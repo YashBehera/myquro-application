@@ -200,7 +200,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setSavedAddresses(data);
           await persistAddresses(data);
         }
