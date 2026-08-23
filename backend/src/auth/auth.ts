@@ -25,6 +25,7 @@ export const auth = betterAuth({
   baseURL: baseURL,
   trustHost: true,
   trustedOrigins: [
+    "https://myquro-backend.onrender.com",
     "https://api.myquro.com",
     "https://myquro.com",
     "http://myquro.com",
