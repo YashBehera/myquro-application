@@ -52,8 +52,8 @@ export const auth = betterAuth({
 
   advanced: {
     crossSubdomainCookies: {
-      enabled: process.env.NODE_ENV === "production",
-      domain: process.env.NODE_ENV === "production" ? ".myquro.com" : undefined
+      enabled: !!process.env.COOKIE_DOMAIN,
+      domain: process.env.COOKIE_DOMAIN || undefined
     },
     defaultCookieAttributes: {
       secure: process.env.NODE_ENV === "production",
