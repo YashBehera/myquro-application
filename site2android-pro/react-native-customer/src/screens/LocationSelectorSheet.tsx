@@ -368,7 +368,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
           address: resolvedAddress,
         });
         setArea(resolvedLabel);
-        setCity(resolvedAddress.split(',')[1]?.trim() || 'Bhubaneswar');
+        setCity(resolvedAddress.split(',').slice(-3, -2)[0]?.trim() || resolvedAddress.split(',')[1]?.trim() || '');
 
         if (navigateToMap) {
           setMapSearchQuery('');
@@ -422,7 +422,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
       }
     }
 
-    const finalFullAddressText = `${houseNo.trim()}, ${landmark.trim() ? landmark.trim() + ', ' : ''}${area.trim()}, ${city.trim() || 'Bhubaneswar'}`;
+    const finalFullAddressText = `${houseNo.trim()}, ${landmark.trim() ? landmark.trim() + ', ' : ''}${area.trim()}${city.trim() ? ', ' + city.trim() : ''}`;
 
     const newAddr: SavedAddress = {
       id: editingAddressId || Date.now().toString(),
@@ -430,7 +430,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
       houseNo: houseNo.trim(),
       landmark: landmark.trim(),
       area: area.trim(),
-      city: city.trim() || 'Bhubaneswar',
+      city: city.trim() || area.trim() || '',
       latitude: mapRegion.latitude,
       longitude: mapRegion.longitude,
       address: finalFullAddressText,
@@ -861,7 +861,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
                           if (info) {
                             setSelectedLocationInfo(info);
                             setArea(info.label);
-                            setCity(info.address.split(',')[1]?.trim() || 'Bhubaneswar');
+                            setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
                           }
                         } catch (err) {
                           console.error(err);
