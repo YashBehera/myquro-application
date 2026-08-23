@@ -284,7 +284,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
             >
               <Image source={imgImage40} style={styles.locationPinImg} />
               <Text style={styles.addressText} numberOfLines={1}>
-                {currentLocation?.address || 'F-134, Cosmopolis, Khandagiri, Bhubaneswar'}
+                {currentLocation?.address || 'Select your dining location'}
               </Text>
             </TouchableOpacity>
           </View>

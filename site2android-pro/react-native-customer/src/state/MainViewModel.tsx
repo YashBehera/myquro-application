@@ -113,12 +113,12 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Global currentLocation state with default fallback pointing to Sector 4, Bokaro
+  // Global currentLocation state
   const [currentLocation, setCurrentLocation] = useState({
-    label: "Sector 4",
-    address: "Sector 4, Bokaro Steel City, Jharkhand, India",
-    latitude: 23.6693,
-    longitude: 86.1511,
+    label: "Home",
+    address: "",
+    latitude: 20.2508,
+    longitude: 85.7886,
   });
 
   const updateCurrentLocation = async (loc: typeof currentLocation) => {
@@ -152,15 +152,15 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       try {
         const storedAddresses = await AsyncStorage.getItem('@saved_addresses');
         if (storedAddresses) {
-          setSavedAddresses(JSON.parse(storedAddresses));
+          const parsed = JSON.parse(storedAddresses);
+          // Purge any legacy dummy/mock addresses
+          const cleanAddresses = Array.isArray(parsed)
+            ? parsed.filter(a => a.id !== '1' && a.id !== '2' && a.houseNo !== 'B-128' && !a.address?.includes('Bokaro Steel City') && !a.address?.includes('DLF Phase 3'))
+            : [];
+          setSavedAddresses(cleanAddresses);
+          await AsyncStorage.setItem('@saved_addresses', JSON.stringify(cleanAddresses));
         } else {
-          // Seed with default addresses
-          const defaults: SavedAddress[] = [
-            { id: '1', type: 'Home', houseNo: 'B-128', landmark: 'Near City Park', area: 'Sector 4', city: 'Bokaro Steel City', latitude: 23.6693, longitude: 86.1511, address: 'Sector 4, Bokaro Steel City, Jharkhand, India' },
-            { id: '2', type: 'Work', houseNo: 'Flat 502, DLF Phase 3', landmark: 'Opposite Cyber City', area: 'Sushant Lok', city: 'Gurugram', latitude: 28.4952, longitude: 77.0894, address: 'Cyber City, DLF Phase 3, Gurugram, Haryana, India' },
-          ];
-          setSavedAddresses(defaults);
-          await AsyncStorage.setItem('@saved_addresses', JSON.stringify(defaults));
+          setSavedAddresses([]);
         }
       } catch (err) {
         console.error("❌ [MainViewModel] Error loading stored addresses:", err);

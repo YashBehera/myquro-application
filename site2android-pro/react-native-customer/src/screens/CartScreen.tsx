@@ -200,9 +200,9 @@ export const CartScreen: React.FC<CartScreenProps> = ({
       ) || {
         id: 'temp_current',
         houseNo: 'Current Location',
-        landmark: 'Pin on Map',
-        area: currentLocation.label || 'Sector 4',
-        city: currentLocation.label || 'Bokaro Steel City',
+        landmark: '',
+        area: currentLocation.label || 'Delivery Location',
+        city: currentLocation.label || 'Delivery Location',
         latitude: currentLocation.latitude,
         longitude: currentLocation.longitude,
         address: currentLocation.address,

@@ -80,15 +80,15 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
 
   const [mapRegion, setMapRegion] = useState({
-    latitude: 23.6693,
-    longitude: 86.1511,
+    latitude: 20.2508,
+    longitude: 85.7886,
     latitudeDelta: 0.01,
     longitudeDelta: 0.01,
   });
 
   const [selectedLocationInfo, setSelectedLocationInfo] = useState({
-    label: 'Sector 4',
-    address: 'Sector 4, Bokaro Steel City, Jharkhand, India',
+    label: '',
+    address: '',
   });
 
   const [userLocation, setUserLocation] = useState<any>(null);
@@ -215,7 +215,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
         setIsResolvingAddress(true);
         setSelectedLocationInfo({ label: item.mainText, address: item.description });
         setArea(item.mainText);
-        setCity(item.description.split(',')[1]?.trim() || 'Bokaro');
+        setCity(item.description.split(',').slice(-3, -2)[0]?.trim() || item.description.split(',')[1]?.trim() || '');
         setIsResolvingAddress(false);
       }
     } catch (err) {
@@ -255,7 +255,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
     }
 
     const finalArea = area.trim() || selectedLocationInfo.label;
-    const finalCity = city.trim() || selectedLocationInfo.address.split(',')[1]?.trim() || 'Bokaro';
+    const finalCity = city.trim() || selectedLocationInfo.address.split(',').slice(-3, -2)[0]?.trim() || selectedLocationInfo.address.split(',')[1]?.trim() || '';
     const finalType = addressType === 'Other' && customSaveAs.trim() ? customSaveAs.trim() : addressType;
 
     const addrData: any = {
@@ -367,14 +367,14 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                 setDeliveryInstructions('');
                 setEditingAddressId(null);
                 setMapRegion({
-                  latitude: 23.6693,
-                  longitude: 86.1511,
+                  latitude: userLocation?.latitude || 20.2508,
+                  longitude: userLocation?.longitude || 85.7886,
                   latitudeDelta: 0.01,
                   longitudeDelta: 0.01,
                 });
                 setSelectedLocationInfo({
-                  label: 'Sector 4',
-                  address: 'Sector 4, Bokaro Steel City, Jharkhand, India',
+                  label: '',
+                  address: '',
                 });
                 setAddressStep('map');
                 detectCurrentLocation();
@@ -462,7 +462,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                       if (info) {
                         setSelectedLocationInfo(info);
                         setArea(info.label);
-                        setCity(info.address.split(',')[1]?.trim() || 'Bokaro');
+                        setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
                       }
                     }).catch(err => {
                       console.warn(err);
@@ -488,7 +488,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                     if (info) {
                       setSelectedLocationInfo(info);
                       setArea(info.label);
-                      setCity(info.address.split(',')[1]?.trim() || 'Bokaro');
+                      setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
                     }
                   } catch (err) {
                     console.warn(err);
@@ -562,7 +562,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                   if (info) {
                     setSelectedLocationInfo(info);
                     setArea(info.label);
-                    setCity(info.address.split(',')[1]?.trim() || 'Bokaro');
+                    setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
                   }
                 }).catch(err => {
                   console.warn(err);
