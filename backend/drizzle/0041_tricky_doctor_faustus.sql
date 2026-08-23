@@ -1,0 +1,1 @@
+ALTER TABLE "table_session" ADD COLUMN "grand_total" integer DEFAULT 0 NOT NULL;

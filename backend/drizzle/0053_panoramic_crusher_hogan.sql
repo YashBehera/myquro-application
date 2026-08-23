@@ -1,0 +1,1 @@
+ALTER TABLE "menu_item_variants" ADD COLUMN "image_url" text;

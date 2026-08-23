@@ -1,0 +1,42 @@
+import { pgTable, text, timestamp, real, boolean, integer } from "drizzle-orm/pg-core";
+
+export const deliveryRiders = pgTable("delivery_riders", {
+  id: text("id").notNull().primaryKey(),
+  name: text("name").notNull(),
+  phone: text("phone").notNull(),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  status: text("status")
+    .notNull()
+    .default("available")
+    .$type<"available" | "busy" | "offline">(),
+  walletBalance: real("wallet_balance").default(0),
+  pendingSettlement: real("pending_settlement").default(0),
+  totalEarnings: real("total_earnings").default(0),
+  rating: real("rating").default(0),
+  totalRatings: integer("total_ratings").default(0),
+  totalDeliveries: integer("total_deliveries").default(0),
+  acceptanceCount: integer("acceptance_count").default(0),
+  rejectionCount: integer("rejection_count").default(0),
+  kycStatus: text("kyc_status").default("pending"),
+  bankAccountStatus: text("bank_account_status").default("pending"),
+  cityId: text("city_id"),
+  zoneId: text("zone_id"),
+  vehicleType: text("vehicle_type"),
+  vehicleNumber: text("vehicle_number"),
+  orderType: text("order_type"),
+  selfieUrl: text("selfie_url"),
+  aadhaarNumber: text("aadhaar_number"),
+  panNumber: text("pan_number"),
+  bankAccount: text("bank_account"),
+  bankIfsc: text("bank_ifsc"),
+  bankHolderName: text("bank_holder_name"),
+  bankName: text("bank_name"),
+  emergencyContactName: text("emergency_contact_name"),
+  emergencyContactPhone: text("emergency_contact_phone"),
+  emergencyContactRelationship: text("emergency_contact_relationship"),
+  joiningFeePaid: boolean("joining_fee_paid").default(false),
+  onboardingCompleted: boolean("onboarding_completed").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});

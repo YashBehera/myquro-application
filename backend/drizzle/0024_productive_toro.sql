@@ -1,0 +1,1 @@
+CREATE INDEX "auth_users_email_index" ON "auth_users" USING btree ("email");

@@ -1,0 +1,17 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "src/assets/fonts/BebasNeue-Regular.ttf",
+      "sha1": "76057d206a498d40aa4779d0d5a382ad7554dd80"
+    },
+    {
+      "path": "src/assets/fonts/Fasthand-Regular.ttf",
+      "sha1": "64cb703e834756f4d2921a60f3563fa87f6ff35b"
+    },
+    {
+      "path": "src/assets/fonts/Ultra-Regular.ttf",
+      "sha1": "78fb38f212fa49029aff24c669a39648d9b4e68b"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "MyQuro",
+  "description": "Premium companion app for restaurant discoveries, reservations, and orders with elegant dashboards, QR scanner, and offline support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

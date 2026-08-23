@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "MyQuro",
+    "slug": "myquro-customer",
+    "version": "1.0.0",
+    "scheme": "myqurocustomer",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0B0B0B"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.myquro.customer"
+    },
+    "android": {
+      "package": "com.myquro.customer",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0B0B"
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow MyQuro to access your location to discover nearby restaurants and deliver food to your address."
+        }
+      ]
+    ]
+  }
+}

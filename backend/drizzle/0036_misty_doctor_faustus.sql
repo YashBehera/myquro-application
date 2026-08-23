@@ -1,0 +1,1 @@
+ALTER TABLE "table_session" ALTER COLUMN "created_by_user_id" DROP NOT NULL;

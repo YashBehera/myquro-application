@@ -1,0 +1,69 @@
+# ==========================================
+# Dependencies
+# ==========================================
+node_modules/
+/vendor/bundle/
+**/Pods/
+
+# ==========================================
+# Build & Distribution Outputs
+# ==========================================
+build/
+dist/
+/coverage/
+*.apk
+*.aar
+*.flat
+*.ipa
+*.jsbundle
+*.dSYM/
+*.dSYM.zip
+
+# ==========================================
+# Gradle & Kotlin Caches
+# ==========================================
+.gradle/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+
+# ==========================================
+# IDE & Editor Files
+# ==========================================
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*~
+
+# ==========================================
+# OS Files
+# ==========================================
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+
+# ==========================================
+# Environment, Logs & Database Files
+# ==========================================
+.env
+.env.local
+.env.*.local
+.xcode.env.local
+local.properties
+*.keystore
+!debug.keystore
+*.log
+api.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+.expo/
+**/.expo/
+*.bak

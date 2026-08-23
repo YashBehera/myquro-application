@@ -1,0 +1,1 @@
+ALTER TABLE "menu_item_variants" DROP COLUMN "image_url";

@@ -1,0 +1,1 @@
+ALTER TABLE "table_session" ADD COLUMN "subtotal" integer;

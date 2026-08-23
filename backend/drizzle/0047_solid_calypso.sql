@@ -1,0 +1,1 @@
+ALTER TABLE "restaurants" ADD COLUMN "default_gst_percentage" numeric(5, 2) DEFAULT 0.00 NOT NULL;

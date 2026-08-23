@@ -1,0 +1,1 @@
+ALTER TABLE "reservations" ADD COLUMN "table_id" text;

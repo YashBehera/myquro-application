@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyQuro Profile Screen Preview</title>
+  <!-- Google Fonts: Urbanist & Hanken Grotesk -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600&family=Urbanist:wght@500;600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    /* Reset & Base styling */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #0F0F12;
+      color: #eae1d4;
+      font-family: 'Urbanist', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    /* Mobile Shell frame to mimic the screen */
+    .mobile-frame {
+      width: 440px;
+      height: 956px;
+      background-color: #191919;
+      border-radius: 48px;
+      border: 8px solid #2e2e2e;
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8);
+      display: flex;
+      flex-direction: column;
+    }
+    /* Ambient Gold Blur/Orb background */
+    .ambient-gold-blur {
+      position: absolute;
+      top: -50px;
+      right: -50px;
+      width: 250px;
+      height: 250px;
+      background: radial-gradient(circle, rgba(212, 175, 55, 0.22) 0%, rgba(212, 175, 55, 0.05) 50%, rgba(212, 175, 55, 0) 100%);
+      filter: blur(20px);
+      pointer-events: none;
+      z-index: 1;
+    }
+    /* Floating Toast Notification */
+    .toast-container {
+      position: absolute;
+      top: 90px;
+      left: 10%;
+      width: 80%;
+      background-color: rgba(9, 9, 11, 0.95);
+      border-radius: 99px;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      z-index: 999;
+      border: 1px solid #27272a;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transform: translateY(-20px);
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      pointer-events: none;
+    }
+    .toast-container.active {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .toast-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #ef4444;
+      animation: pulse 1.5s infinite;
+    }
+    .toast-text {
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.3; }
+      50% { opacity: 1; }
+      100% { opacity: 0.3; }
+    }
+    /* Header TopAppBar styling */
+    .top-app-bar {
+      height: 80px;
+      padding: 30px 24px 10px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(77, 70, 53, 0.1);
+      position: relative;
+      z-index: 10;
+      background-color: #191919;
+    }
+    .back-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background-color: rgba(20, 20, 20, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+      transition: background-color 0.2s;
+    }
+    .back-btn:hover {
+      background-color: rgba(40, 40, 40, 0.9);
+    }
+    .back-btn svg {
+      fill: none;
+      stroke: #f2ca50;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .header-title {
+      font-size: 20px;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+    .help-btn {
+      border-radius: 9999px;
+      border: 1px solid #d4af37;
+      background-color: rgba(20, 20, 20, 0.85);
+      padding: 6px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #f2ca50;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+      transition: background-color 0.2s;
+    }
+    .help-btn:hover {
+      background-color: rgba(212, 175, 55, 0.1);
+    }
+    /* Scrollable Screen Content */
+    .screen-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px 40px 24px;
+      position: relative;
+      z-index: 5;
+      scrollbar-width: none; /* Hide scrollbar Firefox */
+    }
+    .screen-content::-webkit-scrollbar {
+      display: none; /* Hide scrollbar Chrome/Safari */
+    }
+    /* User Profile section */
+    .user-profile {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .user-details {
+      flex: 1;
+      padding-right: 15px;
+    }
+    .user-name {
+      font-size: 24px;
+      font-weight: 800;
+      color: #ffffff;
+      margin-bottom: 4px;
+    }
+    .user-phone {
+      font-size: 14px;
+      color: #bebebe;
+      margin-bottom: 2px;
+    }
+    .user-email {
+      font-size: 14px;
+      color: #bebebe;
+    }
+    .avatar-wrapper {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: 2px solid #d4af37;
+      overflow: hidden;
+      background-color: #333;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+    }
+    .avatar-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    /* Quick Actions row styling */
+    .quick-actions-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .quick-action-card {
+      flex: 1;
+      height: 80px;
+      border-radius: 20px;
+      background-color: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+      transition: all 0.2s;
+    }
+    .quick-action-card:hover {
+      background-color: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.15);
+      transform: translateY(-2px);
+    }
+    .quick-icon {
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .quick-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #eae1d4;
+      text-align: center;
+    }
+    /* Unified Glass Menu Card styling */
+    .menu-card {
+      border-radius: 30px;
+      background-color: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      overflow: hidden;
+      padding: 10px 0;
+      margin-bottom: 28px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+    .menu-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 20px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    .menu-row:hover:not(.toggle-row) {
+      background-color: rgba(255, 255, 255, 0.03);
+    }
+    .menu-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .menu-icon-svg {
+      color: #eae1d4;
+      flex-shrink: 0;
+    }
+    .menu-text {
+      font-size: 15px;
+      font-weight: 600;
+      color: #eae1d4;
+    }
+    .menu-divider {
+      height: 1px;
+      background-color: rgba(255, 255, 255, 0.06);
+      margin: 0 20px;
+    }
+    
+    /* Toggle Switch custom design */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 24px;
+    }
+    .switch input { 
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #3a3a3c;
+      transition: .4s;
+      border-radius: 34px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #d4af37;
+    }
+    input:checked + .slider:before {
+      transform: translateX(24px);
+    }
+    /* Past Orders Section Header */
+    .past-orders-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding: 0 4px;
+    }
+    .past-orders-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #d0c5af;
+    }
+    .view-all-btn {
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 15px;
+      color: #f2ca50;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .view-all-btn:hover {
+      opacity: 0.8;
+    }
+    /* Past Order Card (glass style) */
+    .order-card {
+      border-radius: 35px;
+      background-color: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 20px;
+      margin-bottom: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+    .order-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .order-restaurant {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .restaurant-img-box {
+      width: 48px;
+      height: 48px;
+      border-radius: 8px;
+      background-color: #38342b;
+      overflow: hidden;
+    }
+    .restaurant-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .restaurant-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: #eae1d4;
+    }
+    .restaurant-loc {
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 14px;
+      color: #b8b8b8;
+      margin-top: 2px;
+    }
+    .delivered-badge {
+      display: flex;
+      align-items: center;
+      background-color: rgba(242, 202, 80, 0.1);
+      padding: 4px 8px;
+      border-radius: 6px;
+      gap: 4px;
+    }
+    .delivered-text {
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 13px;
+      color: #f2ca50;
+    }
+    .delivered-badge svg {
+      fill: none;
+      stroke: #f2ca50;
+      stroke-width: 2.5;
+    }
+    /* Items Container */
+    .order-items-box {
+      margin-bottom: 16px;
+      padding-left: 4px;
+    }
+    .order-item-row {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 6px;
+    }
+    .item-qty {
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 14px;
+      color: #f2ca50;
+      width: 24px;
+    }
+    .item-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #eae1d4;
+    }
+    .and-more-text {
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 14px;
+      color: #d0c5af;
+      margin-left: 24px;
+      margin-top: 2px;
+    }
+    /* Ratings container styling */
+    .ratings-box {
+      display: flex;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 12px 0;
+      margin-bottom: 16px;
+    }
+    .rating-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .rating-label {
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 13px;
+      color: #d0c5af;
+      margin-bottom: 6px;
+    }
+    .stars-row {
+      display: flex;
+      gap: 4px;
+    }
+    .stars-row svg.gold-star {
+      fill: #f2ca50;
+      stroke: #f2ca50;
+    }
+    .stars-row svg.empty-star {
+      stroke: rgba(255, 255, 255, 0.2);
+    }
+    .vertical-divider {
+      width: 1px;
+      height: 36px;
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+    /* Reorder Button styling */
+    .reorder-btn {
+      width: 100%;
+      border: 1px solid #f2ca50;
+      border-radius: 8px;
+      padding: 12px 0;
+      text-align: center;
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 15px;
+      font-weight: 500;
+      color: #f2ca50;
+      background-color: transparent;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 16px;
+    }
+    .reorder-btn:hover {
+      background-color: rgba(242, 202, 80, 0.1);
+    }
+    /* Order Footer details */
+    .order-footer-details {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 4px;
+    }
+    .order-date-text {
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 13px;
+      color: #d0c5af;
+    }
+    .order-total-text {
+      font-family: 'Hanken Grotesk', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      color: #eae1d4;
+    }
+    /* Logout Button */
+    .logout-btn {
+      width: 100%;
+      height: 54px;
+      border-radius: 27px;
+      border: 1px solid rgba(212, 175, 55, 0.28);
+      background-color: rgba(32, 31, 31, 0.6);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      margin-top: 10px;
+    }
+    .logout-btn:hover {
+      background-color: rgba(255, 180, 171, 0.1);
+    }
+    .logout-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: #ffb4ab;
+    }
+    /* Navigation home indicator mock at bottom */
+    .home-indicator-area {
+      height: 20px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding-bottom: 8px;
+      background-color: #191919;
+    }
+    .home-indicator {
+      width: 139px;
+      height: 5px;
+      background-color: white;
+      border-radius: 100px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Mock Mobile phone device -->
+  <div class="mobile-frame">
+    <!-- Ambient top glow -->
+    <div class="ambient-gold-blur"></div>
+    <!-- Floating alerts simulator -->
+    <div class="toast-container" id="toast-banner">
+      <div class="toast-dot"></div>
+      <span class="toast-text" id="toast-message">Action Triggered</span>
+    </div>
+    <!-- Top Navigation Bar -->
+    <header class="top-app-bar">
+      <div class="back-btn" onclick="triggerToast('Back pressed. Navigating to Home Screen.')">
+        <svg width="20" height="20" viewBox="0 0 24 24">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </div>
+      <h1 class="header-title">Profile</h1>
+      <button class="help-btn" onclick="triggerToast('Help pressed. Loading Customer support...')">Help</button>
+    </header>
+    <!-- Scrollable content area -->
+    <main class="screen-content">
+      
+      <!-- User profile block -->
+      <section class="user-profile">
+        <div class="user-details">
+          <h2 class="user-name">Kratos!</h2>
+          <p class="user-phone">+91 9785548293</p>
+          <p class="user-email">kratos98@gmail.com</p>
+        </div>
+        <div class="avatar-wrapper">
+          <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120" alt="Profile" class="avatar-img">
+        </div>
+      </section>
+      <!-- Quick Actions Grid -->
+      <section class="quick-actions-row">
+        <div class="quick-action-card" onclick="triggerToast('Saved Address clicked. Navigating to Addresses.')">
+          <div class="quick-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#eae1d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+          </div>
+          <span class="quick-label">Saved Address</span>
+        </div>
+        <div class="quick-action-card" onclick="triggerToast('Payment Mode clicked. Opening Payments manager.')">
+          <div class="quick-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#eae1d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+              <line x1="1" y1="10" x2="23" y2="10"></line>
+            </svg>
+          </div>
+          <span class="quick-label">Payment Mode</span>
+        </div>
+        <div class="quick-action-card" onclick="triggerToast('My Refunds clicked. Showing refund statuses.')">
+          <div class="quick-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#eae1d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+          </div>
+          <span class="quick-label">My Refunds</span>
+        </div>
+        <div class="quick-action-card" onclick="triggerToast('Quro Money clicked. Balance: ₹0.00')">
+          <div class="quick-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#eae1d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+              <path d="M12 14a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path>
+            </svg>
+          </div>
+          <span class="quick-label">Quro Money</span>
+        </div>
+      </section>
+      <!-- Account Settings unified card -->
+      <section class="menu-card">
+        <!-- My Vouchers -->
+        <div class="menu-row" onclick="triggerToast('Opening My Vouchers view.')">
+          <div class="menu-left">
+            <svg class="menu-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 21h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z"></path>
+              <line x1="9" y1="17" x2="15" y2="17"></line>
+              <line x1="9" y1="13" x2="15" y2="13"></line>
+              <line x1="9" y1="9" x2="15" y2="9"></line>
+            </svg>
+            <span class="menu-text">My Vouchers</span>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eae1d4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+        <div class="menu-divider"></div>
+        <!-- Account Statement -->
+        <div class="menu-row" onclick="triggerToast('Downloading account statement statement...')">
+          <div class="menu-left">
+            <svg class="menu-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span class="menu-text">Account Statement</span>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eae1d4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+        <div class="menu-divider"></div>
+        <!-- Student Rewards -->
+        <div class="menu-row" onclick="triggerToast('Registering for Student Program rewards...')">
+          <div class="menu-left">
+            <svg class="menu-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+              <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"></path>
+            </svg>
+            <span class="menu-text">Student Rewards</span>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eae1d4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+        <div class="menu-divider"></div>
+        <!-- Favourites -->
+        <div class="menu-row" onclick="triggerToast('Favourites clicked. Loading liked venues.')">
+          <div class="menu-left">
+            <svg class="menu-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+            </svg>
+            <span class="menu-text">Favourites</span>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eae1d4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+        <div class="menu-divider"></div>
+        <!-- Allow contact switch row -->
+        <div class="menu-row toggle-row">
+          <div class="menu-left">
+            <svg class="menu-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+            </svg>
+            <span class="menu-text">Allow restaurants to contact</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked onchange="toggleContact(this)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </section>
+      <!-- Past Orders section header -->
+      <section class="past-orders-header">
+        <h3 class="past-orders-title">Past Orders:</h3>
+        <span class="view-all-btn" onclick="triggerToast('Loading full order archives...')">View All</span>
+      </section>
+      <!-- Past Orders Card -->
+      <section class="order-card">
+        <div class="order-header-row">
+          <div class="order-restaurant">
+            <div class="restaurant-img-box">
+              <img src="https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=100" alt="Biryani" class="restaurant-img">
+            </div>
+            <div>
+              <h4 class="restaurant-name">Dum Biriyani</h4>
+              <p class="restaurant-loc">T. Nagar</p>
+            </div>
+          </div>
+          <div class="delivered-badge">
+            <span class="delivered-text">Delivered</span>
+            <svg width="14" height="14" viewBox="0 0 24 24">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </div>
+        </div>
+        <!-- Items list -->
+        <div class="order-items-box">
+          <div class="order-item-row">
+            <span class="item-qty">1x</span>
+            <span class="item-name">Cheese Fries</span>
+          </div>
+          <div class="order-item-row">
+            <span class="item-qty">1x</span>
+            <span class="item-name">McVeggie Burger with Multi-Millet Bun</span>
+          </div>
+          <p class="and-more-text">&amp; 1 more</p>
+        </div>
+        <!-- Rating Grid -->
+        <div class="ratings-box">
+          <div class="rating-col">
+            <span class="rating-label">Food Rating</span>
+            <div class="stars-row">
+              <!-- 4 gold stars, 1 empty star -->
+              <svg class="gold-star" width="14" height="14" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <svg class="gold-star" width="14" height="14" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <svg class="gold-star" width="14" height="14" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <svg class="gold-star" width="14" height="14" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <svg class="empty-star" width="14" height="14" viewBox="0 0 24 24" fill="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+            </div>
+          </div>
+          
+          <div class="vertical-divider"></div>
+          
+          <div class="rating-col">
+            <span class="rating-label">Delivery Rating</span>
+            <div class="stars-row">
+              <!-- 3 gold stars, 2 empty stars -->
+              <svg class="gold-star" width="14" height="14" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <svg class="gold-star" width="14" height="14" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <svg class="gold-star" width="14" height="14" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <svg class="empty-star" width="14" height="14" viewBox="0 0 24 24" fill="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <svg class="empty-star" width="14" height="14" viewBox="0 0 24 24" fill="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+            </div>
+          </div>
+        </div>
+        <!-- Reorder Button -->
+        <button class="reorder-btn" onclick="triggerToast('Reordering food combo from Dum Biriyani...')">Reorder</button>
+        <!-- Order details footer -->
+        <div class="order-footer-details">
+          <span class="order-date-text">Ordered: April 27, 11:24 PM</span>
+          <span class="order-total-text">Bill Total: ₹420</span>
+        </div>
+      </section>
+      <!-- Logout Button -->
+      <button class="logout-btn" onclick="triggerToast('Logout pressed. Clearing secure sessions.')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffb4ab" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+          <polyline points="16 17 21 12 16 7"></polyline>
+          <line x1="21" y1="12" x2="9" y2="12"></line>
+        </svg>
+        <span class="logout-text">Log Out</span>
+      </button>
+    </main>
+    <!-- Bottom home bar -->
+    <div class="home-indicator-area">
+      <div class="home-indicator"></div>
+    </div>
+  </div>
+  <script>
+    let toastTimeout;
+    
+    function triggerToast(message) {
+      const toast = document.getElementById('toast-banner');
+      const text = document.getElementById('toast-message');
+      
+      text.innerText = message;
+      toast.classList.add('active');
+      
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('active');
+      }, 2500);
+    }
+    function toggleContact(checkbox) {
+      triggerToast(checkbox.checked ? 'Restaurants can contact you.' : 'Contact permission disabled.');
+    }
+  </script>
+</body>
+</html>
