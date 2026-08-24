@@ -46,6 +46,7 @@ import { StatementSubView } from './profile/StatementSubView';
 import { StudentRewardsSubView } from './profile/StudentRewardsSubView';
 import { SettingsSubView } from './profile/SettingsSubView';
 import { LogoutSubView } from './profile/LogoutSubView';
+import { OrderDetailsSubView } from './profile/OrderDetailsSubView';
 
 // ─── Figma Node 3025:799 & 3029:1729 Profile Assets ──────────────────────────
 const profHeadphones         = require('../assets/profile/profHeadphones.png');
@@ -91,8 +92,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
   // Navigation states
   const [currentView, setCurrentView] = useState<
-    'main' | 'edit_profile' | 'addresses' | 'payments' | 'help' | 'favourites' | 'vouchers' | 'statement' | 'student_rewards' | 'settings' | 'logout'
+    'main' | 'edit_profile' | 'addresses' | 'payments' | 'help' | 'favourites' | 'vouchers' | 'statement' | 'student_rewards' | 'settings' | 'logout' | 'order_details'
   >('main');
+
+  // Selected Order for Figma Node 3029:1553 Details View
+  const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any>(null);
 
   // Menu popup state
   const [showMenuOptions, setShowMenuOptions] = useState(false);
@@ -118,11 +122,51 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
   // Interactive Ratings state per order
   const [ratings, setRatings] = useState<Record<string, { food: number; delivery: number }>>({});
 
+  // Helper to format currency and convert paise (e.g. 115500 -> ₹1155)
+  const formatOrderAmount = (rawAmount: any): string => {
+    if (rawAmount === undefined || rawAmount === null || rawAmount === '') return '₹0';
+    let num: number;
+    if (typeof rawAmount === 'string') {
+      const cleaned = rawAmount.replace(/[^0-9.]/g, '');
+      num = parseFloat(cleaned);
+    } else {
+      num = Number(rawAmount);
+    }
+    if (isNaN(num) || num <= 0) return '₹0';
+
+    // If amount is stored in paise (e.g. 115500 for ₹1155 or 29900 for ₹299)
+    if (num >= 5000 && num % 100 === 0) {
+      num = num / 100;
+    } else if (num >= 10000) {
+      num = num / 100;
+    }
+
+    return `₹${Math.round(num)}`;
+  };
+
   const fetchUserOrders = async () => {
     try {
       let remoteOrders: any[] = [];
-      const userId = authState.type === 'Authenticated' ? ((authState as any).userId || (authState as any).user?.id) : null;
-      const sessionToken = authState.type === 'Authenticated' ? authState.sessionToken : '';
+      let userId: string | null = null;
+      let sessionToken: string | null = null;
+
+      if (authState.type === 'Authenticated') {
+        userId = (authState as any).userId || (authState as any).user?.id || (authState as any).id || null;
+        sessionToken = authState.sessionToken || null;
+      }
+
+      if (!userId || !sessionToken) {
+        try {
+          const storedAuth = await AsyncStorage.getItem('@auth_state');
+          if (storedAuth) {
+            const parsedAuth = JSON.parse(storedAuth);
+            if (parsedAuth?.type === 'Authenticated') {
+              userId = parsedAuth.userId || parsedAuth.user?.id || parsedAuth.id || null;
+              sessionToken = parsedAuth.sessionToken || null;
+            }
+          }
+        } catch (e) {}
+      }
 
       if (userId && sessionToken) {
         try {
@@ -135,6 +179,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
             const data = await res.json();
             if (data.orders && Array.isArray(data.orders)) {
               remoteOrders = data.orders;
+            } else if (Array.isArray(data)) {
+              remoteOrders = data;
             }
           }
         } catch (e) {
@@ -146,25 +192,41 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
       try {
         const localData = await AsyncStorage.getItem('@placed_orders_history');
         if (localData) {
-          localOrders = JSON.parse(localData);
+          const parsed = JSON.parse(localData);
+          if (Array.isArray(parsed)) {
+            localOrders = [...localOrders, ...parsed];
+          }
+        }
+      } catch (e) {}
+
+      try {
+        const altLocal = await AsyncStorage.getItem('@order_history');
+        if (altLocal) {
+          const parsed = JSON.parse(altLocal);
+          if (Array.isArray(parsed)) {
+            localOrders = [...localOrders, ...parsed];
+          }
         }
       } catch (e) {}
 
       const mergedMap = new Map<string, any>();
       localOrders.forEach(o => {
         if (o && (o.id || o.orderId)) {
-          mergedMap.set(o.id || o.orderId, o);
+          const id = String(o.id || o.orderId);
+          mergedMap.set(id, o);
         }
       });
       remoteOrders.forEach(o => {
         if (o && (o.id || o.orderId)) {
-          mergedMap.set(o.id || o.orderId, o);
+          const id = String(o.id || o.orderId);
+          const existing = mergedMap.get(id) || {};
+          mergedMap.set(id, { ...existing, ...o });
         }
       });
 
       const combined = Array.from(mergedMap.values()).sort((a, b) => {
-        const timeA = new Date(a.createdAt || a.date || 0).getTime();
-        const timeB = new Date(b.createdAt || b.date || 0).getTime();
+        const timeA = new Date(a.createdAt || a.date || a.updatedAt || 0).getTime();
+        const timeB = new Date(b.createdAt || b.date || b.updatedAt || 0).getTime();
         return timeB - timeA;
       });
 
@@ -181,7 +243,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
       setEditEmail(authState.email || (authState as any).user?.email || '');
       setEditPhone((authState as any).phone || (authState as any).user?.phone || '');
     }
-  }, [authState]);
+  }, [authState, currentView]);
 
   const showToast = (msg: string) => {
     if (Platform.OS === 'android') {
@@ -354,6 +416,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
           logout();
           setCurrentView('main');
           if (onBackToHome) onBackToHome();
+        }}
+      />
+    );
+  }
+
+  if (currentView === 'order_details') {
+    return (
+      <OrderDetailsSubView
+        order={selectedOrderForDetails}
+        onBack={() => {
+          setSelectedOrderForDetails(null);
+          setCurrentView('main');
+        }}
+        onHelp={() => setCurrentView('help')}
+        onReorder={(ord) => {
+          handleReorder(ord);
         }}
       />
     );
@@ -744,6 +822,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
               const handleCardPress = () => {
                 if (isActive && onNavigateToTracking) {
                   onNavigateToTracking(orderId);
+                } else {
+                  setSelectedOrderForDetails(order);
+                  setCurrentView('order_details');
                 }
               };
 
@@ -796,7 +877,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
                   {/* Items List */}
                   <View style={styles.divider} />
-                  <View style={styles.itemsList}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={handleCardPress}
+                    style={styles.itemsList}
+                  >
                     {order.items && order.items.length > 0 ? (
                       order.items.map((it: any, itIdx: number) => (
                         <View key={itIdx} style={styles.itemRow}>
@@ -816,7 +901,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                         <Text style={styles.itemName}>Order Summary</Text>
                       </View>
                     )}
-                  </View>
+                  </TouchableOpacity>
 
                   {/* Active Track Button or Delivered Rating */}
                   {isActive ? (
@@ -896,17 +981,21 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                   )}
 
                   {/* Order Footer (Ordered Date & Total) */}
-                  <View style={styles.orderFooter}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={handleCardPress}
+                    style={styles.orderFooter}
+                  >
                     <Text style={styles.orderedDateText}>
                       Ordered: {order.date || (order.createdAt ? new Date(order.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Recently')}
                     </Text>
                     <View style={styles.billTotalRow}>
                       <Text style={styles.billTotalLabel}>Bill Total: </Text>
                       <Text style={styles.billTotalAmount}>
-                        {order.billTotal || `₹${order.grandTotal || order.totalAmount || order.subtotal || 0}`}
+                        {formatOrderAmount(order.billTotal || order.grandTotal || order.totalAmount || order.subtotal)}
                       </Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 </View>
               );
             })}
