@@ -30,6 +30,7 @@ import {
   Navigation,
   Clock,
   ShoppingBag,
+  ChevronDown,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKEND_URL } from '../config';
@@ -45,7 +46,6 @@ import { StatementSubView } from './profile/StatementSubView';
 import { StudentRewardsSubView } from './profile/StudentRewardsSubView';
 import { SettingsSubView } from './profile/SettingsSubView';
 import { LogoutSubView } from './profile/LogoutSubView';
-import { PastOrdersSubView } from './profile/PastOrdersSubView';
 
 // ─── Figma Node 3025:799 & 3029:1729 Profile Assets ──────────────────────────
 const profHeadphones         = require('../assets/profile/profHeadphones.png');
@@ -91,11 +91,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
   // Navigation states
   const [currentView, setCurrentView] = useState<
-    'main' | 'past_orders' | 'edit_profile' | 'addresses' | 'payments' | 'help' | 'favourites' | 'vouchers' | 'statement' | 'student_rewards' | 'settings' | 'logout'
+    'main' | 'edit_profile' | 'addresses' | 'payments' | 'help' | 'favourites' | 'vouchers' | 'statement' | 'student_rewards' | 'settings' | 'logout'
   >('main');
 
   // Menu popup state
   const [showMenuOptions, setShowMenuOptions] = useState(false);
+
+  // Pagination for in-screen past orders (show 5, load 5 more on click)
+  const [visibleOrdersCount, setVisibleOrdersCount] = useState(5);
 
   // Edit Profile fields
   const [editName, setEditName] = useState(
@@ -234,23 +237,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
   const displayOrders = ordersList;
 
   // ─── SUB-VIEWS ROUTING ───
-  if (currentView === 'past_orders') {
-    return (
-      <PastOrdersSubView
-        ordersList={ordersList}
-        onBack={() => setCurrentView('main')}
-        onNavigateToTracking={onNavigateToTracking}
-        onSelectOrderDetails={(order: any) => {
-          const isActive = ['placed', 'confirmed', 'preparing', 'ready', 'assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'active', 'pending'].includes((order.status || '').toLowerCase());
-          if (isActive && onNavigateToTracking) {
-            onNavigateToTracking(order.id || order.orderId);
-          }
-        }}
-        onReorder={(order: any) => handleReorder(order)}
-        onHelp={() => setCurrentView('help')}
-      />
-    );
-  }
 
   if (currentView === 'edit_profile') {
     return (
@@ -724,12 +710,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
         {/* ─── [7] PAST ORDERS SECTION (FIGMA NODE 3029:1729) ─── */}
         <View style={styles.pastOrdersHeaderRow}>
           <Text style={styles.pastOrdersSectionTitle}>PAST ORDERS</Text>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => setCurrentView('past_orders')}
-          >
-            <Text style={styles.pastOrdersViewAllText}>View All</Text>
-          </TouchableOpacity>
+          {displayOrders.length > 0 && (
+            <Text style={styles.pastOrdersCountBadge}>
+              {displayOrders.length} {displayOrders.length === 1 ? 'Order' : 'Orders'}
+            </Text>
+          )}
         </View>
 
         {/* Order Cards Preview */}
@@ -744,188 +729,202 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
             </Text>
           </View>
         ) : (
-          displayOrders.slice(0, 3).map((order, orderIdx) => {
-            const orderId = order.id || order.orderId || `order_${orderIdx}`;
-            const currentRating = ratings[orderId] || { food: 0, delivery: 0 };
-            const resImage = typeof order.image === 'string'
-              ? { uri: order.image }
-              : (order.restaurantBanner ? { uri: order.restaurantBanner } : orderResAsiaSeven);
+          <>
+            {displayOrders.slice(0, visibleOrdersCount).map((order, orderIdx) => {
+              const orderId = order.id || order.orderId || `order_${orderIdx}`;
+              const currentRating = ratings[orderId] || { food: 0, delivery: 0 };
+              const resImage = typeof order.image === 'string'
+                ? { uri: order.image }
+                : (order.restaurantBanner ? { uri: order.restaurantBanner } : orderResAsiaSeven);
 
-            const statusStr = (order.status || 'placed').toLowerCase();
-            const isActive = ['placed', 'confirmed', 'preparing', 'ready', 'assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'active', 'pending'].includes(statusStr);
-            const isDelivered = statusStr === 'delivered' || statusStr === 'completed';
+              const statusStr = (order.status || 'placed').toLowerCase();
+              const isActive = ['placed', 'confirmed', 'preparing', 'ready', 'assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'active', 'pending'].includes(statusStr);
+              const isDelivered = statusStr === 'delivered' || statusStr === 'completed';
 
-            const handleCardPress = () => {
-              if (isActive && onNavigateToTracking) {
-                onNavigateToTracking(orderId);
-              } else {
-                setCurrentView('past_orders');
-              }
-            };
+              const handleCardPress = () => {
+                if (isActive && onNavigateToTracking) {
+                  onNavigateToTracking(orderId);
+                }
+              };
 
-            return (
-              <View key={orderId} style={[styles.orderCard, isActive && styles.orderCardActive]}>
-                {/* Active Live Tracking Banner */}
-                {isActive && (
+              return (
+                <View key={orderId} style={[styles.orderCard, isActive && styles.orderCardActive]}>
+                  {/* Active Live Tracking Banner */}
+                  {isActive && (
+                    <TouchableOpacity
+                      style={styles.activeTrackingBanner}
+                      activeOpacity={0.85}
+                      onPress={() => onNavigateToTracking && onNavigateToTracking(orderId)}
+                    >
+                      <View style={styles.livePulseDot} />
+                      <Text style={styles.activeTrackingBannerText}>ORDER IS LIVE — TAP TO TRACK</Text>
+                      <Navigation size={14} color="#000000" />
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Card Header (Image + Name + Loc + Status) */}
                   <TouchableOpacity
-                    style={styles.activeTrackingBanner}
                     activeOpacity={0.85}
-                    onPress={() => onNavigateToTracking && onNavigateToTracking(orderId)}
+                    onPress={handleCardPress}
+                    style={styles.cardHeader}
                   >
-                    <View style={styles.livePulseDot} />
-                    <Text style={styles.activeTrackingBannerText}>ORDER IS LIVE — TAP TO TRACK</Text>
-                    <Navigation size={14} color="#000000" />
+                    <Image source={resImage} style={styles.restaurantThumb} />
+
+                    <View style={styles.restaurantInfo}>
+                      <Text style={styles.restaurantName} numberOfLines={1}>
+                        {order.restaurantName || 'Restaurant'}
+                      </Text>
+                      <View style={styles.locationRow}>
+                        <MapPin size={12} color="#747474" style={{ marginRight: 4 }} />
+                        <Text style={styles.locationText} numberOfLines={1}>
+                          {order.location || order.restaurantAddress || order.city || order.deliveryAddress || 'Bhubaneswar'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={[styles.statusBadge, isActive && styles.statusBadgeActive]}>
+                      <Text style={[styles.statusText, isActive && styles.statusTextActive]}>
+                        {isActive ? 'Ongoing' : (isDelivered ? 'Delivered' : (order.status || 'Delivered'))}
+                      </Text>
+                      {isActive ? (
+                        <Clock size={14} color="#D4AF37" style={{ marginLeft: 4 }} />
+                      ) : (
+                        <CheckCircle2 size={15} color="#468152" style={{ marginLeft: 5 }} />
+                      )}
+                    </View>
                   </TouchableOpacity>
-                )}
 
-                {/* Card Header (Image + Name + Loc + Status) */}
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={handleCardPress}
-                  style={styles.cardHeader}
-                >
-                  <Image source={resImage} style={styles.restaurantThumb} />
+                  {/* Items List */}
+                  <View style={styles.divider} />
+                  <View style={styles.itemsList}>
+                    {order.items && order.items.length > 0 ? (
+                      order.items.map((it: any, itIdx: number) => (
+                        <View key={itIdx} style={styles.itemRow}>
+                          <View style={styles.qtyBadge}>
+                            <Text style={styles.qtyText}>{it.quantity || 1}x</Text>
+                          </View>
+                          <Text style={styles.itemName} numberOfLines={1}>
+                            {it.name || it.menuItemName}
+                          </Text>
+                        </View>
+                      ))
+                    ) : (
+                      <View style={styles.itemRow}>
+                        <View style={styles.qtyBadge}>
+                          <Text style={styles.qtyText}>1x</Text>
+                        </View>
+                        <Text style={styles.itemName}>Order Summary</Text>
+                      </View>
+                    )}
+                  </View>
 
-                  <View style={styles.restaurantInfo}>
-                    <Text style={styles.restaurantName} numberOfLines={1}>
-                      {order.restaurantName || 'Restaurant'}
+                  {/* Active Track Button or Delivered Rating */}
+                  {isActive ? (
+                    <TouchableOpacity
+                      style={styles.trackOrderBtn}
+                      activeOpacity={0.85}
+                      onPress={() => onNavigateToTracking && onNavigateToTracking(orderId)}
+                    >
+                      <Navigation size={16} color="#000000" />
+                      <Text style={styles.trackOrderBtnText}>Track Live Order</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <>
+                      <View style={styles.divider} />
+                      <View style={styles.ratingsRow}>
+                        {/* Food Rating */}
+                        <View style={styles.ratingCol}>
+                          <Text style={styles.ratingLabel}>Food Rating</Text>
+                          <View style={styles.starsRow}>
+                            {[1, 2, 3, 4, 5].map((starVal) => {
+                              const isFilled = starVal <= currentRating.food;
+                              return (
+                                <TouchableOpacity
+                                  key={starVal}
+                                  activeOpacity={0.7}
+                                  onPress={() => handleRate(orderId, 'food', starVal)}
+                                  style={{ padding: 2 }}
+                                >
+                                  <Star
+                                    size={18}
+                                    color="#D4AF37"
+                                    fill={isFilled ? '#D4AF37' : 'transparent'}
+                                  />
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+
+                        <View style={styles.ratingVerticalDivider} />
+
+                        {/* Delivery Rating */}
+                        <View style={styles.ratingCol}>
+                          <Text style={styles.ratingLabel}>Delivery Rating</Text>
+                          <View style={styles.starsRow}>
+                            {[1, 2, 3, 4, 5].map((starVal) => {
+                              const isFilled = starVal <= currentRating.delivery;
+                              return (
+                                <TouchableOpacity
+                                  key={starVal}
+                                  activeOpacity={0.7}
+                                  onPress={() => handleRate(orderId, 'delivery', starVal)}
+                                  style={{ padding: 2 }}
+                                >
+                                  <Star
+                                    size={18}
+                                    color="#D4AF37"
+                                    fill={isFilled ? '#D4AF37' : 'transparent'}
+                                  />
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Reorder Button */}
+                      <TouchableOpacity
+                        style={styles.reorderBtn}
+                        activeOpacity={0.8}
+                        onPress={() => handleReorder(order)}
+                      >
+                        <RotateCcw size={16} color="#A88733" />
+                        <Text style={styles.reorderText}>Reorder</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  {/* Order Footer (Ordered Date & Total) */}
+                  <View style={styles.orderFooter}>
+                    <Text style={styles.orderedDateText}>
+                      Ordered: {order.date || (order.createdAt ? new Date(order.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Recently')}
                     </Text>
-                    <View style={styles.locationRow}>
-                      <MapPin size={12} color="#747474" style={{ marginRight: 4 }} />
-                      <Text style={styles.locationText} numberOfLines={1}>
-                        {order.location || order.restaurantAddress || order.city || order.deliveryAddress || 'Bhubaneswar'}
+                    <View style={styles.billTotalRow}>
+                      <Text style={styles.billTotalLabel}>Bill Total: </Text>
+                      <Text style={styles.billTotalAmount}>
+                        {order.billTotal || `₹${order.grandTotal || order.totalAmount || order.subtotal || 0}`}
                       </Text>
                     </View>
                   </View>
-
-                  <View style={[styles.statusBadge, isActive && styles.statusBadgeActive]}>
-                    <Text style={[styles.statusText, isActive && styles.statusTextActive]}>
-                      {isActive ? 'Ongoing' : (isDelivered ? 'Delivered' : (order.status || 'Delivered'))}
-                    </Text>
-                    {isActive ? (
-                      <Clock size={14} color="#D4AF37" style={{ marginLeft: 4 }} />
-                    ) : (
-                      <CheckCircle2 size={15} color="#468152" style={{ marginLeft: 5 }} />
-                    )}
-                  </View>
-                </TouchableOpacity>
-
-                {/* Items List */}
-                <View style={styles.divider} />
-                <View style={styles.itemsList}>
-                  {order.items && order.items.length > 0 ? (
-                    order.items.map((it: any, itIdx: number) => (
-                      <View key={itIdx} style={styles.itemRow}>
-                        <View style={styles.qtyBadge}>
-                          <Text style={styles.qtyText}>{it.quantity || 1}x</Text>
-                        </View>
-                        <Text style={styles.itemName} numberOfLines={1}>
-                          {it.name || it.menuItemName}
-                        </Text>
-                      </View>
-                    ))
-                  ) : (
-                    <View style={styles.itemRow}>
-                      <View style={styles.qtyBadge}>
-                        <Text style={styles.qtyText}>1x</Text>
-                      </View>
-                      <Text style={styles.itemName}>Order Summary</Text>
-                    </View>
-                  )}
                 </View>
+              );
+            })}
 
-                {/* Active Track Button or Delivered Rating */}
-                {isActive ? (
-                  <TouchableOpacity
-                    style={styles.trackOrderBtn}
-                    activeOpacity={0.85}
-                    onPress={() => onNavigateToTracking && onNavigateToTracking(orderId)}
-                  >
-                    <Navigation size={16} color="#000000" />
-                    <Text style={styles.trackOrderBtnText}>Track Live Order</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <>
-                    <View style={styles.divider} />
-                    <View style={styles.ratingsRow}>
-                      {/* Food Rating */}
-                      <View style={styles.ratingCol}>
-                        <Text style={styles.ratingLabel}>Food Rating</Text>
-                        <View style={styles.starsRow}>
-                          {[1, 2, 3, 4, 5].map((starVal) => {
-                            const isFilled = starVal <= currentRating.food;
-                            return (
-                              <TouchableOpacity
-                                key={starVal}
-                                activeOpacity={0.7}
-                                onPress={() => handleRate(orderId, 'food', starVal)}
-                                style={{ padding: 2 }}
-                              >
-                                <Star
-                                  size={18}
-                                  color="#D4AF37"
-                                  fill={isFilled ? '#D4AF37' : 'transparent'}
-                                />
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      </View>
-
-                      <View style={styles.ratingVerticalDivider} />
-
-                      {/* Delivery Rating */}
-                      <View style={styles.ratingCol}>
-                        <Text style={styles.ratingLabel}>Delivery Rating</Text>
-                        <View style={styles.starsRow}>
-                          {[1, 2, 3, 4, 5].map((starVal) => {
-                            const isFilled = starVal <= currentRating.delivery;
-                            return (
-                              <TouchableOpacity
-                                key={starVal}
-                                activeOpacity={0.7}
-                                onPress={() => handleRate(orderId, 'delivery', starVal)}
-                                style={{ padding: 2 }}
-                              >
-                                <Star
-                                  size={18}
-                                  color="#D4AF37"
-                                  fill={isFilled ? '#D4AF37' : 'transparent'}
-                                />
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    </View>
-
-                    {/* Reorder Button */}
-                    <TouchableOpacity
-                      style={styles.reorderBtn}
-                      activeOpacity={0.8}
-                      onPress={() => handleReorder(order)}
-                    >
-                      <RotateCcw size={16} color="#A88733" />
-                      <Text style={styles.reorderText}>Reorder</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-
-                {/* Order Footer (Ordered Date & Total) */}
-                <View style={styles.orderFooter}>
-                  <Text style={styles.orderedDateText}>
-                    Ordered: {order.date || (order.createdAt ? new Date(order.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Recently')}
-                  </Text>
-                  <View style={styles.billTotalRow}>
-                    <Text style={styles.billTotalLabel}>Bill Total: </Text>
-                    <Text style={styles.billTotalAmount}>
-                      {order.billTotal || `₹${order.grandTotal || order.totalAmount || order.subtotal || 0}`}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            );
-          })
+            {/* View More Orders Button */}
+            {displayOrders.length > visibleOrdersCount && (
+              <TouchableOpacity
+                style={styles.viewMoreOrdersBtn}
+                activeOpacity={0.8}
+                onPress={() => setVisibleOrdersCount((prev) => prev + 5)}
+              >
+                <Text style={styles.viewMoreOrdersText}>
+                  View More Orders ({displayOrders.length - visibleOrdersCount} remaining)
+                </Text>
+                <ChevronDown size={17} color="#BA9237" />
+              </TouchableOpacity>
+            )}
+          </>
         )}
       </ScrollView>
     </View>
@@ -1291,10 +1290,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
-  pastOrdersViewAllText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 13.5,
-    color: '#BA9237',
+  pastOrdersCountBadge: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12.5,
+    color: '#747474',
   },
 
   // ─── ORDER CARD STYLES ───
@@ -1548,5 +1547,27 @@ const styles = StyleSheet.create({
     color: '#777777',
     textAlign: 'center',
     lineHeight: 18,
+  },
+
+  // ─── VIEW MORE ORDERS BUTTON ───
+  viewMoreOrdersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#121008',
+    borderWidth: 1,
+    borderColor: '#382D10',
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginTop: -4,
+    marginBottom: 26,
+  },
+  viewMoreOrdersText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14,
+    color: '#BA9237',
+    marginRight: 6,
+    letterSpacing: 0.3,
   },
 });
