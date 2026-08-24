@@ -187,11 +187,29 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   };
 
+  // Get active session token from state or persisted auth
+  const getActiveToken = async (): Promise<string | undefined> => {
+    if (authState.type === 'Authenticated' && authState.sessionToken) {
+      return authState.sessionToken;
+    }
+    try {
+      const stored = await AsyncStorage.getItem('@auth_state');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.type === 'Authenticated' && parsed?.sessionToken) {
+          return parsed.sessionToken;
+        }
+      }
+    } catch {}
+    return undefined;
+  };
+
   // Fetch addresses from PostgreSQL backend
   const fetchServerAddresses = async (token?: string) => {
-    const activeToken = token || (authState.type === 'Authenticated' ? authState.sessionToken : undefined);
+    const activeToken = token || (await getActiveToken());
     if (!activeToken) return;
     try {
+      console.log(`🌐 [MainViewModel] Fetching addresses from server: ${BACKEND_URL}/api/delivery/addresses`);
       const res = await fetch(`${BACKEND_URL}/api/delivery/addresses`, {
         headers: {
           Authorization: `Bearer ${activeToken}`,
@@ -201,6 +219,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) {
+          console.log(`✅ [MainViewModel] Synced ${data.length} addresses from server`);
           setSavedAddresses(data);
           await persistAddresses(data);
         }
@@ -217,9 +236,10 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     setSavedAddresses(updated);
     persistAddresses(updated);
 
-    const token = authState.type === 'Authenticated' ? authState.sessionToken : undefined;
+    const token = await getActiveToken();
     if (token) {
       try {
+        console.log(`🌐 [MainViewModel] Saving new address to cloud database...`);
         const res = await fetch(`${BACKEND_URL}/api/delivery/addresses`, {
           method: 'POST',
           headers: {
@@ -231,6 +251,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         if (res.ok) {
           const resData = await res.json();
           if (resData.id) {
+            console.log(`✅ [MainViewModel] Address saved to DB with ID:`, resData.id);
             const synced = updated.map(a => a.id === tempId ? { ...a, id: resData.id } : a);
             setSavedAddresses(synced);
             persistAddresses(synced);
@@ -239,6 +260,8 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       } catch (e) {
         console.warn("⚠️ [MainViewModel] Failed to save address to DB:", e);
       }
+    } else {
+      console.warn("⚠️ [MainViewModel] No active user token found when saving address");
     }
   };
 
@@ -247,7 +270,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     setSavedAddresses(updated);
     persistAddresses(updated);
 
-    const token = authState.type === 'Authenticated' ? authState.sessionToken : undefined;
+    const token = await getActiveToken();
     if (token) {
       try {
         await fetch(`${BACKEND_URL}/api/delivery/addresses/${addr.id}`, {
@@ -269,7 +292,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     setSavedAddresses(updated);
     persistAddresses(updated);
 
-    const token = authState.type === 'Authenticated' ? authState.sessionToken : undefined;
+    const token = await getActiveToken();
     if (token) {
       try {
         await fetch(`${BACKEND_URL}/api/delivery/addresses/${id}`, {
@@ -405,6 +428,9 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
           const parsed = JSON.parse(stored);
           if (parsed && parsed.type === 'Authenticated') {
             setAuthState(parsed);
+            if (parsed.sessionToken) {
+              fetchServerAddresses(parsed.sessionToken);
+            }
           }
         }
       } catch (err) {
@@ -655,6 +681,9 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   const setAuthenticatedState = async (state: AuthState) => {
     setAuthState(state);
     await AsyncStorage.setItem('@auth_state', JSON.stringify(state));
+    if (state.type === 'Authenticated' && state.sessionToken) {
+      fetchServerAddresses(state.sessionToken);
+    }
   };
 
   const verifyOtp = async (phone: string, otp: string): Promise<AuthState> => {
@@ -688,7 +717,11 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         userId: data?.user?.id,
       };
 
-      setAuthState({ type: 'Unauthenticated' }); // Keep them on the Login screen so they see the success view
+      setAuthState(authenticatedState);
+      await AsyncStorage.setItem('@auth_state', JSON.stringify(authenticatedState));
+      if (token) {
+        fetchServerAddresses(token);
+      }
       return authenticatedState;
     } catch (error: any) {
       setAuthState({ type: 'Unauthenticated' });

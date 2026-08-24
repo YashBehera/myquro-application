@@ -47,16 +47,15 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     }
     setIsLoading(true);
     setOtpError(null);
-    // try {
-    //   await sendOtp('+91' + phone);
-    //   setIsLoading(false);
-    //   setAuthMode('otp');
-    // } catch (error: any) {
-    //   setIsLoading(false);
-    //   Alert.alert('Error', error.message || 'Failed to send OTP');
-    // }
-    setIsLoading(false);
-    setAuthMode("otp");
+    try {
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      await sendOtp(fullPhone);
+    } catch (error: any) {
+      console.log("ℹ️ [LoginScreen] Send OTP fallback:", error);
+    } finally {
+      setIsLoading(false);
+      setAuthMode("otp");
+    }
   };
 
   const handleVerifyOtp = async (otpCode: string) => {
@@ -67,14 +66,15 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setIsLoading(true);
     setOtpError(null);
     try {
-      const authStateResult = await verifyOtp('+91' + (phone || '9999999999'), otpCode);
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      const authStateResult = await verifyOtp(fullPhone, otpCode);
       setVerifiedState(authStateResult);
+      await setAuthenticatedState(authStateResult);
       setIsLoading(false);
       setAuthMode("verified");
     } catch (error: any) {
-      // Fallback if backend verification fails or demo mode
       setIsLoading(false);
-      setAuthMode("verified");
+      setOtpError(error.message || "Invalid OTP. Please try again.");
     }
   };
 
