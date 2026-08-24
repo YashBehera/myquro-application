@@ -69,12 +69,17 @@ const mapBackendStatus = (backendStatus: string): Order['status'] => {
   }
 };
 
+// Track optimistic status updates to prevent race conditions with background polling
+const pendingStatusUpdates = new Map<string, { status: Order['status']; timestamp: number }>();
+
 export const useOrderStore = create<OrderStore>((set, get) => ({
   orders: [],
   isLoading: false,
 
   loadOrders: async () => {
-    set({ isLoading: true });
+    if (get().orders.length === 0) {
+      set({ isLoading: true });
+    }
     try {
       // 1. Fetch active manager restaurant profile details
       const restRes = await apiClient.get('/restaurants/my-restaurant');
@@ -146,6 +151,20 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
             }
           }
 
+          let resolvedStatus = mapBackendStatus(bo.status);
+          const pending = pendingStatusUpdates.get(bo.id);
+          if (pending) {
+            if (Date.now() - pending.timestamp < 15000) {
+              if (resolvedStatus !== pending.status) {
+                resolvedStatus = pending.status;
+              } else {
+                pendingStatusUpdates.delete(bo.id);
+              }
+            } else {
+              pendingStatusUpdates.delete(bo.id);
+            }
+          }
+
           return {
             id: bo.id,
             customer: bo.customerName || bo.placedByUserId || 'Customer',
@@ -156,7 +175,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
             discount: discountVal,
             total: resolvedTotal,
             timestamp: bo.createdAt || new Date().toISOString(),
-            status: mapBackendStatus(bo.status),
+            status: resolvedStatus,
             receivedTime: bo.createdAt || new Date().toISOString(),
             acceptedTime: bo.updatedAt,
             readyTime: bo.updatedAt,
@@ -184,7 +203,10 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
   },
 
   acceptOrder: async (orderId: string) => {
-    // 1. Instant 0ms optimistic UI update
+    // 1. Lock optimistic status
+    pendingStatusUpdates.set(orderId, { status: 'Preparing', timestamp: Date.now() });
+
+    // 2. Instant 0ms optimistic UI update
     set((state) => ({
       orders: state.orders.map((o) =>
         o.id === orderId
@@ -197,7 +219,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
       ),
     }));
 
-    // 2. Non-blocking backend synchronization
+    // 3. Non-blocking backend synchronization
     try {
       await apiClient.patch(`/orders/${orderId}/status`, { status: 'preparing' });
     } catch (e) {
@@ -206,7 +228,10 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
   },
 
   markReady: async (orderId: string) => {
-    // 1. Instant 0ms optimistic UI update
+    // 1. Lock optimistic status
+    pendingStatusUpdates.set(orderId, { status: 'Ready', timestamp: Date.now() });
+
+    // 2. Instant 0ms optimistic UI update
     set((state) => ({
       orders: state.orders.map((o) =>
         o.id === orderId
@@ -219,7 +244,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
       ),
     }));
 
-    // 2. Non-blocking backend synchronization
+    // 3. Non-blocking backend synchronization
     try {
       await apiClient.patch(`/orders/${orderId}/status`, { status: 'ready' });
     } catch (e) {
@@ -228,7 +253,10 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
   },
 
   markPickedUp: async (orderId: string) => {
-    // 1. Instant 0ms optimistic UI update
+    // 1. Lock optimistic status
+    pendingStatusUpdates.set(orderId, { status: 'Picked up', timestamp: Date.now() });
+
+    // 2. Instant 0ms optimistic UI update
     set((state) => ({
       orders: state.orders.map((o) =>
         o.id === orderId
@@ -241,7 +269,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
       ),
     }));
 
-    // 2. Non-blocking backend synchronization
+    // 3. Non-blocking backend synchronization
     try {
       await apiClient.patch(`/orders/${orderId}/status`, { status: 'served' });
     } catch (e) {
@@ -250,7 +278,10 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
   },
 
   rejectOrder: async (orderId: string, reason = 'Kitchen busy') => {
-    // 1. Instant 0ms optimistic UI update
+    // 1. Lock optimistic status
+    pendingStatusUpdates.set(orderId, { status: 'Rejected', timestamp: Date.now() });
+
+    // 2. Instant 0ms optimistic UI update
     set((state) => ({
       orders: state.orders.map((o) =>
         o.id === orderId
@@ -264,7 +295,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
       ),
     }));
 
-    // 2. Non-blocking backend synchronization
+    // 3. Non-blocking backend synchronization
     try {
       await apiClient.patch(`/orders/${orderId}/status`, { status: 'cancelled' });
     } catch (e) {

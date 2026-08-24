@@ -30,7 +30,14 @@ import {
   TextInput,
   Modal,
   ToastAndroid,
+  Animated,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -541,65 +548,161 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       ? currentRestaurant.deliveryTime
       : dynamicDistanceEta;
 
-  // Active status check: has a rider accepted the order?
-  const currentStatus = trackingData?.status || orderDetail?.status || 'placed';
-  const isRiderAccepted = ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
+  // 1. Restaurant / Kitchen lifecycle status from Restaurant App
+  const kitchenStatus = orderDetail?.status || 'placed';
+
+  // 2. Delivery Partner / Logistics lifecycle status from Rider App
+  const riderStatus = trackingData?.status || null;
+
+  // Active status check: has a rider accepted / been assigned to this order?
+  const currentStatus = riderStatus || kitchenStatus || 'placed';
+  const isRiderAccepted = Boolean(
+    trackingData?.riderId ||
+    (riderStatus && ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(riderStatus))
+  );
+
+  const riderDisplayName = riderInfo?.name || riderInfo?.fullName || 'Delivery Partner';
 
   const getStatusDisplay = () => {
-    switch (currentStatus) {
-      case 'assigned':
+    // ── STAGE 6: CANCELLED / REJECTED ──
+    if (kitchenStatus === 'cancelled' || kitchenStatus === 'rejected') {
+      return {
+        title: 'Order Cancelled',
+        description: 'This order was cancelled. Any amount paid will be refunded to your source payment method.',
+        badge: 'CANCELLED',
+      };
+    }
+
+    // ── STAGE 5: DELIVERED / SERVED ──
+    if (riderStatus === 'delivered' || kitchenStatus === 'served' || kitchenStatus === 'delivered') {
+      return {
+        title: 'Order Delivered! 🎉',
+        description: `Enjoy your delicious meal from\n${restaurantName}`,
+        badge: 'DELIVERED',
+      };
+    }
+
+    // ── STAGE 4: OUT FOR DELIVERY (Heading to customer's doorstep) ──
+    if (riderStatus === 'out_for_delivery') {
+      return {
+        title: 'Out for Delivery',
+        description: `${riderDisplayName} is out for delivery. Keep your phone handy!`,
+        badge: 'ON TIME',
+      };
+    }
+
+    // ── STAGE 3: ORDER PICKED UP (Collected from restaurant) ──
+    if (riderStatus === 'picked_up') {
+      return {
+        title: 'Order Picked Up',
+        description: `${riderDisplayName} has picked up your order and is heading towards your location`,
+        badge: 'ON TIME',
+      };
+    }
+
+    // ── STAGE 2: PARTNER ARRIVED AT RESTAURANT ──
+    if (riderStatus === 'arrived_at_store') {
+      if (kitchenStatus === 'ready') {
         return {
-          title: 'Partner is on the way',
-          description: `${riderInfo?.name || riderInfo?.fullName || 'Delivery Partner'} is on the way to pick your order`,
-          badge: 'ON TIME',
+          title: 'Collecting your order',
+          description: `${riderDisplayName} is at ${restaurantName} collecting your packed order`,
+          badge: 'PICKING UP',
         };
-      case 'arrived_at_store':
+      } else {
+        // Rider has arrived, but food is still cooking
         return {
           title: 'Partner reached restaurant',
-          description: `${riderInfo?.name || riderInfo?.fullName || 'Delivery Partner'} has arrived at the restaurant`,
-          badge: 'ON TIME',
+          description: `${riderDisplayName} has arrived at the restaurant, waiting for your order to be prepared`,
+          badge: 'WAITING FOR ORDER',
         };
-      case 'picked_up':
-        return {
-          title: 'Order Picked Up',
-          description: `${riderInfo?.name || riderInfo?.fullName || 'Delivery Partner'} has picked up your order and is on the way`,
-          badge: 'ON TIME',
-        };
-      case 'out_for_delivery':
-        return {
-          title: 'Out for Delivery',
-          description: `${riderInfo?.name || riderInfo?.fullName || 'Delivery Partner'} is out for delivery. Keep your phone handy!`,
-          badge: 'ON TIME',
-        };
-      case 'preparing':
-      case 'confirmed':
-        return {
-          title: 'Preparing your order',
-          description: `Chef at ${restaurantName} is preparing your\nfreshly made meal`,
-          badge: 'ON TIME',
-        };
-      case 'ready':
-        return {
-          title: 'Your order is prepared',
-          description: 'Waiting for a delivery partner to be assigned...',
-          badge: 'PREPARED',
-        };
-      case 'delivered':
-        return {
-          title: 'Order Delivered! 🎉',
-          description: `Enjoy your delicious meal from\n${restaurantName}`,
-          badge: 'DELIVERED',
-        };
-      default:
-        return {
-          title: 'Order received',
-          description: '',
-          badge: 'RECEIVED',
-        };
+      }
     }
+
+    // ── STAGE 1B: PARTNER ASSIGNED & ON THE WAY TO RESTAURANT ──
+    if (riderStatus === 'assigned') {
+      if (kitchenStatus === 'ready') {
+        return {
+          title: 'Order is Ready & Partner is on the way',
+          description: `Your order is packed & ready. ${riderDisplayName} is rushing to ${restaurantName} to pick it up`,
+          badge: 'READY FOR PICKUP',
+        };
+      } else {
+        // Food is cooking, rider is on the way
+        return {
+          title: 'Partner is on the way',
+          description: `${riderDisplayName} is on the way to ${restaurantName} while your food is being freshly prepared`,
+          badge: 'ON THE WAY',
+        };
+      }
+    }
+
+    // ── STAGE 1A: NO RIDER ASSIGNED YET (WAITING / FINDING PARTNER) ──
+    if (kitchenStatus === 'ready') {
+      return {
+        title: 'Order is Ready',
+        description: 'Order is Ready, waiting for delivery partner to be assigned...',
+        badge: 'ORDER READY',
+      };
+    }
+
+    if (kitchenStatus === 'preparing' || kitchenStatus === 'confirmed') {
+      return {
+        title: 'Preparing your order',
+        description: `Chef at ${restaurantName} is preparing your freshly made meal. Finding a delivery partner nearby...`,
+        badge: 'PREPARING',
+      };
+    }
+
+    // Default: Order placed / received
+    return {
+      title: 'Order received',
+      description: `Waiting for ${restaurantName} to accept your order...`,
+      badge: 'RECEIVED',
+    };
   };
 
   const statusInfo = getStatusDisplay();
+
+  // ── Smooth Status Transition Animation ──
+  const statusFadeAnim = useRef(new Animated.Value(1)).current;
+  const statusTranslateYAnim = useRef(new Animated.Value(0)).current;
+  const statusScaleAnim = useRef(new Animated.Value(1)).current;
+  const prevStatusKeyRef = useRef<string>('');
+
+  useEffect(() => {
+    const currentStatusKey = `${statusInfo.title}_${statusInfo.badge}_${isRiderAccepted}_${kitchenStatus}_${riderStatus}`;
+    if (prevStatusKeyRef.current && prevStatusKeyRef.current !== currentStatusKey) {
+      // 1. Smooth layout animation for card resize
+      try {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      } catch (e) {}
+
+      // 2. Micro fade & entrance slide for status text and badge
+      statusFadeAnim.setValue(0);
+      statusTranslateYAnim.setValue(6);
+      statusScaleAnim.setValue(0.98);
+
+      Animated.parallel([
+        Animated.timing(statusFadeAnim, {
+          toValue: 1,
+          duration: 320,
+          useNativeDriver: true,
+        }),
+        Animated.timing(statusTranslateYAnim, {
+          toValue: 0,
+          duration: 320,
+          useNativeDriver: true,
+        }),
+        Animated.spring(statusScaleAnim, {
+          toValue: 1,
+          friction: 8,
+          tension: 65,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+    prevStatusKeyRef.current = currentStatusKey;
+  }, [statusInfo.title, statusInfo.badge, isRiderAccepted, kitchenStatus, riderStatus]);
 
   const handleCallRider = () => {
     const phone = riderInfo?.phone || riderInfo?.contactNumber;
@@ -1049,7 +1152,15 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               <View>
                 <View style={styles.statusCardTopSection}>
                   {/* Left: Order Received Title + Restaurant/Address Timeline */}
-                  <View style={styles.statusCardLeftInfo}>
+                  <Animated.View
+                    style={[
+                      styles.statusCardLeftInfo,
+                      {
+                        opacity: statusFadeAnim,
+                        transform: [{ translateY: statusTranslateYAnim }, { scale: statusScaleAnim }],
+                      },
+                    ]}
+                  >
                     <Text style={styles.orderReceivedHeading}>{statusInfo.title}</Text>
 
                     {statusInfo.description ? (
@@ -1076,7 +1187,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                         </View>
                       </View>
                     )}
-                  </View>
+                  </Animated.View>
 
                   {/* Right: Gold ETA Box (30 mins) */}
                   <View style={styles.etaGoldBadgeCard}>
@@ -1114,7 +1225,15 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               <View>
                 <View style={styles.statusCardTopSection}>
                   {/* Left Content */}
-                  <View style={styles.statusCardLeftInfo}>
+                  <Animated.View
+                    style={[
+                      styles.statusCardLeftInfo,
+                      {
+                        opacity: statusFadeAnim,
+                        transform: [{ translateY: statusTranslateYAnim }, { scale: statusScaleAnim }],
+                      },
+                    ]}
+                  >
                     {/* ON TIME Badge Row */}
                     <View style={styles.onTimeBadgeRow}>
                       <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
@@ -1126,7 +1245,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                           strokeLinejoin="round"
                         />
                       </Svg>
-                      <Text style={styles.onTimeBadgeText}>ON TIME</Text>
+                      <Text style={styles.onTimeBadgeText}>{statusInfo.badge || 'ON TIME'}</Text>
                     </View>
 
                     {/* Main Status Title */}
@@ -1134,7 +1253,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
                     {/* Subtitle Description */}
                     <Text style={styles.partnerStatusDesc}>{statusInfo.description}</Text>
-                  </View>
+                  </Animated.View>
 
                   {/* Right: Vibrant Emerald-Lime Green ETA Card */}
                   <View style={styles.etaGreenBadgeCard}>

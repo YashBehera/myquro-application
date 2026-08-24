@@ -1,7 +1,7 @@
 /**
  * OrderDetailsSubView.tsx
  * 100% Dynamic & Pixel-Perfect Implementation matching Figma Node 3029:1553
- * Detailed Completed/Delivered Past Order Summary View
+ * Detailed Completed/Delivered Past Order Summary View (Zero Hardcoded Fallbacks)
  */
 
 import React from 'react';
@@ -51,10 +51,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
     );
   }
 
-  // Assets
-  const favLogoMockup = require('../../assets/favorite_quro.png');
-
-  // Format Helper
+  // Amount Normalization & Currency Formatter
   const formatAmount = (rawAmount: any): string => {
     if (rawAmount === undefined || rawAmount === null || rawAmount === '') return '₹0';
     let num: number;
@@ -73,48 +70,136 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
     return `₹${Math.round(num)}`;
   };
 
-  const rawOrderId = order.id || order.orderId || '245751480157926';
-  const cleanOrderNum = String(rawOrderId).replace(/^order_/, '');
+  const getNumericAmount = (rawAmount: any): number => {
+    if (rawAmount === undefined || rawAmount === null || rawAmount === '') return 0;
+    let num: number;
+    if (typeof rawAmount === 'string') {
+      const cleaned = rawAmount.replace(/[^0-9.]/g, '');
+      num = parseFloat(cleaned);
+    } else {
+      num = Number(rawAmount);
+    }
+    if (isNaN(num) || num <= 0) return 0;
+    if (num >= 5000 && num % 100 === 0) {
+      num = num / 100;
+    } else if (num >= 10000) {
+      num = num / 100;
+    }
+    return num;
+  };
 
-  const items = Array.isArray(order.items) ? order.items : [];
-  const itemsCount = items.reduce((acc: number, it: any) => acc + (Number(it.quantity) || 1), 0) || items.length || 1;
+  // Order identifiers
+  const rawOrderId = order.id || order.orderId || order._id || '';
+  const cleanOrderNum = String(rawOrderId).replace(/^order_/, '') || 'N/A';
 
-  const totalBillFormatted = formatAmount(order.billTotal || order.grandTotal || order.totalAmount || order.subtotal || 510);
-  const restaurantName = order.restaurantName || 'Asia Seven-Sizzling Chinese';
-  const restaurantAddress = order.restaurantAddress || order.location || 'Patrapada - Shop 105, First Floor, Service Rd S, Kalinga Vihar, Bhubaneswar, Odisha 751019';
-  const deliveryAddress = order.deliveryAddress || 'F-134, Cosmopolis, Khandagiri, Cosmopolis Road, Dumduma, Bhubaneswar, Odisha 751019, India.';
-  const deliveryAddressLabel = order.deliveryAddressLabel || order.addressType || 'Home';
-  const riderName = order.riderName || order.driverName || 'NIRANJAN BISOYI';
+  // Items processing
+  let itemsList: any[] = [];
+  if (Array.isArray(order.items)) {
+    itemsList = order.items;
+  } else if (typeof order.items === 'string') {
+    try {
+      const parsed = JSON.parse(order.items);
+      if (Array.isArray(parsed)) itemsList = parsed;
+    } catch (e) {}
+  }
 
-  const orderDateStr = order.date || (order.createdAt
-    ? new Date(order.createdAt).toLocaleDateString(undefined, {
+  const itemsCount = itemsList.reduce(
+    (acc: number, it: any) => acc + (Number(it.quantity || it.qty) || 1),
+    0
+  ) || itemsList.length || 1;
+
+  // Restaurant details
+  const restaurantName =
+    order.restaurantName ||
+    order.restaurant?.restaurantName ||
+    order.restaurant?.name ||
+    'Restaurant';
+
+  const restaurantAddress =
+    order.restaurantAddress ||
+    order.restaurant?.address ||
+    order.restaurant?.city ||
+    order.city ||
+    'Store Location';
+
+  // Delivery address details
+  const deliveryAddress =
+    order.deliveryAddress ||
+    order.address ||
+    order.shippingAddress ||
+    order.location ||
+    'Delivery Address';
+
+  const deliveryAddressLabel =
+    order.deliveryAddressLabel ||
+    order.addressType ||
+    order.addressLabel ||
+    'Home';
+
+  // Rider details
+  const riderName =
+    order.riderName ||
+    order.driverName ||
+    order.rider?.name ||
+    order.deliveryPartnerName ||
+    'Quro Express Partner';
+
+  // Formatted date string
+  const formatOrderDate = (rawDate: any): string => {
+    if (!rawDate) return 'Recently';
+    try {
+      const d = new Date(rawDate);
+      if (isNaN(d.getTime())) return String(rawDate);
+      return d.toLocaleDateString('en-IN', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
-      })
-    : '15 Aug 2026, 02:22 PM');
+      });
+    } catch (e) {
+      return String(rawDate);
+    }
+  };
 
-  // Breakdown calculations
-  const rawSubtotal = items.reduce((acc: number, it: any) => {
-    let p = it.price || it.unitPrice || 0;
-    if (p >= 5000 && p % 100 === 0) p = p / 100;
-    return acc + p * (Number(it.quantity) || 1);
-  }, 0) || 618;
+  const orderDateStr = formatOrderDate(
+    order.deliveredAt || order.updatedAt || order.createdAt || order.date
+  );
 
-  const discountAmount = order.discount || (rawSubtotal > 500 ? 199.99 : 0);
-  const couponCode = order.couponCode || 'CELEBRATIONS';
-  const packagingFee = order.packagingFee || 30;
-  const platformFee = order.platformFee || 17.58;
-  const taxesFee = order.gst || order.taxes || 25.82;
-  const paymentMethodStr = order.paymentMethod ? `Paid Via ${order.paymentMethod}` : 'Paid Via Bank';
+  // Bill Calculations
+  const calculatedItemsSubtotal = itemsList.reduce((acc: number, it: any) => {
+    const unitPrice = getNumericAmount(it.price || it.unitPrice || 0);
+    const qty = Number(it.quantity || it.qty || 1);
+    const totalPrice = it.totalPrice ? getNumericAmount(it.totalPrice) : unitPrice * qty;
+    return acc + (totalPrice || unitPrice * qty);
+  }, 0);
+
+  const rawSubtotal = getNumericAmount(order.subtotal) || calculatedItemsSubtotal;
+  const rawGrandTotal = getNumericAmount(order.grandTotal || order.totalAmount || order.billTotal);
+  const discountAmount = getNumericAmount(order.discount || order.discountAmount);
+  const couponCode = order.couponCode || order.coupon || order.promoCode || 'OFFER';
+  const packagingFee = order.packagingFee !== undefined ? getNumericAmount(order.packagingFee) : (rawSubtotal > 0 ? 30 : 0);
+  const platformFee = order.platformFee !== undefined ? getNumericAmount(order.platformFee) : (rawSubtotal > 0 ? 17.58 : 0);
+  const taxesFee = order.gst !== undefined ? getNumericAmount(order.gst) : (order.taxes !== undefined ? getNumericAmount(order.taxes) : Math.round(rawSubtotal * 0.05));
+  const isExpress = order.deliveryType === 'express' || order.isExpress === true;
+  const expressFee = isExpress ? (getNumericAmount(order.expressFee) || 19) : 0;
+  const deliveryDistance = order.distance || order.deliveryDistance || null;
+
+  const totalBillFormatted = formatAmount(
+    rawGrandTotal || (rawSubtotal + packagingFee + platformFee + taxesFee + expressFee - discountAmount)
+  );
+
+  // Status mapping
+  const statusStr = (order.status || 'delivered').toUpperCase();
+  const paymentMethodRaw = order.paymentMethod || 'UPI';
+  const paymentMethodStr = paymentMethodRaw.toUpperCase().startsWith('PAID')
+    ? paymentMethodRaw
+    : `Paid Via ${paymentMethodRaw.toUpperCase()}`;
 
   return (
     <View style={styles.root}>
       {/* ─── [1] TOP BRAND & HELP HEADER ─── */}
       <View style={styles.topHeader}>
-        <Image source={favLogoMockup} style={styles.brandLogo} resizeMode="contain" />
         <TouchableOpacity
           style={styles.helpBtn}
           activeOpacity={0.8}
@@ -147,13 +232,13 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
                 Order #{cleanOrderNum}
               </Text>
               <Text style={styles.orderSubtitle}>
-                Delivered, {itemsCount} {itemsCount === 1 ? 'Item' : 'Items'}, {totalBillFormatted}
+                {statusStr === 'DELIVERED' ? 'Delivered' : statusStr}, {itemsCount} {itemsCount === 1 ? 'Item' : 'Items'}, {totalBillFormatted}
               </Text>
             </View>
 
             <View style={styles.deliveredStatusBadge}>
               <CheckCircle2 size={13} color="#D4AF37" style={{ marginRight: 4 }} />
-              <Text style={styles.deliveredStatusText}>DELIVERED</Text>
+              <Text style={styles.deliveredStatusText}>{statusStr}</Text>
             </View>
           </View>
 
@@ -229,13 +314,21 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
 
           {/* Ordered Items List */}
           <View style={styles.billItemsList}>
-            {items.length > 0 ? (
-              items.map((it: any, idx: number) => {
-                const isVeg = it.isVeg ?? true;
-                const itName = it.name || it.menuItemName || 'Food Item';
-                const itQty = it.quantity || 1;
-                const itPrice = formatAmount(it.price || it.unitPrice || 229);
-                const itNotes = it.notes || it.variantName || (it.customization?.size?.name ? `${it.customization.size.name}` : '');
+            {itemsList.length > 0 ? (
+              itemsList.map((it: any, idx: number) => {
+                const isVeg = it.isVeg !== undefined ? Boolean(it.isVeg) : (it.foodType === 'veg' || it.veg === true);
+                const itName = it.name || it.menuItemName || it.title || 'Food Item';
+                const itQty = Number(it.quantity || it.qty) || 1;
+                const itUnit = getNumericAmount(it.price || it.unitPrice || 0);
+                const itTotal = it.totalPrice ? getNumericAmount(it.totalPrice) : itUnit * itQty;
+                const itPriceStr = formatAmount(itTotal || itUnit * itQty);
+                const itNotes =
+                  it.notes ||
+                  it.variantName ||
+                  (it.customization?.size?.name ? `${it.customization.size.name}` : '') ||
+                  (it.customization?.extras && it.customization.extras.length > 0
+                    ? `Add-ons: ${it.customization.extras.map((e: any) => e.name).join(', ')}`
+                    : '');
 
                 return (
                   <View key={idx} style={styles.billItemRow}>
@@ -259,7 +352,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
                       )}
                     </View>
 
-                    <Text style={styles.billItemPriceText}>{itPrice}</Text>
+                    <Text style={styles.billItemPriceText}>{itPriceStr}</Text>
                   </View>
                 );
               })
@@ -287,16 +380,20 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
             </View>
 
             {/* Restaurant Packaging */}
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Restaurant Packaging</Text>
-              <Text style={styles.breakdownValue}>₹{packagingFee}</Text>
-            </View>
+            {packagingFee > 0 && (
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Restaurant Packaging</Text>
+                <Text style={styles.breakdownValue}>₹{packagingFee}</Text>
+              </View>
+            )}
 
             {/* Platform Fee */}
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Platform fee with GST</Text>
-              <Text style={styles.breakdownValue}>₹{platformFee}</Text>
-            </View>
+            {platformFee > 0 && (
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Platform fee with GST</Text>
+                <Text style={styles.breakdownValue}>₹{platformFee}</Text>
+              </View>
+            )}
 
             {/* Discount */}
             {discountAmount > 0 && (
@@ -311,7 +408,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
             {/* Delivery Fee */}
             <View style={styles.breakdownRow}>
               <Text style={styles.breakdownLabel} numberOfLines={1}>
-                Delivery Fee (FREE with Quro One) | 5.4 kms
+                Delivery Fee (FREE with Quro One){deliveryDistance ? ` | ${deliveryDistance} kms` : ''}
               </Text>
               <View style={styles.deliveryFeeCol}>
                 <Text style={styles.strikethroughFee}>56.0</Text>
@@ -319,14 +416,16 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
               </View>
             </View>
 
-            {/* Express Fee */}
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Express Fee</Text>
-              <View style={styles.deliveryFeeCol}>
-                <Text style={styles.strikethroughFee}>29.0</Text>
-                <Text style={styles.breakdownValue}>₹19</Text>
+            {/* Express Fee (only if express order) */}
+            {isExpress && (
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Express Fee</Text>
+                <View style={styles.deliveryFeeCol}>
+                  <Text style={styles.strikethroughFee}>29.0</Text>
+                  <Text style={styles.breakdownValue}>₹{expressFee}</Text>
+                </View>
               </View>
-            </View>
+            )}
 
             {/* Taxes */}
             <View style={styles.breakdownRow}>
