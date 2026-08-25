@@ -797,6 +797,7 @@ router.get("/offers", requireAuth, async (req: any, res) => {
     }
 
     // 2. If rider is online ("available"), check for any unassigned delivery orders created in the last 2 hours
+    // ONLY assign orders that have been accepted by the restaurant (status is 'preparing' or 'ready')
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const unassignedOrders = await db
       .select({
@@ -811,7 +812,7 @@ router.get("/offers", requireAuth, async (req: any, res) => {
       .leftJoin(orderDeliveries, eq(orders.id, orderDeliveries.orderId))
       .where(
         and(
-          inArray(orders.status, ["placed", "preparing", "ready"]),
+          inArray(orders.status, ["preparing", "ready"]),
           sql`${orders.tableId} IS NULL`,
           sql`(${orderDeliveries.id} IS NULL OR (${orderDeliveries.status} = 'offered' AND ${orderDeliveries.riderId} = ${user.id}))`,
           sql`${orders.createdAt} >= ${twoHoursAgo}`
@@ -906,7 +907,7 @@ router.get("/offers", requireAuth, async (req: any, res) => {
       .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
       .where(
         and(
-          inArray(orders.status, ["placed", "preparing", "ready"]),
+          inArray(orders.status, ["preparing", "ready"]),
           eq(orderDeliveries.status, "offered"),
           eq(orderDeliveries.riderId, user.id),
           sql`${orders.createdAt} >= ${twoHoursAgo}`
