@@ -982,6 +982,19 @@ router.post("/accept", requireAuth, async (req: any, res) => {
       .where(eq(orderDeliveries.orderId, orderId));
 
     const activeRider = (await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, user.id)))[0];
+    const orderRow = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+
+    if (orderRow) {
+      emitToRestaurant(orderRow.restaurantId, 'order-updated', {
+        orderId,
+        status: orderRow.status,
+        deliveryStatus: 'assigned',
+        riderName: activeRider?.name,
+        riderPhone: activeRider?.phone,
+        restaurantId: orderRow.restaurantId,
+        updatedAt: new Date().toISOString()
+      });
+    }
 
     emitToOrder(orderId, "delivery-update", {
       orderId,

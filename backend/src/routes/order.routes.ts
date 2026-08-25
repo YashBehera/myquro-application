@@ -1693,15 +1693,16 @@ router.get(
 
         const del = allDeliveries.find(d => d.orderId === order.id);
         const isDeliveryOrder = !order.tableId && !order.tableNumber;
+        const isRiderAssigned = del && del.deliveryStatus && del.deliveryStatus !== 'offered';
 
         return {
           ...order,
           totalAmount: order.grandTotal || 0,
           isDelivery: isDeliveryOrder,
-          deliveryStatus: del?.deliveryStatus || (isDeliveryOrder ? 'unassigned' : null),
-          riderName: del?.riderName || null,
-          riderPhone: del?.riderPhone || null,
-          etaMinutes: del?.etaMinutes || null,
+          deliveryStatus: isRiderAssigned ? del.deliveryStatus : (isDeliveryOrder ? 'unassigned' : null),
+          riderName: isRiderAssigned ? del.riderName : null,
+          riderPhone: isRiderAssigned ? del.riderPhone : null,
+          etaMinutes: isRiderAssigned ? del.etaMinutes : null,
           items: allOrderItems.filter(item => item.orderId === order.id).map(item => ({
             id: item.id,
             menuItemName: item.menuItemName || 'Unknown Item',

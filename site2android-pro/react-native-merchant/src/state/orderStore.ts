@@ -214,9 +214,15 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
             cookingInstruction,
             tableNumber: bo.tableNumber || null,
             isDelivery: bo.isDelivery !== undefined ? bo.isDelivery : !bo.tableId && !bo.tableNumber,
-            deliveryStatus: bo.deliveryStatus || (!bo.tableId && !bo.tableNumber ? 'unassigned' : undefined),
-            riderName: bo.riderName || undefined,
-            riderPhone: bo.riderPhone || undefined,
+            deliveryStatus: (bo.deliveryStatus && bo.deliveryStatus !== 'offered' && bo.deliveryStatus !== 'unassigned')
+              ? bo.deliveryStatus
+              : (!bo.tableId && !bo.tableNumber ? 'unassigned' : undefined),
+            riderName: (bo.deliveryStatus && bo.deliveryStatus !== 'offered' && bo.deliveryStatus !== 'unassigned')
+              ? (bo.riderName || undefined)
+              : undefined,
+            riderPhone: (bo.deliveryStatus && bo.deliveryStatus !== 'offered' && bo.deliveryStatus !== 'unassigned')
+              ? (bo.riderPhone || undefined)
+              : undefined,
             etaMinutes: bo.etaMinutes || undefined,
           };
         });

@@ -150,7 +150,7 @@ export default function LiveOrdersTabScreen() {
                               Delivery rider is yet to be assigned <Text style={styles.deliverySubNote}>(Accept to dispatch)</Text>
                             </Text>
                           </View>
-                        ) : order.riderName ? (
+                        ) : (order.riderName && order.deliveryStatus && order.deliveryStatus !== 'offered' && order.deliveryStatus !== 'unassigned') ? (
                           <View style={[styles.deliveryStatusBadge, styles.deliveryAssignedBadge]}>
                             <View style={styles.riderAvatarMini}>
                               <Ionicons
