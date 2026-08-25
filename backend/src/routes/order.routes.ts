@@ -1553,6 +1553,8 @@ router.get(
           restaurantId: orders.restaurantId,
           tableId: orders.tableId,
           placedByUserId: orders.placedByUserId,
+          customerName: authUsers.name,
+          customerEmail: authUsers.email,
           notes: orders.notes,
           status: orders.status,
           subtotal: orders.subtotal,
@@ -1566,6 +1568,7 @@ router.get(
         })
         .from(orders)
         .leftJoin(tables, eq(orders.tableId, tables.id))
+        .leftJoin(authUsers, eq(orders.placedByUserId, authUsers.id))
         .where(and(...conditions))
         .orderBy(desc(orders.createdAt))
         .limit(limit)

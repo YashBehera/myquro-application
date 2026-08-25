@@ -212,7 +212,7 @@ export default function LiveOrdersTabScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0B0B',
+    backgroundColor: '#000000',
   },
   safeArea: {
     flex: 1,
@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderColor: '#2A2A2A',
-    backgroundColor: '#0B0B0B',
+    backgroundColor: '#000000',
   },
   headerTitleContainer: {
     flex: 1,

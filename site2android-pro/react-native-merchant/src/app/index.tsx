@@ -347,7 +347,7 @@ export default function RestaurantOnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0D12',
+    backgroundColor: '#000000',
   },
   heroImageWrapper: {
     position: 'absolute',

@@ -7,17 +7,20 @@ import {
   ScrollView,
   StatusBar,
   Image,
+  ImageBackground,
   Dimensions,
   Alert,
   Modal,
   Animated,
+  Platform,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { useRouter } from 'expo-router';
 import { useOrderStore, Order } from '../../state/orderStore';
 import { useComplaintStore } from '../../state/complaintStore';
+import { apiClient } from '../../services/apiClient';
 
 const { width } = Dimensions.get('window');
 
@@ -25,7 +28,19 @@ export default function RestaurantDashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [isOnline, setIsOnline] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<'New' | 'Preparing' | 'Ready' | 'Picked up'>('New');
+  const [activeSubTab, setActiveSubTab] = useState<'Preparing' | 'Ready' | 'Picked up'>('Preparing');
+  const [showNewOrderModal, setShowNewOrderModal] = useState(false);
+  const [selectedNewOrder, setSelectedNewOrder] = useState<Order | null>(null);
+  const [prepTime, setPrepTime] = useState(15);
+  const [showPrepTimeModal, setShowPrepTimeModal] = useState(false);
+  const [tempPrepTime, setTempPrepTime] = useState(15);
+  const [restaurantProfile, setRestaurantProfile] = useState<{
+    restaurantName?: string;
+    restaurantAddress?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string | number;
+  } | null>(null);
   const [activeBottomTab, setActiveBottomTab] = useState<'Orders' | 'Menu' | 'Business' | 'Complaints' | 'More'>('Orders');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
@@ -47,8 +62,21 @@ export default function RestaurantDashboard() {
 
   const { complaints, loadComplaints, getActiveComplaintsCount } = useComplaintStore();
 
-  // Load orders and complaints on mount and poll for live updates
+  // Load restaurant profile, orders, and complaints on mount and poll for live updates
   useEffect(() => {
+    const fetchRestaurantProfile = async () => {
+      try {
+        const res = await apiClient.get('/restaurants/my-restaurant');
+        const rest = res.data?.restaurant || res.data;
+        if (rest) {
+          setRestaurantProfile(rest);
+        }
+      } catch (e) {
+        console.warn('Error fetching restaurant profile in index:', e);
+      }
+    };
+
+    fetchRestaurantProfile();
     loadOrders();
     loadComplaints();
 
@@ -113,7 +141,9 @@ export default function RestaurantDashboard() {
     setIsOnline(!isOnline);
   };
 
-  const subTabs: ('New' | 'Preparing' | 'Ready' | 'Picked up')[] = ['New', 'Preparing', 'Ready', 'Picked up'];
+  const subTabs: ('Preparing' | 'Ready' | 'Picked up')[] = ['Preparing', 'Ready', 'Picked up'];
+
+  const newOrders = orders.filter((o) => o.status === 'New');
 
   // Handle transitioning order statuses
   const updateOrderStatus = (orderId: string, nextStatus: 'Preparing' | 'Ready' | 'Picked up' | 'Rejected') => {
@@ -158,14 +188,12 @@ export default function RestaurantDashboard() {
 
   const getEmptyStateMessage = () => {
     switch (activeSubTab) {
-      case 'New':
-        return 'New orders will appear here';
       case 'Preparing':
-        return 'Orders that are getting prepared will be shown here';
+        return 'Orders that are getting prepared will\nbe shown here';
       case 'Ready':
-        return 'Orders that are ready for pickup will be shown here';
+        return 'Orders that are ready for pickup will\nbe shown here';
       case 'Picked up':
-        return 'Orders that have been picked up will be shown here';
+        return 'Orders that have been picked up will\nbe shown here';
       default:
         return '';
     }
@@ -180,7 +208,7 @@ export default function RestaurantDashboard() {
 
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 12) }]}>
-      <StatusBar barStyle="light-content" backgroundColor="#0E0C0A" translucent />
+      <StatusBar barStyle="light-content" backgroundColor="#000000" translucent />
 
       {/* TOP STATUS & HELP BAR */}
       <View style={styles.topBar}>
@@ -224,7 +252,7 @@ export default function RestaurantDashboard() {
       </View>
 
       {/* FULL-LENGTH SCROLLABLE DASHBOARD CONTENT */}
-      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 90 }}>
+      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
 
         {/* 1. HERO SECTION — Conditional Online / Offline */}
         {isOnline ? (
@@ -547,8 +575,12 @@ export default function RestaurantDashboard() {
           ) : (
             /* Empty State */
             <View style={styles.emptyView}>
-              <View style={styles.emptyIconWrapper}>
-                <Ionicons name="bag-handle-outline" size={48} color="rgba(242, 202, 80, 0.3)" />
+              <View style={styles.emptyPanWrapper}>
+                <Image
+                  source={require('../../../assets/images/pan-empty-state.png')}
+                  style={styles.emptyPanImage}
+                  resizeMode="contain"
+                />
               </View>
               <Text style={styles.emptyTitle}>No Orders!</Text>
               <Text style={styles.emptySubtitle}>{getEmptyStateMessage()}</Text>
@@ -694,8 +726,6 @@ export default function RestaurantDashboard() {
             </TouchableOpacity>
           </View>
         </View>
-
-        <View style={{ height: 40 }} />
       </ScrollView>
 
       {/* More Options Menu Modal Overlay */}
@@ -812,6 +842,360 @@ export default function RestaurantDashboard() {
         </TouchableOpacity>
       </Modal>
 
+      {/* 7. "YOU HAVE A NEW ORDER" POPUP BANNER (FIGMA NODE 3061:150) */}
+      {newOrders.length > 0 && (
+        <Animated.View style={[styles.newOrderPopupContainer, { bottom: insets.bottom + 8 }]}>
+          <TouchableOpacity
+            activeOpacity={0.88}
+            style={styles.newOrderPopupCard}
+            onPress={() => {
+              setSelectedNewOrder(newOrders[0]);
+              setShowNewOrderModal(true);
+            }}
+          >
+            <Image
+              source={require('../../../assets/images/new-order-hand-bag.png')}
+              style={styles.newOrderHandBagImage}
+              resizeMode="contain"
+            />
+
+            <Text style={styles.newOrderPopupTitle}>
+              You have a new order
+            </Text>
+
+            <Image
+              source={require('../../../assets/images/new-order-arrow.png')}
+              style={styles.newOrderArrowImage}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
+      {/* 8. NEW INCOMING ORDER REVIEW & ACCEPT SCREEN (FIGMA NODE 3061:179) */}
+      <Modal
+        visible={showNewOrderModal && !!selectedNewOrder}
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setShowNewOrderModal(false)}
+      >
+        <View
+          style={[
+            styles.incomingOrderScreenContainer,
+            {
+              paddingTop: Math.max(insets.top, Platform.OS === 'ios' ? 52 : (StatusBar.currentHeight || 28)),
+              paddingBottom: Math.max(insets.bottom, 16),
+            },
+          ]}
+        >
+          <StatusBar barStyle="light-content" backgroundColor="#000000" translucent />
+          
+          {selectedNewOrder && (
+            <View style={{ flex: 1 }}>
+              {/* TOP HEADER */}
+              <View style={styles.incomingOrderHeader}>
+                <View style={styles.incomingHeaderLeft}>
+                  <TouchableOpacity
+                    onPress={() => setShowNewOrderModal(false)}
+                    style={styles.incomingBackBtn}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="arrow-back" size={24} color="#F2CA50" />
+                  </TouchableOpacity>
+
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <View style={styles.incomingOrderIdRow}>
+                      <Text style={styles.incomingOrderIdPrefix}>
+                        #{selectedNewOrder.id.length > 8 ? selectedNewOrder.id.slice(0, 11) + '-' : selectedNewOrder.id + '-'}
+                      </Text>
+                      <Text style={styles.incomingOrderIdHighlight}>
+                        {selectedNewOrder.id.slice(-4) || '1956'}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.incomingOrderMetaText}>
+                      {formatTime(selectedNewOrder.timestamp)} | {selectedNewOrder.items.reduce((s, it) => s + it.qty, 0)} items for ₹{selectedNewOrder.total.toFixed(2)}
+                    </Text>
+
+                    <View style={styles.incomingNewBadge}>
+                      <Text style={styles.incomingNewBadgeText}>NEW</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowNewOrderModal(false);
+                    router.push('/help-support');
+                  }}
+                  activeOpacity={0.8}
+                  style={styles.incomingHelpBtn}
+                >
+                  <Text style={styles.incomingHelpText}>HELP</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* SCROLLABLE CARDS CONTENT */}
+              <ScrollView
+                style={styles.incomingOrderScroll}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 24 }}
+              >
+                {/* CARD 1: CUSTOMER DETAILS */}
+                <View style={styles.customerCardContainer}>
+                  <Image
+                    source={require('../../../assets/images/order-user-badge.png')}
+                    style={styles.customerUserBadgeImage}
+                    resizeMode="contain"
+                  />
+                  <Text style={styles.customerCardNameText}>
+                    Order from {selectedNewOrder.customer}
+                  </Text>
+                  <TouchableOpacity activeOpacity={0.8} style={styles.customerPhoneBtn}>
+                    <Image
+                      source={require('../../../assets/images/order-phone-icon.png')}
+                      style={styles.customerPhoneImage}
+                      resizeMode="contain"
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {/* CARD 2: OUTLET / RESTAURANT LOCATION */}
+                <View style={styles.locationCardContainer}>
+                  <Image
+                    source={require('../../../assets/images/order-location-badge.png')}
+                    style={styles.locationBadgeImage}
+                    resizeMode="contain"
+                  />
+                  <View style={styles.locationCardTextWrapper}>
+                    <Text style={styles.locationCardTitle}>
+                      {restaurantProfile?.restaurantName || 'Restaurant Outlet'}
+                    </Text>
+                    <Text style={styles.locationCardAddress}>
+                      {restaurantProfile?.restaurantAddress || [restaurantProfile?.city, restaurantProfile?.state, restaurantProfile?.postalCode].filter(Boolean).join(', ') || 'Outlet Location'}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* CARD 3: ITEM DETAILS */}
+                <View style={styles.itemDetailsCardContainer}>
+                  <View style={styles.itemDetailsCardHeader}>
+                    <Text style={styles.itemDetailsCardTitle}>Item Details</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#333333" />
+                  </View>
+
+                  <View style={styles.itemCardDivider} />
+
+                  {/* Items List */}
+                  {selectedNewOrder.items.map((item, idx) => (
+                    <React.Fragment key={idx}>
+                      <View style={styles.itemRowContainer}>
+                        <Image
+                          source={
+                            item.isVeg === false
+                              ? require('../../../assets/images/order-nonveg-badge.png')
+                              : require('../../../assets/images/order-veg-badge.png')
+                          }
+                          style={styles.foodTypeBadge}
+                          resizeMode="contain"
+                        />
+
+                        <View style={styles.itemRowTextWrapper}>
+                          <Text style={styles.itemRowName}>{item.name}</Text>
+                          {!!(item.category || item.addonsText) && (
+                            <Text style={styles.itemRowCategory}>{item.category || item.addonsText}</Text>
+                          )}
+                        </View>
+
+                        <View style={styles.itemRowRightSection}>
+                          <Text style={styles.itemRowQty}>
+                            x <Text style={styles.itemRowQtyNumber}>{item.qty}</Text>
+                          </Text>
+                          <Text style={styles.itemRowPrice}>₹{(item.price * item.qty).toFixed(2)}</Text>
+                        </View>
+                      </View>
+
+                      {idx < selectedNewOrder.items.length - 1 && (
+                        <View style={styles.itemCardDivider} />
+                      )}
+                    </React.Fragment>
+                  ))}
+
+                  {/* Cooking Request Sub-Card (Rendered only if customer requested) */}
+                  {!!selectedNewOrder.cookingInstruction && (
+                    <View style={styles.cookingRequestSubCard}>
+                      <Image
+                        source={require('../../../assets/images/order-chef-avatar.png')}
+                        style={styles.cookingChefAvatar}
+                        resizeMode="contain"
+                      />
+                      <View style={styles.cookingRequestTextWrapper}>
+                        <Text style={styles.cookingRequestTitle}>
+                          Cooking Request from {selectedNewOrder.customer}
+                        </Text>
+                        <Text style={styles.cookingRequestInstruction}>
+                          {selectedNewOrder.cookingInstruction}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                {/* CARD 4: SUGGESTED PREP TIME & ACTION BUTTONS */}
+                <View style={styles.prepTimeCardContainer}>
+                  <View style={styles.prepTimeTopRow}>
+                    <ImageBackground
+                      source={require('../../../assets/images/order-prep-timer-ring.png')}
+                      style={styles.prepTimerRingBg}
+                      resizeMode="contain"
+                    >
+                      <Text style={styles.prepTimerNumber}>{prepTime}</Text>
+                      <Text style={styles.prepTimerMinsText}>mins</Text>
+                    </ImageBackground>
+
+                    <View style={styles.prepTimeTextWrapper}>
+                      <Text style={styles.prepTimeTitle}>Suggested Prep Time</Text>
+                      <Text style={styles.prepTimeDescription}>
+                        Based on your past orders. Driver will arrive accordingly to ensure on-time and fresh delivery.
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setTempPrepTime(prepTime);
+                        setShowPrepTimeModal(true);
+                      }}
+                      style={styles.prepTimeChangeBtn}
+                    >
+                      <Text style={styles.prepTimeChangeText}>Change</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.prepCardDivider} />
+
+                  {/* ACTION BUTTONS */}
+                  <View style={styles.orderActionsRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      style={styles.outOfStockBtn}
+                      onPress={() => {
+                        updateOrderStatus(selectedNewOrder.id, 'Rejected');
+                        setShowNewOrderModal(false);
+                        setSelectedNewOrder(null);
+                      }}
+                    >
+                      <Text style={styles.outOfStockBtnText}>OUT OF STOCK?</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      activeOpacity={0.88}
+                      style={styles.confirmNowBtn}
+                      onPress={() => {
+                        updateOrderStatus(selectedNewOrder.id, 'Preparing');
+                        setShowNewOrderModal(false);
+                        setSelectedNewOrder(null);
+                      }}
+                    >
+                      <Text style={styles.confirmNowBtnText}>CONFIRM NOW</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </ScrollView>
+            </View>
+          )}
+
+          {/* 9. CHANGE PREPARATION TIME BOTTOM SHEET OVERLAY (FIGMA NODE 3061:266) */}
+          {showPrepTimeModal && (
+            <View style={StyleSheet.absoluteFillObject}>
+              <TouchableOpacity
+                style={styles.prepModalBackdropTouchable}
+                activeOpacity={1}
+                onPress={() => setShowPrepTimeModal(false)}
+              />
+              <View style={[styles.prepBottomSheetContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+                {/* Golden Drag Handle */}
+                <View style={styles.prepDragHandle} />
+
+                {/* Title & Subtitle */}
+                <Text style={styles.prepModalTitle}>Change Preparation Time</Text>
+                <Text style={styles.prepModalSubtitle}>
+                  Faster preparation leads to better{'\n'}customer ratings and more orders
+                </Text>
+
+                {/* Woman Chef Avatar */}
+                <Image
+                  source={require('../../../assets/images/prep-time-avatar.png')}
+                  style={styles.prepModalAvatar}
+                  resizeMode="contain"
+                />
+
+                {/* Time Adjuster Row */}
+                <View style={styles.prepAdjusterRow}>
+                  {/* Minus Button */}
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => setTempPrepTime((prev) => Math.max(5, prev - 1))}
+                    style={styles.prepCircleBtn}
+                  >
+                    <Image
+                      source={require('../../../assets/images/prep-time-minus.png')}
+                      style={styles.prepCircleIcon}
+                      resizeMode="contain"
+                    />
+                  </TouchableOpacity>
+
+                  {/* Central Time Pill */}
+                  <View style={styles.prepTimePill}>
+                    <Text style={styles.prepTimePillText}>{tempPrepTime} MINS</Text>
+                  </View>
+
+                  {/* Plus Button */}
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => setTempPrepTime((prev) => Math.min(15, prev + 1))}
+                    style={styles.prepCircleBtn}
+                  >
+                    <Image
+                      source={require('../../../assets/images/prep-time-plus.png')}
+                      style={styles.prepCircleIcon}
+                      resizeMode="contain"
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Suggested Label */}
+                <Text style={styles.prepSuggestedLabel}>Suggested</Text>
+
+                {/* Action Buttons Row */}
+                <View style={styles.prepModalActionsRow}>
+                  {/* Cancel Button */}
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => setShowPrepTimeModal(false)}
+                    style={styles.prepCancelBtn}
+                  >
+                    <Text style={styles.prepCancelBtnText}>CANCEL</Text>
+                  </TouchableOpacity>
+
+                  {/* Done Button */}
+                  <TouchableOpacity
+                    activeOpacity={0.88}
+                    onPress={() => {
+                      setPrepTime(tempPrepTime);
+                      setShowPrepTimeModal(false);
+                    }}
+                    style={styles.prepDoneBtn}
+                  >
+                    <Text style={styles.prepDoneBtnText}>DONE</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -819,7 +1203,7 @@ export default function RestaurantDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0E0C0A',
+    backgroundColor: '#000000',
   },
 
   /* TOP BAR */
@@ -829,7 +1213,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 10,
-    backgroundColor: '#0E0C0A',
+    backgroundColor: '#000000',
   },
   statusPill: {
     flexDirection: 'row',
@@ -872,7 +1256,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    backgroundColor: '#0E0C0A',
+    backgroundColor: '#000000',
   },
   helpText: {
     fontSize: 12,
@@ -915,7 +1299,7 @@ const styles = StyleSheet.create({
 
   /* HERO CARD — OFFLINE STATE */
   heroCard: {
-    backgroundColor: '#0E0C0A',
+    backgroundColor: '#000000',
     paddingVertical: 8,
     marginTop: 12,
     marginBottom: 14,
@@ -1023,10 +1407,10 @@ const styles = StyleSheet.create({
     color: '#F2CA50',
   },
   exploreArrowCircle: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#F2CA50',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#000000',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1566,7 +1950,7 @@ const styles = StyleSheet.create({
     borderColor: '#2E2923',
     borderRadius: 20,
     padding: 16,
-    marginBottom: 14,
+    marginBottom: 6,
   },
   shortcutsHeaderTitle: {
     fontSize: 11,
@@ -1725,5 +2109,545 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     fontSize: 14.5,
     color: '#EAE1D4',
+  },
+
+  /* Empty Pan Illustration */
+  emptyPanWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    height: 130,
+    width: '100%',
+  },
+  emptyPanImage: {
+    width: 240,
+    height: 130,
+  },
+
+  /* "You have a new order" Popup Banner (Figma Node 3061:150) */
+  newOrderPopupContainer: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    zIndex: 999,
+  },
+  newOrderPopupCard: {
+    backgroundColor: '#090909',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1F1F1F',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    height: 82,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.8,
+    shadowRadius: 16,
+    elevation: 18,
+  },
+  newOrderHandBagImage: {
+    width: 68,
+    height: 58,
+  },
+  newOrderPopupTitle: {
+    flex: 1,
+    marginLeft: 16,
+    fontSize: 18.5,
+    fontFamily: 'Urbanist-ExtraBold',
+    fontWeight: '900',
+    color: '#D0D0D0',
+    letterSpacing: -0.2,
+  },
+  newOrderArrowImage: {
+    width: 28,
+    height: 20,
+    marginRight: 4,
+  },
+
+  /* Incoming Order Review Screen (Figma Node 3061:179) */
+  incomingOrderScreenContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  incomingOrderHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: '#000000',
+  },
+  incomingHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+  },
+  incomingBackBtn: {
+    paddingTop: 4,
+    paddingRight: 4,
+  },
+  incomingOrderIdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  incomingOrderIdPrefix: {
+    fontSize: 20,
+    fontFamily: 'Urbanist-ExtraBold',
+    fontWeight: '800',
+    color: '#CECECE',
+  },
+  incomingOrderIdHighlight: {
+    fontSize: 20,
+    fontFamily: 'Urbanist-ExtraBold',
+    fontWeight: '800',
+    color: '#C49829',
+  },
+  incomingOrderMetaText: {
+    fontSize: 13,
+    fontFamily: 'Urbanist-Regular',
+    color: '#9A9A9A',
+    marginTop: 4,
+  },
+  incomingNewBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#000001',
+    borderWidth: 1,
+    borderColor: '#B7831E',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    marginTop: 6,
+  },
+  incomingNewBadgeText: {
+    fontSize: 11,
+    fontFamily: 'Urbanist-ExtraBold',
+    fontWeight: '800',
+    color: '#AB8627',
+    letterSpacing: 0.5,
+  },
+  incomingHelpBtn: {
+    paddingTop: 4,
+    paddingHorizontal: 6,
+  },
+  incomingHelpText: {
+    fontSize: 14,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#AB8525',
+    letterSpacing: 0.5,
+  },
+  incomingOrderScroll: {
+    flex: 1,
+  },
+  customerCardContainer: {
+    backgroundColor: '#0B0B0B',
+    borderWidth: 1.5,
+    borderColor: '#161616',
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  customerUserBadgeImage: {
+    width: 38,
+    height: 38,
+  },
+  customerCardNameText: {
+    flex: 1,
+    marginLeft: 14,
+    fontSize: 15.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#BEBEBE',
+  },
+  customerPhoneBtn: {
+    padding: 6,
+  },
+  customerPhoneImage: {
+    width: 22,
+    height: 22,
+  },
+  locationCardContainer: {
+    backgroundColor: '#0B0B0B',
+    borderWidth: 1,
+    borderColor: '#131313',
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  locationBadgeImage: {
+    width: 38,
+    height: 38,
+    marginTop: 2,
+  },
+  locationCardTextWrapper: {
+    flex: 1,
+    marginLeft: 14,
+  },
+  locationCardTitle: {
+    fontSize: 16,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#C8C8C8',
+    marginBottom: 3,
+  },
+  locationCardAddress: {
+    fontSize: 12.5,
+    fontFamily: 'Urbanist-Regular',
+    color: '#838383',
+    lineHeight: 17,
+  },
+  itemDetailsCardContainer: {
+    backgroundColor: '#0B0B0B',
+    borderWidth: 1.5,
+    borderColor: '#151515',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
+    marginBottom: 10,
+  },
+  itemDetailsCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  itemDetailsCardTitle: {
+    fontSize: 16,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#D0D0D0',
+  },
+  itemCardDivider: {
+    height: 1,
+    backgroundColor: '#161616',
+    marginVertical: 10,
+  },
+  itemRowContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 4,
+  },
+  foodTypeBadge: {
+    width: 16,
+    height: 16,
+    marginTop: 3,
+    marginRight: 10,
+  },
+  itemRowTextWrapper: {
+    flex: 1,
+  },
+  itemRowName: {
+    fontSize: 15,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#CACACA',
+  },
+  itemRowCategory: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Regular',
+    color: '#767676',
+    marginTop: 2,
+  },
+  itemRowRightSection: {
+    alignItems: 'flex-end',
+    marginLeft: 12,
+  },
+  itemRowQty: {
+    fontSize: 13,
+    fontFamily: 'Urbanist-Bold',
+    color: '#ABABAB',
+  },
+  itemRowQtyNumber: {
+    fontSize: 15,
+    fontFamily: 'Urbanist-Bold',
+    color: '#C6C6C6',
+  },
+  itemRowPrice: {
+    fontSize: 13.5,
+    fontFamily: 'Urbanist-Bold',
+    color: '#8C8C8C',
+    marginTop: 2,
+  },
+  cookingRequestSubCard: {
+    backgroundColor: '#0B0B0B',
+    borderWidth: 1,
+    borderColor: '#4D4020',
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginTop: 12,
+  },
+  cookingChefAvatar: {
+    width: 36,
+    height: 36,
+    marginRight: 12,
+  },
+  cookingRequestTextWrapper: {
+    flex: 1,
+  },
+  cookingRequestTitle: {
+    fontSize: 13.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#C8C8C8',
+  },
+  cookingRequestInstruction: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Regular',
+    color: '#848484',
+    marginTop: 2,
+  },
+  prepTimeCardContainer: {
+    backgroundColor: '#0B0B0A',
+    borderWidth: 1,
+    borderColor: '#0C0C0C',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 16,
+    marginBottom: 20,
+  },
+  prepTimeTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  prepTimerRingBg: {
+    width: 60,
+    height: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  prepTimerNumber: {
+    fontSize: 22,
+    fontFamily: 'Urbanist-ExtraBold',
+    fontWeight: '900',
+    color: '#C49621',
+    lineHeight: 24,
+  },
+  prepTimerMinsText: {
+    fontSize: 10.5,
+    fontFamily: 'Urbanist-Regular',
+    color: '#9E9E9E',
+    marginTop: -2,
+  },
+  prepTimeTextWrapper: {
+    flex: 1,
+    marginLeft: 14,
+    marginRight: 8,
+  },
+  prepTimeTitle: {
+    fontSize: 14.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#C7C7C7',
+    marginBottom: 3,
+  },
+  prepTimeDescription: {
+    fontSize: 11.5,
+    fontFamily: 'Urbanist-Regular',
+    color: '#818181',
+    lineHeight: 15,
+  },
+  prepTimeChangeBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  prepTimeChangeText: {
+    fontSize: 13.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#B28E2D',
+  },
+  prepCardDivider: {
+    height: 1,
+    backgroundColor: '#161616',
+    marginVertical: 14,
+  },
+  orderActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  outOfStockBtn: {
+    flex: 1,
+    height: 50,
+    backgroundColor: '#090909',
+    borderWidth: 1,
+    borderColor: '#614C21',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  outOfStockBtnText: {
+    fontSize: 13.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#A88329',
+    letterSpacing: 0.2,
+  },
+  confirmNowBtn: {
+    flex: 1,
+    height: 50,
+    backgroundColor: '#D09A1B',
+    borderWidth: 1,
+    borderColor: '#B38C2F',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  confirmNowBtnText: {
+    fontSize: 14,
+    fontFamily: 'Urbanist-ExtraBold',
+    fontWeight: '900',
+    color: '#382506',
+    letterSpacing: 0.2,
+  },
+
+  /* CHANGE PREPARATION TIME MODAL (FIGMA NODE 3061:266) */
+  prepModalBackdropTouchable: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+  },
+  prepBottomSheetContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#070707',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 1,
+    borderColor: '#1C1C1C',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    alignItems: 'center',
+  },
+  prepDragHandle: {
+    width: 50,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#C49829',
+    marginBottom: 18,
+  },
+  prepModalTitle: {
+    color: '#D0D0D0',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: 'Urbanist-Bold',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  prepModalSubtitle: {
+    color: '#7A7A7A',
+    fontSize: 13,
+    fontWeight: '400',
+    fontFamily: 'Urbanist-Regular',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  prepModalAvatar: {
+    width: 120,
+    height: 98,
+    marginBottom: 20,
+  },
+  prepAdjusterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+    width: '100%',
+  },
+  prepCircleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  prepCircleIcon: {
+    width: 44,
+    height: 44,
+  },
+  prepTimePill: {
+    backgroundColor: '#0B0B0B',
+    borderWidth: 1,
+    borderColor: '#735F29',
+    borderRadius: 30,
+    paddingVertical: 10,
+    paddingHorizontal: 28,
+    marginHorizontal: 16,
+    minWidth: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  prepTimePillText: {
+    color: '#D9D9D9',
+    fontSize: 19,
+    fontWeight: '700',
+    fontFamily: 'Urbanist-Bold',
+    letterSpacing: 0.5,
+  },
+  prepSuggestedLabel: {
+    color: '#757575',
+    fontSize: 12,
+    fontWeight: '400',
+    fontFamily: 'Urbanist-Regular',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  prepModalActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 12,
+  },
+  prepCancelBtn: {
+    flex: 1,
+    height: 48,
+    backgroundColor: '#0B0B0B',
+    borderWidth: 1,
+    borderColor: '#665529',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  prepCancelBtnText: {
+    color: '#B79131',
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: 'Urbanist-Bold',
+    letterSpacing: 0.5,
+  },
+  prepDoneBtn: {
+    flex: 1,
+    height: 48,
+    backgroundColor: '#E4AC20',
+    borderWidth: 1,
+    borderColor: '#BF9A37',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  prepDoneBtnText: {
+    color: '#3C2808',
+    fontSize: 15,
+    fontWeight: '700',
+    fontFamily: 'Urbanist-Bold',
+    letterSpacing: 0.5,
   },
 });
