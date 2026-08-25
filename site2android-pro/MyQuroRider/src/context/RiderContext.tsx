@@ -609,11 +609,22 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } else if (activeTrip.status === 'ARRIVED_AT_PICKUP') {
         nextStatus = 'TRIP_IN_PROGRESS';
       } else if (activeTrip.status === 'TRIP_IN_PROGRESS') {
+        nextStatus = 'COMPLETED';
+      } else if (activeTrip.status === 'COMPLETED') {
         setActiveTrip(null);
         setChatMessages([]);
         return;
       }
       setActiveTrip({ ...activeTrip, status: nextStatus });
+      return;
+    }
+
+    if (activeTrip.status === 'COMPLETED') {
+      setActiveTrip(null);
+      setChatMessages([]);
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
       return;
     }
 
@@ -642,11 +653,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       if (res.ok) {
         if (nextStatus === 'delivered') {
-          setActiveTrip(null);
-          setChatMessages([]);
-          if (socketRef.current) {
-            socketRef.current.disconnect();
-          }
+          setActiveTrip({ ...activeTrip, status: 'COMPLETED' });
           fetchDashboardStats(sessionToken);
           fetchRiderProfile(sessionToken);
         } else {

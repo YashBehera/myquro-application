@@ -695,7 +695,7 @@ export const ActiveTripCard: React.FC = () => {
 
   const earningsAmount = activeTrip.id.startsWith('demo_order_') ? 22 : (Math.round(activeTrip.fareAmount * 0.3) || 22);
 
-  if (showEarningsScreen) {
+  if (showEarningsScreen || activeTrip.status === 'COMPLETED') {
     return (
       <View style={styles.earningsContainer}>
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
@@ -1079,7 +1079,10 @@ export const ActiveTripCard: React.FC = () => {
             ]}
             activeOpacity={0.9}
             disabled={activeTrip.paymentMode === 'COD' && !cashCollected}
-            onPress={() => setShowEarningsScreen(true)}
+            onPress={() => {
+              setShowEarningsScreen(true);
+              advanceTripStatus();
+            }}
           >
             <Ionicons 
               name="checkmark-circle" 

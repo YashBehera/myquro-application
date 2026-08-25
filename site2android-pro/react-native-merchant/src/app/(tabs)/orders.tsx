@@ -140,6 +140,58 @@ export default function LiveOrdersTabScreen() {
                       ))}
                     </View>
 
+                    {/* Delivery / Rider Assignment Status Notification */}
+                    {!order.tableNumber && (
+                      <View style={styles.deliveryStatusContainer}>
+                        {order.status === 'New' ? (
+                          <View style={[styles.deliveryStatusBadge, styles.deliveryPendingBadge]}>
+                            <Ionicons name="bicycle-outline" size={14} color="#8E8E8E" />
+                            <Text style={styles.deliveryPendingText}>
+                              Delivery rider is yet to be assigned <Text style={styles.deliverySubNote}>(Accept to dispatch)</Text>
+                            </Text>
+                          </View>
+                        ) : order.riderName ? (
+                          <View style={[styles.deliveryStatusBadge, styles.deliveryAssignedBadge]}>
+                            <View style={styles.riderAvatarMini}>
+                              <Ionicons
+                                name={
+                                  order.deliveryStatus === 'arrived_at_store'
+                                    ? 'location'
+                                    : order.deliveryStatus === 'picked_up' || order.status === 'Picked up'
+                                    ? 'checkmark-circle'
+                                    : 'bicycle'
+                                }
+                                size={12}
+                                color="#000000"
+                              />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.deliveryRiderTitle}>
+                                Delivery Partner <Text style={styles.deliveryRiderHighlight}>{order.riderName}</Text>{' '}
+                                {order.deliveryStatus === 'arrived_at_store'
+                                  ? 'has arrived at restaurant'
+                                  : order.deliveryStatus === 'picked_up' || order.status === 'Picked up'
+                                  ? 'picked up order • Out for delivery'
+                                  : order.status === 'Ready'
+                                  ? 'is assigned • Awaiting food pickup'
+                                  : 'is assigned • On the way'}
+                              </Text>
+                              {order.riderPhone ? (
+                                <Text style={styles.deliveryRiderPhone}>📞 {order.riderPhone}</Text>
+                              ) : null}
+                            </View>
+                          </View>
+                        ) : (
+                          <View style={[styles.deliveryStatusBadge, styles.deliverySearchingBadge]}>
+                            <Ionicons name="sync-outline" size={13} color="#E8C547" />
+                            <Text style={styles.deliverySearchingText}>
+                              Delivery partner is being assigned...
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
                     <View style={styles.divider} />
 
                     {/* Actions and Status Row */}
@@ -378,6 +430,76 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '400',
     color: '#FFFFFF',
+  },
+  deliveryStatusContainer: {
+    marginTop: 8,
+    marginBottom: 2,
+  },
+  deliveryStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 7,
+    borderWidth: 1,
+    gap: 6,
+  },
+  deliveryPendingBadge: {
+    backgroundColor: '#121212',
+    borderColor: '#242424',
+  },
+  deliveryPendingText: {
+    fontSize: 11,
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+    color: '#A0A0A0',
+    flex: 1,
+  },
+  deliverySubNote: {
+    color: '#666666',
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 10.5,
+  },
+  deliveryAssignedBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  riderAvatarMini: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deliveryRiderTitle: {
+    fontSize: 11.5,
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+    color: '#E0E0E0',
+    lineHeight: 15,
+  },
+  deliveryRiderHighlight: {
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#10B981',
+  },
+  deliveryRiderPhone: {
+    fontSize: 10.5,
+    fontFamily: 'Urbanist-Medium',
+    color: '#94A3B8',
+    marginTop: 1,
+  },
+  deliverySearchingBadge: {
+    backgroundColor: 'rgba(232, 197, 71, 0.08)',
+    borderColor: 'rgba(232, 197, 71, 0.3)',
+  },
+  deliverySearchingText: {
+    fontSize: 11,
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+    color: '#E8C547',
+    flex: 1,
   },
   footerRow: {
     flexDirection: 'row',

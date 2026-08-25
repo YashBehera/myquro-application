@@ -14,6 +14,8 @@ import { restaurants } from "../db/schema/restaurants.js";
 import { restaurantManagers } from "../db/schema/restaurant-managers.js";
 import { authUsers } from "../db/schema/auth-users.js";
 import { authSessions } from "../db/schema/auth-sessions.js";
+import { orderDeliveries } from "../db/schema/order-deliveries.js";
+import { deliveryRiders } from "../db/schema/delivery-riders.js";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
 
 import { nanoid } from "nanoid";
@@ -1653,6 +1655,28 @@ router.get(
         orderItemCounts = counts.map(c => ({ orderId: c.orderId || '', count: Number(c.count) }));
       }
 
+      // Fetch delivery partner assignments for all orders
+      let allDeliveries: any[] = [];
+      if (orderIds.length > 0) {
+        try {
+          allDeliveries = await db
+            .select({
+              orderId: orderDeliveries.orderId,
+              deliveryId: orderDeliveries.id,
+              deliveryStatus: orderDeliveries.status,
+              etaMinutes: orderDeliveries.etaMinutes,
+              riderId: orderDeliveries.riderId,
+              riderName: deliveryRiders.name,
+              riderPhone: deliveryRiders.phone,
+            })
+            .from(orderDeliveries)
+            .leftJoin(deliveryRiders, eq(orderDeliveries.riderId, deliveryRiders.id))
+            .where(inArray(orderDeliveries.orderId, orderIds));
+        } catch (delErr) {
+          console.warn("[DEBUG] Error fetching delivery assignments:", delErr);
+        }
+      }
+
 
 
       // Group items by order
@@ -1667,9 +1691,17 @@ router.get(
           };
         }
 
+        const del = allDeliveries.find(d => d.orderId === order.id);
+        const isDeliveryOrder = !order.tableId && !order.tableNumber;
+
         return {
           ...order,
           totalAmount: order.grandTotal || 0,
+          isDelivery: isDeliveryOrder,
+          deliveryStatus: del?.deliveryStatus || (isDeliveryOrder ? 'unassigned' : null),
+          riderName: del?.riderName || null,
+          riderPhone: del?.riderPhone || null,
+          etaMinutes: del?.etaMinutes || null,
           items: allOrderItems.filter(item => item.orderId === order.id).map(item => ({
             id: item.id,
             menuItemName: item.menuItemName || 'Unknown Item',

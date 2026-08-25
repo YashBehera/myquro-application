@@ -30,6 +30,12 @@ export interface Order {
   rejectionReason?: string;
   customerType: 'New' | 'Returning';
   cookingInstruction?: string;
+  tableNumber?: string | number | null;
+  isDelivery?: boolean;
+  deliveryStatus?: 'unassigned' | 'offered' | 'assigned' | 'arrived_at_store' | 'picked_up' | 'out_for_delivery' | 'delivered';
+  riderName?: string;
+  riderPhone?: string;
+  etaMinutes?: number;
 }
 
 interface OrderStore {
@@ -57,8 +63,8 @@ const mapBackendStatus = (backendStatus: string): Order['status'] => {
     case 'ready':
     case 'assigned':
     case 'arrived_at_store':
-    case 'picked_up':
       return 'Ready';
+    case 'picked_up':
     case 'out_for_delivery':
     case 'delivered':
     case 'served':
@@ -158,6 +164,13 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
           }
 
           let resolvedStatus = mapBackendStatus(bo.status);
+          if (
+            bo.deliveryStatus === 'picked_up' ||
+            bo.deliveryStatus === 'out_for_delivery' ||
+            bo.deliveryStatus === 'delivered'
+          ) {
+            resolvedStatus = 'Picked up';
+          }
           const pending = pendingStatusUpdates.get(bo.id);
           if (pending) {
             if (Date.now() - pending.timestamp < 15000) {
@@ -199,6 +212,12 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
             readyTime: bo.updatedAt,
             pickedUpTime: bo.updatedAt,
             cookingInstruction,
+            tableNumber: bo.tableNumber || null,
+            isDelivery: bo.isDelivery !== undefined ? bo.isDelivery : !bo.tableId && !bo.tableNumber,
+            deliveryStatus: bo.deliveryStatus || (!bo.tableId && !bo.tableNumber ? 'unassigned' : undefined),
+            riderName: bo.riderName || undefined,
+            riderPhone: bo.riderPhone || undefined,
+            etaMinutes: bo.etaMinutes || undefined,
           };
         });
 

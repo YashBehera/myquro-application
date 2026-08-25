@@ -506,6 +506,58 @@ export default function RestaurantDashboard() {
                     </View>
                   ) : null}
 
+                  {/* Delivery / Rider Assignment Status Notification */}
+                  {!order.tableNumber && (
+                    <View style={styles.deliveryStatusContainer}>
+                      {order.status === 'New' ? (
+                        <View style={[styles.deliveryStatusBadge, styles.deliveryPendingBadge]}>
+                          <Ionicons name="bicycle-outline" size={15} color="#A6A6A6" />
+                          <Text style={styles.deliveryPendingText}>
+                            Delivery rider is yet to be assigned <Text style={styles.deliverySubNote}>(Accept order to dispatch)</Text>
+                          </Text>
+                        </View>
+                      ) : order.riderName ? (
+                        <View style={[styles.deliveryStatusBadge, styles.deliveryAssignedBadge]}>
+                          <View style={styles.riderAvatarMini}>
+                            <Ionicons
+                              name={
+                                order.deliveryStatus === 'arrived_at_store'
+                                  ? 'location'
+                                  : order.deliveryStatus === 'picked_up' || order.status === 'Picked up'
+                                  ? 'checkmark-circle'
+                                  : 'bicycle'
+                              }
+                              size={13}
+                              color="#000000"
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.deliveryRiderTitle}>
+                              Delivery Partner <Text style={styles.deliveryRiderHighlight}>{order.riderName}</Text>{' '}
+                              {order.deliveryStatus === 'arrived_at_store'
+                                ? 'has arrived at restaurant'
+                                : order.deliveryStatus === 'picked_up' || order.status === 'Picked up'
+                                ? 'picked up order • Out for delivery'
+                                : order.status === 'Ready'
+                                ? 'is assigned • Awaiting food handover'
+                                : 'is assigned • On the way to store'}
+                            </Text>
+                            {order.riderPhone ? (
+                              <Text style={styles.deliveryRiderPhone}>📞 {order.riderPhone}</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={[styles.deliveryStatusBadge, styles.deliverySearchingBadge]}>
+                          <Ionicons name="sync-outline" size={14} color="#F2CA50" />
+                          <Text style={styles.deliverySearchingText}>
+                            Delivery Partner is being assigned...
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+
                   {/* Card Separator */}
                   <View style={styles.cardSeparator} />
 
@@ -557,7 +609,7 @@ export default function RestaurantDashboard() {
                         onPress={() => updateOrderStatus(order.id, 'Picked up')}
                       >
                         <Ionicons name="bicycle-outline" size={16} color="#0E0C0A" style={{ marginRight: 6 }} />
-                        <Text style={styles.readyBtnText}>Complete Delivery</Text>
+                        <Text style={styles.readyBtnText}>Complete Picked Up</Text>
                       </TouchableOpacity>
                     )}
 
@@ -1681,6 +1733,76 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     fontSize: 13,
     color: '#EAE1D4',
+  },
+  deliveryStatusContainer: {
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  deliveryStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 9,
+    borderWidth: 1,
+    gap: 8,
+  },
+  deliveryPendingBadge: {
+    backgroundColor: '#161410',
+    borderColor: '#2D281E',
+  },
+  deliveryPendingText: {
+    fontSize: 11.5,
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+    color: '#CCCCCC',
+    flex: 1,
+  },
+  deliverySubNote: {
+    color: '#888888',
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11,
+  },
+  deliveryAssignedBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  riderAvatarMini: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deliveryRiderTitle: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+    color: '#E0E0E0',
+    lineHeight: 16,
+  },
+  deliveryRiderHighlight: {
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#10B981',
+  },
+  deliveryRiderPhone: {
+    fontSize: 11,
+    fontFamily: 'Urbanist-Medium',
+    color: '#94A3B8',
+    marginTop: 1,
+  },
+  deliverySearchingBadge: {
+    backgroundColor: 'rgba(242, 202, 80, 0.08)',
+    borderColor: 'rgba(242, 202, 80, 0.3)',
+  },
+  deliverySearchingText: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+    color: '#F2CA50',
+    flex: 1,
   },
   totalRow: {
     flexDirection: 'row',

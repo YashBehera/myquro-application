@@ -14,7 +14,7 @@ import { operatingCities, operatingZones } from "../db/schema/rider-onboarding.j
 import { requireAuth } from "../auth/requireAuth.js";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { emitToOrder } from "../lib/socket.js";
+import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
 import { calculateSwiggyETA, seedRidersIfEmpty, startDeliverySimulation, haversineDistance } from "../lib/delivery-simulation.js";
 
 const router = Router();
@@ -1134,13 +1134,36 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
       .where(eq(orderDeliveries.orderId, orderId));
 
     if (nextDeliveryStatus === "picked_up") {
-      // Rider picked up food — order is now ready
-      await db.update(orders).set({ status: "ready", updatedAt: new Date() }).where(eq(orders.id, orderId));
-      emitToOrder(orderId, "order-status", { orderId, status: "ready" });
+      // Rider picked up food — order is now picked up / served from restaurant
+      await db.update(orders).set({ status: "served", updatedAt: new Date() }).where(eq(orders.id, orderId));
+      
+      const orderRecord = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+      if (orderRecord) {
+        emitToRestaurant(orderRecord.restaurantId, 'order-updated', {
+          orderId,
+          status: 'served',
+          deliveryStatus: 'picked_up',
+          restaurantId: orderRecord.restaurantId,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      emitToOrder(orderId, "order-status", { orderId, status: "served" });
+      emitToOrder(orderId, "order-status-update", { orderId, status: "served" });
     } else if (nextDeliveryStatus === "out_for_delivery") {
       // Rider has left the restaurant
     } else if (nextDeliveryStatus === "delivered") {
       await db.update(orders).set({ status: "served", updatedAt: new Date() }).where(eq(orders.id, orderId));
+      
+      const orderRecord = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+      if (orderRecord) {
+        emitToRestaurant(orderRecord.restaurantId, 'order-updated', {
+          orderId,
+          status: 'served',
+          deliveryStatus: 'delivered',
+          restaurantId: orderRecord.restaurantId,
+          updatedAt: new Date().toISOString()
+        });
+      }
       
       const deliveryRecord = delList[0];
       const fee = deliveryRecord.deliveryFee || 0;
@@ -1155,6 +1178,7 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
         .where(eq(deliveryRiders.id, user.id));
         
       emitToOrder(orderId, "order-status", { orderId, status: "served" });
+      emitToOrder(orderId, "order-status-update", { orderId, status: "served" });
     }
 
     const activeRider = (await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, user.id)))[0];
