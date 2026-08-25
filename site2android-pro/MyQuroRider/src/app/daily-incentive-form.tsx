@@ -23,6 +23,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 interface Message {
   id: string;
@@ -46,6 +47,35 @@ export default function DailyIncentiveFormScreen() {
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
   const [ticketStatus, setTicketStatus] = useState<'chatting' | 'submitted'>('chatting');
 
   // Load initial AI messages based on language selection
@@ -174,29 +204,7 @@ export default function DailyIncentiveFormScreen() {
   };
 
   const openUploadMenu = () => {
-    Alert.alert(
-      'Attach Incentive Screenshot',
-      'Select source from your device:',
-      [
-        {
-          text: '📷 Take Photo (Camera)',
-          onPress: () => handleSelectOption('camera'),
-        },
-        {
-          text: '🖼️ Choose from Gallery',
-          onPress: () => handleSelectOption('local'),
-        },
-        {
-          text: '📄 Browse Files / Google Drive',
-          onPress: () => handleSelectOption('drive'),
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ],
-      { cancelable: true }
-    );
+    setUploadModalVisible(true);
   };
 
   const handleSelectOption = async (optionType: 'camera' | 'local' | 'drive') => {
@@ -216,7 +224,13 @@ export default function DailyIncentiveFormScreen() {
             return;
           }
         } else {
-          Alert.alert('Permission Required', 'Camera permission is needed to capture photos.');
+          showAlertModal({
+            type: 'warning',
+            title: 'Permission Required',
+            subtitle: 'Camera permission is needed to capture screenshot photos.',
+            primaryButtonText: 'Okay',
+            onPrimaryPress: hideAlertModal,
+          });
         }
       } else if (optionType === 'local') {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -231,7 +245,13 @@ export default function DailyIncentiveFormScreen() {
             return;
           }
         } else {
-          Alert.alert('Permission Required', 'Gallery permission is needed to select photos.');
+          showAlertModal({
+            type: 'warning',
+            title: 'Permission Required',
+            subtitle: 'Gallery permission is needed to select screenshot photos.',
+            primaryButtonText: 'Okay',
+            onPrimaryPress: hideAlertModal,
+          });
         }
       } else if (optionType === 'drive') {
         const docResult = await DocumentPicker.getDocumentAsync({
@@ -439,6 +459,17 @@ export default function DailyIncentiveFormScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </KeyboardAvoidingView>
   );
 }

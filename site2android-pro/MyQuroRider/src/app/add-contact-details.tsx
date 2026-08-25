@@ -15,18 +15,47 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function AddContactDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { sessionToken, driverProfile, updateDriverProfile } = useRider();
-
+  const { driverProfile, updateDriverProfile, sessionToken } = useRider();
   const [contactName, setContactName] = useState(driverProfile.emergencyContactName || '');
   const [contactNumber, setContactNumber] = useState(driverProfile.emergencyContactPhone || '');
-  const [selectedRelationship, setSelectedRelationship] = useState<string>(
+  const [selectedRelationship, setSelectedRelationship] = useState(
     driverProfile.emergencyContactRelationship || 'spouse'
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -46,11 +75,23 @@ export default function AddContactDetailsScreen() {
 
   const handleSaveContact = async () => {
     if (!contactName.trim()) {
-      Alert.alert('Required Field', 'Please enter the emergency contact name.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Required Field',
+        subtitle: 'Please enter the emergency contact name.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
     if (!contactNumber.trim() || contactNumber.trim().length < 10) {
-      Alert.alert('Invalid Number', 'Please enter a valid 10-digit emergency contact number.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Invalid Number',
+        subtitle: 'Please enter a valid 10-digit emergency contact phone number.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -78,20 +119,28 @@ export default function AddContactDetailsScreen() {
         });
       }
 
-      Alert.alert('Success', 'Emergency contact saved successfully!', [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/emergency-contacts'),
+      showAlertModal({
+        type: 'success_online',
+        title: 'Contact Saved 🎉',
+        subtitle: 'Emergency contact details have been successfully saved.',
+        primaryButtonText: 'Done',
+        onPrimaryPress: () => {
+          hideAlertModal();
+          router.replace('/emergency-contacts');
         },
-      ]);
+      });
     } catch (e) {
       console.error('Error saving emergency contact:', e);
-      Alert.alert('Notice', 'Emergency contact saved locally.', [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/emergency-contacts'),
+      showAlertModal({
+        type: 'success_online',
+        title: 'Contact Saved',
+        subtitle: 'Emergency contact details saved locally.',
+        primaryButtonText: 'Done',
+        onPrimaryPress: () => {
+          hideAlertModal();
+          router.replace('/emergency-contacts');
         },
-      ]);
+      });
     } finally {
       setIsSaving(false);
     }
@@ -191,6 +240,17 @@ export default function AddContactDetailsScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }

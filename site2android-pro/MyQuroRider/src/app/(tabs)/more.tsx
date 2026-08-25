@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useRider } from '@/context/RiderContext';
+import { CustomAlertModal, ModalType } from '../../components/CustomAlertModal';
 
 export default function MoreScreen() {
   const router = useRouter();
@@ -27,22 +28,54 @@ export default function MoreScreen() {
     }
   };
 
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
+
   const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout? You will need to login again to go online.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/onboarding');
-          },
-        },
-      ]
-    );
+    showAlertModal({
+      type: 'shift_cancel',
+      title: 'Logout?',
+      subtitle: 'Are you sure you want to logout? You will need to login again to start shifts and go online.',
+      primaryButtonText: 'Logout',
+      onPrimaryPress: async () => {
+        hideAlertModal();
+        await logout();
+        router.replace('/onboarding');
+      },
+      secondaryButtonText: 'Cancel',
+      onSecondaryPress: hideAlertModal,
+    });
   };
 
   const menuItems = [
@@ -249,10 +282,18 @@ export default function MoreScreen() {
 
           <TouchableOpacity
             onPress={() => {
-              Alert.alert('Orders on Hold', 'You have 0 orders on hold. All assigned deliveries are clear.', [
-                { text: 'View Orders', onPress: () => router.push('/(tabs)/orders') },
-                { text: 'OK', style: 'cancel' }
-              ]);
+              showAlertModal({
+                type: 'info',
+                title: 'Orders on Hold',
+                subtitle: 'You have 0 orders on hold. All assigned deliveries are clear.',
+                primaryButtonText: 'View Orders',
+                onPrimaryPress: () => {
+                  hideAlertModal();
+                  router.push('/(tabs)/orders');
+                },
+                secondaryButtonText: 'Dismiss',
+                onSecondaryPress: hideAlertModal,
+              });
             }}
             style={styles.additionalRow}
             activeOpacity={0.8}
@@ -281,6 +322,19 @@ export default function MoreScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        secondaryButtonText={customAlert.secondaryButtonText}
+        onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }

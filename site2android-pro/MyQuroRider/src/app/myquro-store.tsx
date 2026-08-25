@@ -15,11 +15,41 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function MyQuroStoreScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -31,16 +61,36 @@ export default function MyQuroStoreScreen() {
 
   const handleNotifyMe = () => {
     if (!email) {
-      Alert.alert('Error', 'Please enter your email address');
+      showAlertModal({
+        type: 'warning',
+        title: 'Email Required',
+        subtitle: 'Please enter your email address to receive launch updates.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      Alert.alert('Error', 'Please enter a valid email address');
+      showAlertModal({
+        type: 'warning',
+        title: 'Invalid Email',
+        subtitle: 'Please enter a valid email address (e.g. name@example.com).',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
-    Alert.alert('Success', "Thank you! We'll notify you as soon as we launch.");
-    setEmail('');
+    showAlertModal({
+      type: 'success_online',
+      title: 'Subscribed 🎉',
+      subtitle: "Thank you! We'll notify you as soon as MyQuro Store goes live in your city.",
+      primaryButtonText: 'Done',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        setEmail('');
+      },
+    });
   };
 
   return (
@@ -160,6 +210,17 @@ export default function MyQuroStoreScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </KeyboardAvoidingView>
   );
 }

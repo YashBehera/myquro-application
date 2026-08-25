@@ -72,7 +72,9 @@ export default function EarningsScreen() {
 
           {/* Amount & 3D Gold Lock */}
           <View style={styles.earningsAmountRow}>
-            <Text style={styles.earningsAmountText}>₹{weeklyEarnings}</Text>
+            <Text style={styles.earningsAmountText}>
+              ₹{Number(weeklyEarnings || 0).toFixed(2)}
+            </Text>
             <Image
               source={require('../../../assets/images/3d_gold_lock_icon.png')}
               style={styles.goldLockImage}

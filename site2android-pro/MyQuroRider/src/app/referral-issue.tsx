@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function ReferralIssueScreen() {
   const router = useRouter();
@@ -27,6 +28,35 @@ export default function ReferralIssueScreen() {
   const { sessionToken } = useRider();
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   const handleBack = () => {
     Keyboard.dismiss();
@@ -40,7 +70,13 @@ export default function ReferralIssueScreen() {
   const handleSubmit = async () => {
     Keyboard.dismiss();
     if (!description.trim()) {
-      Alert.alert('Error', 'Please describe the issue before submitting.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Description Required',
+        subtitle: 'Please describe the referral bonus issue before submitting.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -72,14 +108,16 @@ export default function ReferralIssueScreen() {
     }
 
     setIsSubmitting(false);
-    Alert.alert('Ticket Raised', `Your referral bonus ticket (#${ticketId}) has been submitted successfully. Our team will verify and resolve it within 2-4 hours.`, [
-      {
-        text: 'OK',
-        onPress: () => {
-          router.replace('/payout-issue');
-        },
+    showAlertModal({
+      type: 'success_online',
+      title: 'Ticket Raised 🎉',
+      subtitle: `Your referral bonus ticket (#${ticketId}) has been submitted successfully. Our team will verify and resolve it within 2-4 hours.`,
+      primaryButtonText: 'Done',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        router.replace('/payout-issue');
       },
-    ]);
+    });
   };
 
   return (
@@ -135,6 +173,17 @@ export default function ReferralIssueScreen() {
             </LinearGradient>
           </TouchableOpacity>
         </View>
+
+        {/* REUSABLE CUSTOM ALERT UI MODAL */}
+        <CustomAlertModal
+          visible={customAlert.visible}
+          type={customAlert.type}
+          title={customAlert.title}
+          subtitle={customAlert.subtitle}
+          primaryButtonText={customAlert.primaryButtonText}
+          onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+          onClose={hideAlertModal}
+        />
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );

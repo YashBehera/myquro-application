@@ -17,6 +17,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function AddBankAccountScreen() {
   const router = useRouter();
@@ -28,6 +29,35 @@ export default function AddBankAccountScreen() {
   const [bankName, setBankName] = useState(driverProfile.bankName || '');
   const [ifscCode, setIfscCode] = useState(driverProfile.bankIfsc || '');
   const [isVerifying, setIsVerifying] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -39,15 +69,33 @@ export default function AddBankAccountScreen() {
 
   const handleVerifyBankDetails = async () => {
     if (!accountNumber.trim()) {
-      Alert.alert('Account Number Required', 'Please enter your bank account number.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Account Number Required',
+        subtitle: 'Please enter your bank account number.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
     if (accountNumber.trim() !== reAccountNumber.trim()) {
-      Alert.alert('Account Number Mismatch', 'Account number and confirmation do not match.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Account Number Mismatch',
+        subtitle: 'Account number and confirmation do not match. Please re-enter carefully.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
     if (!ifscCode.trim() || ifscCode.trim().length < 8) {
-      Alert.alert('Invalid IFSC', 'Please enter a valid IFSC code (e.g. HDFC0001234).');
+      showAlertModal({
+        type: 'warning',
+        title: 'Invalid IFSC',
+        subtitle: 'Please enter a valid IFSC code (e.g. HDFC0001234).',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -78,24 +126,28 @@ export default function AddBankAccountScreen() {
         });
       }
 
-      Alert.alert(
-        'Bank Account Verified',
-        'Your bank account details have been successfully verified and linked.',
-        [
-          {
-            text: 'View Bank Details',
-            onPress: () => router.replace('/bank-details'),
-          },
-        ]
-      );
+      showAlertModal({
+        type: 'success_online',
+        title: 'Bank Account Verified 🎉',
+        subtitle: 'Your bank account details have been successfully verified and linked.',
+        primaryButtonText: 'View Bank Details',
+        onPrimaryPress: () => {
+          hideAlertModal();
+          router.replace('/bank-details');
+        },
+      });
     } catch (e) {
       console.error('Error saving bank account:', e);
-      Alert.alert('Success', 'Bank details saved locally.', [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/bank-details'),
+      showAlertModal({
+        type: 'success_online',
+        title: 'Details Saved',
+        subtitle: 'Bank account details saved locally.',
+        primaryButtonText: 'Done',
+        onPrimaryPress: () => {
+          hideAlertModal();
+          router.replace('/bank-details');
         },
-      ]);
+      });
     } finally {
       setIsVerifying(false);
     }
@@ -230,6 +282,17 @@ export default function AddBankAccountScreen() {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* REUSABLE CUSTOM ALERT UI MODAL */}
+        <CustomAlertModal
+          visible={customAlert.visible}
+          type={customAlert.type}
+          title={customAlert.title}
+          subtitle={customAlert.subtitle}
+          primaryButtonText={customAlert.primaryButtonText}
+          onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+          onClose={hideAlertModal}
+        />
       </View>
     </TouchableWithoutFeedback>
   );

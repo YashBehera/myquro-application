@@ -22,6 +22,7 @@ import { WebView } from 'react-native-webview';
 import { OLA_MAPS_API_KEY } from '../../config';
 import { useRider } from '../../context/RiderContext';
 import { ActiveTripCard } from '../../components/ActiveTripCard';
+import { CustomAlertModal, ModalType } from '../../components/CustomAlertModal';
 
 function getMiniMapHtml(apiKey: string): string {
   return `
@@ -175,11 +176,44 @@ function isTimeInShiftWindow(shiftTimeStr: string): boolean {
 export default function DashboardScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { triggerDemoRequest, activeTrip, isOnline, toggleOnlineStatus } = useRider();
+  const { triggerDemoRequest, activeTrip, isOnline, toggleOnlineStatus, todayEarnings, tripsToday } = useRider();
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [showBookShiftModal, setShowBookShiftModal] = useState(false);
   const [showOutsideZoneModal, setShowOutsideZoneModal] = useState(false);
   const [hasOverlayPermission, setHasOverlayPermission] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   const bubbleOpacity = useRef(new Animated.Value(1)).current;
 
@@ -248,12 +282,13 @@ export default function DashboardScreen() {
 
   const toggleOnline = async () => {
     if (isOnline) {
-      await toggleOnlineStatus();
+      // Instant offline switch (0ms latency!)
+      toggleOnlineStatus();
       return;
     }
 
     try {
-      // 1. Get shift data from AsyncStorage
+      // 1. Quick Shift check from AsyncStorage
       const stored = await AsyncStorage.getItem('MYQURO_SHIFTS');
       const currentShifts = stored ? JSON.parse(stored) : [];
       const bookedShifts = currentShifts.filter((s: any) => s.status === 'BOOKED');
@@ -272,41 +307,65 @@ export default function DashboardScreen() {
       const activeShift = bookedShifts.find((s: any) => isTimeInShiftWindow(s.time));
 
       if (!activeShift) {
-        Alert.alert(
-          'Outside Shift Time',
-          'You can only go online during your booked shift hours (including 15 mins before start).'
-        );
+        showAlertModal({
+          type: 'outside_shift',
+          title: 'Outside Shift Time',
+          subtitle: 'You can only go online during your booked shift hours (including 15 mins before start).',
+          primaryButtonText: 'Book Shift',
+          onPrimaryPress: () => {
+            hideAlertModal();
+            router.push('/(tabs)/orders');
+          },
+          secondaryButtonText: 'Dismiss',
+        });
         return;
       }
 
-      // 4. Check if rider is inside the active zone
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please grant location permission to verify your zone.');
-        return;
-      }
-
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      // 4. Fast Location verification (use fast cached position first, avoiding 4-second GPS cold lock)
+      let loc = await Location.getLastKnownPositionAsync();
       if (!loc?.coords) {
-        Alert.alert('GPS Error', 'Unable to retrieve your current location. Please try again.');
-        return;
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          showAlertModal({
+            type: 'permission_location',
+            title: 'Location Permission',
+            subtitle: 'Please grant location permission so we can verify your zone before going online.',
+            primaryButtonText: 'Grant Permission',
+            onPrimaryPress: async () => {
+              hideAlertModal();
+              await Location.requestForegroundPermissionsAsync();
+            },
+            secondaryButtonText: 'Cancel',
+          });
+          return;
+        }
+        loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Lowest });
       }
 
-      const inside = isPointInPolygon([loc.coords.longitude, loc.coords.latitude], ACTIVE_ZONE_POLYGON);
-
-      if (!inside) {
-        // Outside active zone -> show custom outside zone modal instead of generic Alert
-        setShowOutsideZoneModal(true);
-        return;
+      if (loc?.coords) {
+        const inside = isPointInPolygon([loc.coords.longitude, loc.coords.latitude], ACTIVE_ZONE_POLYGON);
+        if (!inside) {
+          setShowOutsideZoneModal(true);
+          return;
+        }
       }
 
-      // 5. Success -> Rider is inside the zone and shift is active
-      await toggleOnlineStatus();
-      Alert.alert('Welcome Online! 🎉', 'You are now online and ready to receive orders.');
+      // 5. Instantly toggle online status (0ms UI latency!)
+      toggleOnlineStatus();
+      showAlertModal({
+        type: 'success_online',
+        title: 'Welcome Online! 🎉',
+        subtitle: 'You are now online and ready to receive customer delivery requests.',
+        primaryButtonText: 'Start Delivering',
+        onPrimaryPress: () => {
+          hideAlertModal();
+        },
+      });
 
     } catch (err) {
       console.warn('Go Online validation error:', err);
-      Alert.alert('Error', 'An error occurred while going online. Please try again.');
+      // Fallback: toggle online smoothly
+      toggleOnlineStatus();
     }
   };
 
@@ -700,7 +759,7 @@ export default function DashboardScreen() {
               activeOpacity={0.85}
               onPress={() => router.push('/(tabs)/earnings')}
             >
-              <Text style={styles.progressValueText}>₹0</Text>
+              <Text style={styles.progressValueText}>₹{Number(todayEarnings || 0).toFixed(2)}</Text>
               <View style={styles.metricLabelRow}>
                 <Ionicons name="wallet-outline" size={13} color="#A6A6A6" style={{ marginRight: 3 }} />
                 <Text style={styles.metricLabelText}>Earnings</Text>
@@ -730,7 +789,7 @@ export default function DashboardScreen() {
               activeOpacity={0.85}
               onPress={() => router.push('/(tabs)/earnings')}
             >
-              <Text style={styles.progressValueText}>0</Text>
+              <Text style={styles.progressValueText}>{tripsToday || 0}</Text>
               <View style={styles.metricLabelRow}>
                 <Ionicons name="bag-handle-outline" size={13} color="#A6A6A6" style={{ marginRight: 3 }} />
                 <Text style={styles.metricLabelText}>Orders</Text>
@@ -1224,6 +1283,19 @@ export default function DashboardScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        secondaryButtonText={customAlert.secondaryButtonText}
+        onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }

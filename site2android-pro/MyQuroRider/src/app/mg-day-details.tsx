@@ -24,6 +24,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function MGDayFormScreen() {
   const router = useRouter();
@@ -37,6 +38,35 @@ export default function MGDayFormScreen() {
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<1 | 2 | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
   
   // Track uploaded file name and URI for slot 1 and slot 2
   const [slot1File, setSlot1File] = useState<string | null>(null);
@@ -55,29 +85,7 @@ export default function MGDayFormScreen() {
 
   const openUploadMenu = (slotNum: 1 | 2) => {
     setSelectedSlot(slotNum);
-    Alert.alert(
-      'Upload Proof Screenshot',
-      'Select device upload source:',
-      [
-        {
-          text: '📷 Take Photo (Camera)',
-          onPress: () => handleSelectOption('camera', slotNum),
-        },
-        {
-          text: '🖼️ Choose from Gallery',
-          onPress: () => handleSelectOption('local', slotNum),
-        },
-        {
-          text: '📄 Browse Files / Google Drive',
-          onPress: () => handleSelectOption('drive', slotNum),
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ],
-      { cancelable: true }
-    );
+    setUploadModalVisible(true);
   };
 
   const handleSelectOption = async (optionType: 'camera' | 'local' | 'drive', targetSlot?: 1 | 2 | null) => {
@@ -103,11 +111,23 @@ export default function MGDayFormScreen() {
               setSlot2File(name);
               setSlot2Uri(uri);
             }
-            Alert.alert('Screenshot Attached', 'Photo captured and attached successfully!');
+            showAlertModal({
+              type: 'success_online',
+              title: 'Photo Attached 🎉',
+              subtitle: 'Screenshot proof captured and attached successfully!',
+              primaryButtonText: 'Great',
+              onPrimaryPress: hideAlertModal,
+            });
             return;
           }
         } else {
-          Alert.alert('Permission Required', 'Camera permission is needed to take photos.');
+          showAlertModal({
+            type: 'warning',
+            title: 'Permission Required',
+            subtitle: 'Camera permission is needed to take screenshot proofs.',
+            primaryButtonText: 'Okay',
+            onPrimaryPress: hideAlertModal,
+          });
         }
       } else if (optionType === 'local') {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -127,11 +147,23 @@ export default function MGDayFormScreen() {
               setSlot2File(name);
               setSlot2Uri(uri);
             }
-            Alert.alert('Screenshot Attached', 'Image selected from gallery successfully!');
+            showAlertModal({
+              type: 'success_online',
+              title: 'Photo Attached 🎉',
+              subtitle: 'Image selected from gallery successfully!',
+              primaryButtonText: 'Great',
+              onPrimaryPress: hideAlertModal,
+            });
             return;
           }
         } else {
-          Alert.alert('Permission Required', 'Gallery permission is needed to select photos.');
+          showAlertModal({
+            type: 'warning',
+            title: 'Permission Required',
+            subtitle: 'Gallery permission is needed to select screenshot proofs.',
+            primaryButtonText: 'Okay',
+            onPrimaryPress: hideAlertModal,
+          });
         }
       } else if (optionType === 'drive') {
         const docResult = await DocumentPicker.getDocumentAsync({
@@ -148,7 +180,13 @@ export default function MGDayFormScreen() {
             setSlot2File(name);
             setSlot2Uri(asset.uri);
           }
-          Alert.alert('Document Attached', `Document "${name}" attached successfully!`);
+          showAlertModal({
+            type: 'success_online',
+            title: 'Document Attached 🎉',
+            subtitle: `Document "${name}" attached successfully!`,
+            primaryButtonText: 'Great',
+            onPrimaryPress: hideAlertModal,
+          });
           return;
         }
       }
@@ -169,7 +207,13 @@ export default function MGDayFormScreen() {
 
   const handleSubmit = async () => {
     if (!description.trim()) {
-      Alert.alert('Error', 'Please describe the issue before submitting.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Description Required',
+        subtitle: 'Please describe the Minimum Guarantee discrepancy before submitting.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -202,14 +246,16 @@ export default function MGDayFormScreen() {
     }
 
     setIsSubmitting(false);
-    Alert.alert('Dispute Submitted', `Your minimum guarantee dispute (Ticket #${ticketId}) for ${dateStr} has been submitted successfully. Our operations team will review your login hours and order acceptances.`, [
-      {
-        text: 'OK',
-        onPress: () => {
-          router.replace('/daily-mg');
-        },
+    showAlertModal({
+      type: 'success_online',
+      title: 'Dispute Submitted 🎉',
+      subtitle: `Your minimum guarantee dispute (Ticket #${ticketId}) for ${dateStr} has been submitted successfully. Our operations team will review your login hours and order acceptances.`,
+      primaryButtonText: 'Done',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        router.replace('/daily-mg');
       },
-    ]);
+    });
   };
 
   return (
@@ -397,6 +443,17 @@ export default function MGDayFormScreen() {
             </View>
           </TouchableOpacity>
         </Modal>
+
+        {/* REUSABLE CUSTOM ALERT UI MODAL */}
+        <CustomAlertModal
+          visible={customAlert.visible}
+          type={customAlert.type}
+          title={customAlert.title}
+          subtitle={customAlert.subtitle}
+          primaryButtonText={customAlert.primaryButtonText}
+          onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+          onClose={hideAlertModal}
+        />
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );

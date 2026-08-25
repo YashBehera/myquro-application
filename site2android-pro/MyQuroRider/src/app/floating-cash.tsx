@@ -26,6 +26,7 @@ import QRCode from 'react-native-qrcode-svg';
 import * as ImagePicker from 'expo-image-picker';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 interface CodOrder {
   orderId: string;
@@ -76,7 +77,40 @@ export default function FloatingCashScreen() {
   const [iciciModalVisible, setIciciModalVisible] = useState(false);
   const [novopayModalVisible, setNovopayModalVisible] = useState(false);
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
-  const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
+  const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   // Return Change Form State
   const [selectedOrder, setSelectedOrder] = useState<CodOrder | null>(null);
@@ -210,7 +244,13 @@ export default function FloatingCashScreen() {
   const handleOpenSpecificUpiApp = async (appKey: 'gpay' | 'phonepe' | 'paytm' | 'bhim' | 'default') => {
     const amount = parseFloat(changeAmountInput);
     if (!amount || amount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid change amount to pay.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Invalid Amount',
+        subtitle: 'Please enter a valid change amount to pay.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -226,14 +266,18 @@ export default function FloatingCashScreen() {
     try {
       await Linking.openURL(targetedUrl);
     } catch {
-      Alert.alert(
-        `${appNames[appKey]} Not Available`,
-        `Could not launch ${appNames[appKey]}. Make sure the app is installed, or show the dynamic QR code on screen.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Show QR Code', onPress: () => setShowQrInModal(true) },
-        ]
-      );
+      showAlertModal({
+        type: 'info',
+        title: `${appNames[appKey]} Not Available`,
+        subtitle: `Could not launch ${appNames[appKey]}. Make sure the app is installed, or show the dynamic QR code on screen.`,
+        primaryButtonText: 'Show QR Code',
+        onPrimaryPress: () => {
+          hideAlertModal();
+          setShowQrInModal(true);
+        },
+        secondaryButtonText: 'Cancel',
+        onSecondaryPress: hideAlertModal,
+      });
     }
   };
 
@@ -242,7 +286,13 @@ export default function FloatingCashScreen() {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera permission is needed to scan QR code.');
+        showAlertModal({
+          type: 'warning',
+          title: 'Permission Required',
+          subtitle: 'Camera permission is needed to scan QR code.',
+          primaryButtonText: 'Okay',
+          onPrimaryPress: hideAlertModal,
+        });
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -253,10 +303,22 @@ export default function FloatingCashScreen() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const simulatedVpa = `${customerPhoneInput || '9876543210'}@okaxis`;
         setCustomerUpiInput(simulatedVpa);
-        Alert.alert('QR Scanned', `Detected UPI ID: ${simulatedVpa}`);
+        showAlertModal({
+          type: 'success_online',
+          title: 'QR Scanned 🎉',
+          subtitle: `Detected Customer UPI ID: ${simulatedVpa}`,
+          primaryButtonText: 'Use UPI ID',
+          onPrimaryPress: hideAlertModal,
+        });
       }
     } catch {
-      Alert.alert('Scan QR', 'Please enter the Customer UPI ID or phone number manually.');
+      showAlertModal({
+        type: 'info',
+        title: 'Scan QR',
+        subtitle: 'Please enter the Customer UPI ID or phone number manually.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
     }
   };
 
@@ -264,7 +326,13 @@ export default function FloatingCashScreen() {
   const handleConfirmChangeReturn = async () => {
     const change = parseFloat(changeAmountInput);
     if (!change || change <= 0) {
-      Alert.alert('Error', 'Please enter a valid change amount greater than ₹0.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Invalid Change Amount',
+        subtitle: 'Please enter a valid change amount greater than ₹0.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -298,11 +366,23 @@ export default function FloatingCashScreen() {
         fetchFloatingCashData();
       } else {
         const errData = await res.json();
-        Alert.alert('Failed', errData.message || 'Could not record change return.');
+        showAlertModal({
+          type: 'error',
+          title: 'Operation Failed',
+          subtitle: errData.message || 'Could not record change return.',
+          primaryButtonText: 'Okay',
+          onPrimaryPress: hideAlertModal,
+        });
       }
     } catch (err) {
       console.error('Change refund error:', err);
-      Alert.alert('Network Error', 'Could not communicate with server.');
+      showAlertModal({
+        type: 'error',
+        title: 'Network Error',
+        subtitle: 'Could not communicate with the server.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
     } finally {
       setIsProcessingChange(false);
     }
@@ -312,12 +392,24 @@ export default function FloatingCashScreen() {
   const handleDepositToMyQuro = async () => {
     const amount = parseFloat(depositAmountInput);
     if (!amount || amount <= 0) {
-      Alert.alert('Error', 'Please enter a valid deposit amount.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Amount Required',
+        subtitle: 'Please enter a valid deposit amount.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
     if (amount > currentBalance) {
-      Alert.alert('Invalid Amount', `Deposit amount cannot exceed your current balance (₹${currentBalance}).`);
+      showAlertModal({
+        type: 'warning',
+        title: 'Invalid Amount',
+        subtitle: `Deposit amount cannot exceed your current balance (₹${currentBalance}).`,
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -355,11 +447,23 @@ export default function FloatingCashScreen() {
         fetchFloatingCashData();
       } else {
         const errData = await res.json();
-        Alert.alert('Error', errData.message || 'Deposit failed');
+        showAlertModal({
+          type: 'error',
+          title: 'Deposit Failed',
+          subtitle: errData.message || 'Deposit failed',
+          primaryButtonText: 'Okay',
+          onPrimaryPress: hideAlertModal,
+        });
       }
     } catch (err) {
       console.error('Deposit error:', err);
-      Alert.alert('Network Error', 'Failed to process deposit');
+      showAlertModal({
+        type: 'error',
+        title: 'Network Error',
+        subtitle: 'Failed to process deposit.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
     } finally {
       setIsProcessingDeposit(false);
     }
@@ -1135,7 +1239,13 @@ export default function FloatingCashScreen() {
               <View style={styles.vanRow}>
                 <Text style={styles.vanNumberText}>MQRO{driverProfile?.phone?.slice(-10) || '9876543210'}</Text>
                 <TouchableOpacity
-                  onPress={() => Alert.alert('Copied', 'VAN copied to clipboard.')}
+                  onPress={() => showAlertModal({
+                    type: 'success_online',
+                    title: 'Copied to Clipboard 📋',
+                    subtitle: `Virtual Account Number MQRO${driverProfile?.phone?.slice(-10) || '9876543210'} copied successfully.`,
+                    primaryButtonText: 'Got It',
+                    onPrimaryPress: hideAlertModal,
+                  })}
                   style={styles.copyVanBtn}
                 >
                   <Ionicons name="copy-outline" size={14} color="#F2CA50" />
@@ -1311,6 +1421,19 @@ export default function FloatingCashScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        secondaryButtonText={customAlert.secondaryButtonText}
+        onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }

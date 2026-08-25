@@ -29,6 +29,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 const { width, height } = Dimensions.get('window');
 
@@ -148,6 +149,39 @@ export default function OnboardingScreen() {
   });
   const [predictions, setPredictions] = useState<AutocompleteSuggestion[]>([]);
   const [isResolvingAddress, setIsResolvingAddress] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
   const mapRef = React.useRef<MapView | null>(null);
 
@@ -396,39 +430,36 @@ export default function OnboardingScreen() {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(
-          'Permission Needed',
-          'Camera access is required to take a selfie. Would you like to pick a photo from gallery instead?',
-          [
-            {
-              text: 'Open Gallery',
-              onPress: async () => {
-                const galleryResult = await ImagePicker.launchImageLibraryAsync({
-                  mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                  allowsEditing: true,
-                  aspect: [1, 1],
-                  quality: 0.8,
-                  base64: true,
-                });
-                if (!galleryResult.canceled && galleryResult.assets[0]) {
-                  const uri = galleryResult.assets[0].uri;
-                  setSelfieUri(uri);
-                  setSelfieBase64(galleryResult.assets[0].base64 || null);
-                  updateDriverProfile({ avatarUrl: uri });
-                  setStep(11);
-                }
-              },
-            },
-            {
-              text: 'Use Demo Photo',
-              onPress: () => {
-                setSelfieUri(null);
-                setSelfieBase64('mock_selfie_base64_figma_copied');
-                setStep(11);
-              },
-            },
-          ]
-        );
+        showAlertModal({
+          type: 'warning',
+          title: 'Camera Permission Needed',
+          subtitle: 'Camera access is required to take a verification selfie. You can choose from gallery or use demo photo.',
+          primaryButtonText: 'Open Gallery',
+          onPrimaryPress: async () => {
+            hideAlertModal();
+            const galleryResult = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.8,
+              base64: true,
+            });
+            if (!galleryResult.canceled && galleryResult.assets[0]) {
+              const uri = galleryResult.assets[0].uri;
+              setSelfieUri(uri);
+              setSelfieBase64(galleryResult.assets[0].base64 || null);
+              updateDriverProfile({ avatarUrl: uri });
+              setStep(11);
+            }
+          },
+          secondaryButtonText: 'Use Demo Photo',
+          onSecondaryPress: () => {
+            hideAlertModal();
+            setSelfieUri(null);
+            setSelfieBase64('mock_selfie_base64_figma_copied');
+            setStep(11);
+          },
+        });
         return;
       }
 
@@ -457,81 +488,92 @@ export default function OnboardingScreen() {
   };
 
   const handlePickAadhaarImage = async (side: 'front' | 'back') => {
-    Alert.alert(
-      `Upload Aadhaar ${side === 'front' ? 'Front Side' : 'Back Side'}`,
-      'Choose an option to capture or upload your Aadhaar photo:',
-      [
-        {
-          text: 'Take Photo (Camera)',
-          onPress: async () => {
-            try {
-              const { status } = await ImagePicker.requestCameraPermissionsAsync();
-              if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'Camera permission is required.');
-                return;
-              }
-              const result = await ImagePicker.launchCameraAsync({
-                cameraType: ImagePicker.CameraType.back,
-                allowsEditing: true,
-                aspect: [16, 10],
-                quality: 0.8,
-                base64: true,
-              });
-              if (!result.canceled && result.assets[0]) {
-                if (side === 'front') {
-                  setAadhaarFrontUri(result.assets[0].uri);
-                  setAadhaarFrontBase64(result.assets[0].base64 || null);
-                } else {
-                  setAadhaarBackUri(result.assets[0].uri);
-                  setAadhaarBackBase64(result.assets[0].base64 || null);
-                }
-              }
-            } catch (e) {
-              console.error('Error opening camera for Aadhaar:', e);
+    showAlertModal({
+      type: 'info',
+      title: `Upload Aadhaar ${side === 'front' ? 'Front Side' : 'Back Side'}`,
+      subtitle: 'Choose an option to capture or upload your Aadhaar document photo:',
+      primaryButtonText: '📷 Take Photo (Camera)',
+      onPrimaryPress: async () => {
+        hideAlertModal();
+        try {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+            showAlertModal({
+              type: 'warning',
+              title: 'Permission Denied',
+              subtitle: 'Camera permission is required to capture Aadhaar document.',
+              primaryButtonText: 'Okay',
+              onPrimaryPress: hideAlertModal,
+            });
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            cameraType: ImagePicker.CameraType.back,
+            allowsEditing: true,
+            aspect: [16, 10],
+            quality: 0.8,
+            base64: true,
+          });
+          if (!result.canceled && result.assets[0]) {
+            if (side === 'front') {
+              setAadhaarFrontUri(result.assets[0].uri);
+              setAadhaarFrontBase64(result.assets[0].base64 || null);
+            } else {
+              setAadhaarBackUri(result.assets[0].uri);
+              setAadhaarBackBase64(result.assets[0].base64 || null);
             }
-          },
-        },
-        {
-          text: 'Choose from Gallery',
-          onPress: async () => {
-            try {
-              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-              if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'Gallery permission is required.');
-                return;
-              }
-              const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                aspect: [16, 10],
-                quality: 0.8,
-                base64: true,
-              });
-              if (!result.canceled && result.assets[0]) {
-                if (side === 'front') {
-                  setAadhaarFrontUri(result.assets[0].uri);
-                  setAadhaarFrontBase64(result.assets[0].base64 || null);
-                } else {
-                  setAadhaarBackUri(result.assets[0].uri);
-                  setAadhaarBackBase64(result.assets[0].base64 || null);
-                }
-              }
-            } catch (e) {
-              console.error('Error opening gallery for Aadhaar:', e);
+          }
+        } catch (e) {
+          console.error('Error opening camera for Aadhaar:', e);
+        }
+      },
+      secondaryButtonText: '🖼️ Choose from Gallery',
+      onSecondaryPress: async () => {
+        hideAlertModal();
+        try {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            showAlertModal({
+              type: 'warning',
+              title: 'Permission Denied',
+              subtitle: 'Gallery permission is required to upload Aadhaar document.',
+              primaryButtonText: 'Okay',
+              onPrimaryPress: hideAlertModal,
+            });
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [16, 10],
+            quality: 0.8,
+            base64: true,
+          });
+          if (!result.canceled && result.assets[0]) {
+            if (side === 'front') {
+              setAadhaarFrontUri(result.assets[0].uri);
+              setAadhaarFrontBase64(result.assets[0].base64 || null);
+            } else {
+              setAadhaarBackUri(result.assets[0].uri);
+              setAadhaarBackBase64(result.assets[0].base64 || null);
             }
-          },
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ]
-    );
+          }
+        } catch (e) {
+          console.error('Error opening gallery for Aadhaar:', e);
+        }
+      },
+    });
   };
 
   const handleUploadAadhaarSubmit = async () => {
     if (!aadhaarFullName.trim()) {
-      Alert.alert('Full Name Required', 'Please enter your full name as printed on your Aadhaar card.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Full Name Required',
+        subtitle: 'Please enter your full name as printed on your Aadhaar card.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
     setIsUploadingAadhaar(true);
@@ -3721,6 +3763,19 @@ export default function OnboardingScreen() {
             )}
           </View>
         )}
+
+        {/* REUSABLE CUSTOM ALERT UI MODAL */}
+        <CustomAlertModal
+          visible={customAlert.visible}
+          type={customAlert.type}
+          title={customAlert.title}
+          subtitle={customAlert.subtitle}
+          primaryButtonText={customAlert.primaryButtonText}
+          onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+          secondaryButtonText={customAlert.secondaryButtonText}
+          onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
+          onClose={hideAlertModal}
+        />
       </View>
     </TouchableWithoutFeedback>
   );

@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function AppSettingsScreen() {
   const router = useRouter();
@@ -51,12 +52,44 @@ export default function AppSettingsScreen() {
     }
   };
 
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
+
   const handleBatterySettings = () => {
-    Alert.alert(
-      'Battery Optimization',
-      'Battery settings are optimized for background order tracking without unexpected logouts.',
-      [{ text: 'OK' }]
-    );
+    showAlertModal({
+      type: 'info',
+      title: 'Battery Optimization',
+      subtitle: 'Battery settings are optimized for background order tracking without unexpected logouts or pauses.',
+      primaryButtonText: 'Understood',
+      onPrimaryPress: hideAlertModal,
+    });
   };
 
   const handleReloadConfig = () => {
@@ -64,15 +97,24 @@ export default function AppSettingsScreen() {
     // Reloads in ~0.20s - 0.45s as requested by user
     setTimeout(() => {
       setIsReloadingConfig(false);
+      showAlertModal({
+        type: 'success_online',
+        title: 'Configurations Synced ⚡',
+        subtitle: 'App preferences and remote parameters updated with the cloud server.',
+        primaryButtonText: 'Great',
+        onPrimaryPress: hideAlertModal,
+      });
     }, 450);
   };
 
   const handleCheckUpdates = () => {
-    Alert.alert(
-      'Up to Date! 🎉',
-      'You are running the latest version of MyQuro Rider App (v54.0.8).',
-      [{ text: 'Great' }]
-    );
+    showAlertModal({
+      type: 'success_online',
+      title: 'Up to Date! 🎉',
+      subtitle: 'You are running the latest production build of MyQuro Rider App (v54.0.8).',
+      primaryButtonText: 'Great',
+      onPrimaryPress: hideAlertModal,
+    });
   };
 
   const handleDeviceHealth = () => {
@@ -267,6 +309,16 @@ export default function AppSettingsScreen() {
           </View>
         </View>
       </Modal>
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }

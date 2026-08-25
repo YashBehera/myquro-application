@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function SOSScreen() {
   const router = useRouter();
@@ -29,48 +30,83 @@ export default function SOSScreen() {
     router.push('/help-support');
   };
 
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
+
   const handleCallHelpline = () => {
-    Alert.alert(
-      'MyQuro Helpline',
-      'Do you want to call MyQuro 24x7 emergency rider support?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call Now',
-          onPress: () => Linking.openURL('tel:18001239999').catch(() => {}),
-        },
-      ]
-    );
+    showAlertModal({
+      type: 'info',
+      title: 'MyQuro Helpline 📞',
+      subtitle: 'Connect immediately to MyQuro 24x7 Emergency Rider Safety & Operations Desk.',
+      primaryButtonText: 'Call 1800-123-9999',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        Linking.openURL('tel:18001239999').catch(() => {});
+      },
+      secondaryButtonText: 'Cancel',
+      onSecondaryPress: hideAlertModal,
+    });
   };
 
   const handleCallPolice = () => {
-    Alert.alert(
-      'Emergency - Police',
-      'Connect with local police emergency dispatch (112)?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call 112',
-          style: 'destructive',
-          onPress: () => Linking.openURL('tel:112').catch(() => {}),
-        },
-      ]
-    );
+    showAlertModal({
+      type: 'warning',
+      title: 'Emergency Police (112)',
+      subtitle: 'Connect directly with local police emergency dispatch for on-road safety.',
+      primaryButtonText: 'Call 112',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        Linking.openURL('tel:112').catch(() => {});
+      },
+      secondaryButtonText: 'Cancel',
+      onSecondaryPress: hideAlertModal,
+    });
   };
 
   const handleCallAmbulance = () => {
-    Alert.alert(
-      'Emergency - Ambulance',
-      'Request medical emergency ambulance assistance (108)?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Call 108',
-          style: 'destructive',
-          onPress: () => Linking.openURL('tel:108').catch(() => {}),
-        },
-      ]
-    );
+    showAlertModal({
+      type: 'warning',
+      title: 'Medical Ambulance (108)',
+      subtitle: 'Request emergency medical and hospital dispatch assistance immediately.',
+      primaryButtonText: 'Call 108',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        Linking.openURL('tel:108').catch(() => {});
+      },
+      secondaryButtonText: 'Cancel',
+      onSecondaryPress: hideAlertModal,
+    });
   };
 
   const handleEmergencyDetails = () => {
@@ -286,6 +322,19 @@ export default function SOSScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        secondaryButtonText={customAlert.secondaryButtonText}
+        onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }

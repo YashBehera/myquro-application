@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CustomAlertModal, ModalType } from '../../components/CustomAlertModal';
 
 interface ShiftItem {
   id: string;
@@ -121,6 +122,39 @@ export default function MyShiftsScreen() {
   const dates = getDynamicDates();
   const [selectedDate, setSelectedDate] = useState(dates[0].date);
   const [shifts, setShifts] = useState<ShiftItem[]>(INITIAL_SHIFTS);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   // Load shifts on mount and make sure all non-booked are forced to OPEN for easy testing
   useEffect(() => {
@@ -157,36 +191,35 @@ export default function MyShiftsScreen() {
     const updated = shifts.map((s) => (s.id === id ? { ...s, status: 'BOOKED' as const } : s));
     setShifts(updated);
     saveShifts(updated);
-    Alert.alert(
-      'Shift Booked! 🎉',
-      `You have successfully booked the shift for ${time}. You can now go online during this window.`,
-      [
-        {
-          text: 'Go to Dashboard',
-          onPress: () => router.replace('/(tabs)'),
-        },
-        { text: 'OK', style: 'default' },
-      ]
-    );
+    showAlertModal({
+      type: 'shift_booked',
+      title: 'Shift Booked! 🎉',
+      subtitle: `You have successfully booked the shift for ${time}. You can now go online during this window.`,
+      primaryButtonText: 'Go to Dashboard',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        router.replace('/(tabs)');
+      },
+      secondaryButtonText: 'Stay Here',
+      onSecondaryPress: hideAlertModal,
+    });
   };
 
   const handleCancelShift = (id: string, time: string) => {
-    Alert.alert(
-      'Cancel Shift',
-      `Are you sure you want to cancel your booked shift for ${time}?`,
-      [
-        { text: 'Keep Shift', style: 'cancel' },
-        {
-          text: 'Cancel Shift',
-          style: 'destructive',
-          onPress: () => {
-            const updated = shifts.map((s) => (s.id === id ? { ...s, status: 'OPEN' as const } : s));
-            setShifts(updated);
-            saveShifts(updated);
-          },
-        },
-      ]
-    );
+    showAlertModal({
+      type: 'shift_cancel',
+      title: 'Cancel Shift?',
+      subtitle: `Are you sure you want to cancel your booked shift for ${time}?`,
+      primaryButtonText: 'Cancel Shift',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        const updated = shifts.map((s) => (s.id === id ? { ...s, status: 'OPEN' as const } : s));
+        setShifts(updated);
+        saveShifts(updated);
+      },
+      secondaryButtonText: 'Keep Shift',
+      onSecondaryPress: hideAlertModal,
+    });
   };
 
   const categories: Array<'Morning' | 'Lunch' | 'Dinner' | 'Late Night'> = [
@@ -378,6 +411,19 @@ export default function MyShiftsScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        secondaryButtonText={customAlert.secondaryButtonText}
+        onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }

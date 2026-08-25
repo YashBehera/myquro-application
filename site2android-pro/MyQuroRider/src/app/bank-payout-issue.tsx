@@ -15,7 +15,6 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import {
-  Alert,
   TextInput,
   Keyboard,
   TouchableWithoutFeedback,
@@ -24,6 +23,7 @@ import {
 } from 'react-native';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function BankPayoutIssueScreen() {
   const router = useRouter();
@@ -33,9 +33,38 @@ export default function BankPayoutIssueScreen() {
   const hasBankAdded = Boolean(driverProfile?.bankAccount);
   const [bottomSheetVisible, setBottomSheetVisible] = useState(false);
   const [disputeModalVisible, setDisputeModalVisible] = useState(false);
-  const [selectedWeek, setSelectedWeek] = useState<any>(null);
+  const [selectedWeek, setSelectedWeek] = useState<any | null>(null);
   const [disputeReason, setDisputeReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   const handleBack = () => {
     Keyboard.dismiss();
@@ -87,7 +116,13 @@ export default function BankPayoutIssueScreen() {
   const handleSubmitDispute = async () => {
     Keyboard.dismiss();
     if (!disputeReason.trim()) {
-      Alert.alert('Error', 'Please select or describe the payout discrepancy.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Description Required',
+        subtitle: 'Please describe the bank payout discrepancy before submitting.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -126,9 +161,16 @@ export default function BankPayoutIssueScreen() {
     setIsSubmitting(false);
     setDisputeModalVisible(false);
 
-    Alert.alert('Inquiry Submitted', `Your bank payout inquiry (#${ticketId}) for ${selectedWeek?.title} has been submitted successfully. Our finance operations team will verify the NEFT / UTR transfer status within 2-4 hours.`, [
-      { text: 'OK' },
-    ]);
+    showAlertModal({
+      type: 'success_online',
+      title: 'Inquiry Submitted 🎉',
+      subtitle: `Your bank payout inquiry (#${ticketId}) for ${selectedWeek?.title} has been submitted successfully. Our finance team will verify the transfer status within 2-4 hours.`,
+      primaryButtonText: 'Got It',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        setDisputeReason('');
+      },
+    });
   };
 
   return (
@@ -394,6 +436,17 @@ export default function BankPayoutIssueScreen() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }

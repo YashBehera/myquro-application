@@ -55,7 +55,7 @@ export const HeaderBar: React.FC = () => {
       <View style={styles.bottomRow}>
         <View style={styles.earningMetric}>
           <Text style={styles.metricLabel}>Today's Earnings</Text>
-          <Text style={styles.metricValue}>${todayEarnings.toFixed(2)}</Text>
+          <Text style={styles.metricValue}>₹{Number(todayEarnings || 0).toFixed(2)}</Text>
         </View>
 
         {!incomingRequest && !activeTrip && isOnline && (

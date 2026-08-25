@@ -20,6 +20,7 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useRider } from '@/context/RiderContext';
+import { CustomAlertModal, ModalType } from './CustomAlertModal';
 import { WebView } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -232,6 +233,39 @@ export const ActiveTripCard: React.FC = () => {
   const [targetTime, setTargetTime] = useState('');
   const [isMapReady, setIsMapReady] = useState(false);
   const [route, setRoute] = useState<[number, number][]>([]);
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   // Transition mount delay to prevent maps overlap rendering
   useEffect(() => {
@@ -429,7 +463,13 @@ export const ActiveTripCard: React.FC = () => {
         setShowCollectCashModal(false);
         setDeliveryDetailsExpanded(true);
       } else {
-        Alert.alert("Invalid Passcode", "The passcode you entered is incorrect.");
+        showAlertModal({
+          type: 'error',
+          title: 'Invalid Passcode',
+          subtitle: 'The cash collection passcode you entered is incorrect. Please verify with the customer.',
+          primaryButtonText: 'Try Again',
+          onPrimaryPress: hideAlertModal,
+        });
         setCollectCashPasscode('');
       }
     } else if (val !== 'empty') {
@@ -445,7 +485,13 @@ export const ActiveTripCard: React.FC = () => {
             }, 350);
           } else {
             setTimeout(() => {
-              Alert.alert("Invalid Passcode", "The passcode you entered is incorrect.");
+              showAlertModal({
+                type: 'error',
+                title: 'Invalid Passcode',
+                subtitle: 'The cash collection passcode you entered is incorrect. Please verify with the customer.',
+                primaryButtonText: 'Try Again',
+                onPrimaryPress: hideAlertModal,
+              });
               setCollectCashPasscode('');
             }, 350);
           }
@@ -540,42 +586,38 @@ export const ActiveTripCard: React.FC = () => {
     console.log(`Scanned barcode: ${data}, expected: ${expectedBarcode}`);
 
     if (data === expectedBarcode || data.includes(expectedBarcode) || expectedBarcode.includes(data)) {
-      Alert.alert(
-        "Scan Successful",
-        `Order verified successfully!\nBarcode: ${data}`,
-        [
-          {
-            text: "OK",
-            onPress: () => {
-              setVerified1(true);
-              setVerified2(true);
-              setShowScannerModal(false);
-              setShowPasscodeModal(false);
-            }
-          }
-        ]
-      );
+      showAlertModal({
+        type: 'success_online',
+        title: 'Scan Successful 🎉',
+        subtitle: `Order package verified successfully!\nBarcode: ${data}`,
+        primaryButtonText: 'Continue',
+        onPrimaryPress: () => {
+          hideAlertModal();
+          setVerified1(true);
+          setVerified2(true);
+          setShowScannerModal(false);
+          setShowPasscodeModal(false);
+        },
+      });
     } else {
-      Alert.alert(
-        "Barcode Mismatch",
-        `Scanned: "${data}"\nExpected: "${expectedBarcode}"\n\nWould you like to verify this package anyway?`,
-        [
-          {
-            text: "Retry Scan",
-            style: "cancel",
-            onPress: () => setHasScanned(false)
-          },
-          {
-            text: "Verify Anyway",
-            onPress: () => {
-              setVerified1(true);
-              setVerified2(true);
-              setShowScannerModal(false);
-              setShowPasscodeModal(false);
-            }
-          }
-        ]
-      );
+      showAlertModal({
+        type: 'warning',
+        title: 'Barcode Mismatch',
+        subtitle: `Scanned: "${data}"\nExpected: "${expectedBarcode}"\n\nWould you like to verify this package anyway?`,
+        primaryButtonText: 'Verify Anyway',
+        onPrimaryPress: () => {
+          hideAlertModal();
+          setVerified1(true);
+          setVerified2(true);
+          setShowScannerModal(false);
+          setShowPasscodeModal(false);
+        },
+        secondaryButtonText: 'Retry Scan',
+        onSecondaryPress: () => {
+          hideAlertModal();
+          setHasScanned(false);
+        },
+      });
     }
   };
 
@@ -589,7 +631,13 @@ export const ActiveTripCard: React.FC = () => {
         setVerified2(true);
         setShowPasscodeModal(false);
       } else {
-        Alert.alert("Invalid Passcode", "The passcode you entered is incorrect.");
+        showAlertModal({
+          type: 'error',
+          title: 'Invalid Passcode',
+          subtitle: 'The delivery confirmation passcode you entered is incorrect.',
+          primaryButtonText: 'Try Again',
+          onPrimaryPress: hideAlertModal,
+        });
         setPasscode('');
       }
     } else if (val !== 'empty') {
@@ -605,7 +653,13 @@ export const ActiveTripCard: React.FC = () => {
             }, 350);
           } else {
             setTimeout(() => {
-              Alert.alert("Invalid Passcode", "The passcode you entered is incorrect.");
+              showAlertModal({
+                type: 'error',
+                title: 'Invalid Passcode',
+                subtitle: 'The delivery confirmation passcode you entered is incorrect.',
+                primaryButtonText: 'Try Again',
+                onPrimaryPress: hideAlertModal,
+              });
               setPasscode('');
             }, 350);
           }
@@ -1229,10 +1283,13 @@ export const ActiveTripCard: React.FC = () => {
                     onPress={() => {
                       const expectedAmount = activeTrip.fareAmount.toFixed(0);
                       if (enteredAmount1 !== expectedAmount || enteredAmount2 !== expectedAmount) {
-                        Alert.alert(
-                          "Amount Mismatch",
-                          `The entered amount must match the fare amount of ₹${expectedAmount}.`
-                        );
+                        showAlertModal({
+                          type: 'warning',
+                          title: 'Amount Mismatch',
+                          subtitle: `The entered amount must match the fare amount of ₹${expectedAmount}.`,
+                          primaryButtonText: 'Okay',
+                          onPrimaryPress: hideAlertModal,
+                        });
                         return;
                       }
                       setPaymentStep('passcode_entry');
@@ -2064,6 +2121,19 @@ export const ActiveTripCard: React.FC = () => {
           <Text style={styles.cancelTripText}>Cancel Order / Trip</Text>
         </TouchableOpacity>
       </View>
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        secondaryButtonText={customAlert.secondaryButtonText}
+        onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 };

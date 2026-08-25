@@ -33,6 +33,7 @@ import {
   Animated,
   LayoutAnimation,
   UIManager,
+  Alert,
 } from 'react-native';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -57,6 +58,7 @@ import {
   MapPin,
   CheckCircle2,
 } from 'lucide-react-native';
+import { DeliveredOrderView } from './DeliveredOrderView';
 import Svg, {
   Rect,
   Path,
@@ -885,6 +887,42 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       setSimulating(false);
     }
   };
+
+  const isDelivered =
+    riderStatus === 'delivered' ||
+    kitchenStatus === 'served' ||
+    kitchenStatus === 'delivered' ||
+    currentStatus === 'delivered';
+
+  if (isDelivered) {
+    return (
+      <DeliveredOrderView
+        orderId={orderId || undefined}
+        restaurantName={restaurantName}
+        riderName={riderDisplayName}
+        riderPhone={riderInfo?.phone}
+        itemsCount={itemsCount}
+        deliveredTime={trackingData?.updatedAt || orderDetail?.updatedAt}
+        onBack={onBack}
+        onRateDelivery={(rating) => {
+          console.log('Rated delivery:', rating);
+        }}
+        onRateItems={() => {
+          Alert.alert('Rate Items', 'Thank you! Item rating submitted successfully.');
+        }}
+        onContactSupport={() => {
+          if (riderInfo?.phone) {
+            Linking.openURL(`tel:${riderInfo.phone}`);
+          } else {
+            Alert.alert('Delivery Support', 'Connecting to MyQuro delivery support hotline...');
+          }
+        }}
+        onExploreOffers={() => {
+          Alert.alert('My Quro Pay', 'Explore exclusive 5% cashback offers on every order with My Quro Pay!');
+        }}
+      />
+    );
+  }
 
   const topHeaderPadding = insets.top + (Platform.OS === 'android' ? 6 : 2) * SCALE;
 

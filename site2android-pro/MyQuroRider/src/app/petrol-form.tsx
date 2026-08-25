@@ -24,6 +24,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function PetrolFormScreen() {
   const router = useRouter();
@@ -45,6 +46,36 @@ export default function PetrolFormScreen() {
   const [slot2File, setSlot2File] = useState<string | null>(null);
   const [slot2Uri, setSlot2Uri] = useState<string | null>(null);
 
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
+
   const handleBack = () => {
     Keyboard.dismiss();
     if (router.canGoBack()) {
@@ -56,29 +87,7 @@ export default function PetrolFormScreen() {
 
   const openUploadMenu = (slotNum: 1 | 2) => {
     setSelectedSlot(slotNum);
-    Alert.alert(
-      'Upload Proof Screenshot',
-      'Select device upload source:',
-      [
-        {
-          text: '📷 Take Photo (Camera)',
-          onPress: () => handleSelectOption('camera', slotNum),
-        },
-        {
-          text: '🖼️ Choose from Gallery',
-          onPress: () => handleSelectOption('local', slotNum),
-        },
-        {
-          text: '📄 Browse Files / Google Drive',
-          onPress: () => handleSelectOption('drive', slotNum),
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ],
-      { cancelable: true }
-    );
+    setUploadModalVisible(true);
   };
 
   const handleSelectOption = async (optionType: 'camera' | 'local' | 'drive', targetSlot?: 1 | 2 | null) => {
@@ -104,11 +113,23 @@ export default function PetrolFormScreen() {
               setSlot2File(name);
               setSlot2Uri(uri);
             }
-            Alert.alert('Screenshot Attached', 'Photo captured and attached successfully!');
+            showAlertModal({
+              type: 'success_online',
+              title: 'Photo Attached 🎉',
+              subtitle: 'Screenshot proof captured and attached successfully!',
+              primaryButtonText: 'Great',
+              onPrimaryPress: hideAlertModal,
+            });
             return;
           }
         } else {
-          Alert.alert('Permission Required', 'Camera permission is needed to take screenshot proofs.');
+          showAlertModal({
+            type: 'warning',
+            title: 'Permission Required',
+            subtitle: 'Camera permission is needed to capture screenshot proofs.',
+            primaryButtonText: 'Okay',
+            onPrimaryPress: hideAlertModal,
+          });
         }
       } else if (optionType === 'local') {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -128,11 +149,23 @@ export default function PetrolFormScreen() {
               setSlot2File(name);
               setSlot2Uri(uri);
             }
-            Alert.alert('Screenshot Attached', 'Screenshot selected from gallery successfully!');
+            showAlertModal({
+              type: 'success_online',
+              title: 'Photo Attached 🎉',
+              subtitle: 'Screenshot selected from gallery successfully!',
+              primaryButtonText: 'Great',
+              onPrimaryPress: hideAlertModal,
+            });
             return;
           }
         } else {
-          Alert.alert('Permission Required', 'Gallery permission is needed to select screenshot proofs.');
+          showAlertModal({
+            type: 'warning',
+            title: 'Permission Required',
+            subtitle: 'Gallery permission is needed to select screenshot proofs.',
+            primaryButtonText: 'Okay',
+            onPrimaryPress: hideAlertModal,
+          });
         }
       } else if (optionType === 'drive') {
         const docResult = await DocumentPicker.getDocumentAsync({
@@ -149,7 +182,13 @@ export default function PetrolFormScreen() {
             setSlot2File(name);
             setSlot2Uri(asset.uri);
           }
-          Alert.alert('Document Attached', `Document "${name}" attached successfully!`);
+          showAlertModal({
+            type: 'success_online',
+            title: 'Document Attached 🎉',
+            subtitle: `Document "${name}" attached successfully!`,
+            primaryButtonText: 'Great',
+            onPrimaryPress: hideAlertModal,
+          });
           return;
         }
       }
@@ -170,7 +209,13 @@ export default function PetrolFormScreen() {
 
   const handleSubmit = async () => {
     if (!description.trim()) {
-      Alert.alert('Error', 'Please describe the issue before submitting.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Description Required',
+        subtitle: 'Please describe the petrol incentive issue before submitting.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -203,14 +248,16 @@ export default function PetrolFormScreen() {
     }
 
     setIsSubmitting(false);
-    Alert.alert('Claim Submitted', `Your petrol incentive claim (Ticket #${ticketId}) and attached receipts have been submitted successfully. Our team will verify and credit the amount.`, [
-      {
-        text: 'OK',
-        onPress: () => {
-          router.replace('/petrol-issue');
-        },
+    showAlertModal({
+      type: 'success_online',
+      title: 'Claim Submitted 🎉',
+      subtitle: `Your petrol incentive claim (Ticket #${ticketId}) and attached receipts have been submitted successfully. Our team will verify and credit the amount.`,
+      primaryButtonText: 'Done',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        router.replace('/petrol-issue');
       },
-    ]);
+    });
   };
 
   return (
@@ -402,6 +449,17 @@ export default function PetrolFormScreen() {
             </View>
           </TouchableOpacity>
         </Modal>
+
+        {/* REUSABLE CUSTOM ALERT UI MODAL */}
+        <CustomAlertModal
+          visible={customAlert.visible}
+          type={customAlert.type}
+          title={customAlert.title}
+          subtitle={customAlert.subtitle}
+          primaryButtonText={customAlert.primaryButtonText}
+          onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+          onClose={hideAlertModal}
+        />
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );

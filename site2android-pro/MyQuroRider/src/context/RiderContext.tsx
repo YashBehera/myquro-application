@@ -129,6 +129,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const socketRef = useRef<any>(null);
   const declinedOrderIdsRef = useRef<Map<string, number>>(new Map());
+  const isTogglingRef = useRef<boolean>(false);
 
   // Load token and profile on startup
   useEffect(() => {
@@ -172,7 +173,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [sessionToken, isOnline]);
+  }, [sessionToken]);
 
   // Periodic background location streaming
   useEffect(() => {
@@ -291,9 +292,11 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (res.ok) {
         const data = await res.json();
         if (data.stats) {
-          setIsOnline(data.stats.status === 'available');
-          setTodayEarnings(data.stats.todayEarnings || 0);
-          setWeeklyEarnings(data.stats.weekEarnings || 0);
+          if (!isTogglingRef.current) {
+            setIsOnline(data.stats.status === 'available');
+          }
+          setTodayEarnings(Math.round(Number(data.stats.todayEarnings || 0) * 100) / 100);
+          setWeeklyEarnings(Math.round(Number(data.stats.weekEarnings || 0) * 100) / 100);
           setTripsToday(data.stats.todayDeliveries || 0);
           setOnlineHours(6.2);
         }
@@ -466,7 +469,13 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const toggleOnlineStatus = async () => {
-    if (!sessionToken) return;
+    if (!sessionToken || isTogglingRef.current) return;
+    isTogglingRef.current = true;
+    const targetOnline = !isOnline;
+
+    // 1. Instant Optimistic State Flip (0ms UI latency)
+    setIsOnline(targetOnline);
+
     try {
       const res = await fetch(`${BACKEND_URL}/api/delivery/rider/toggle-status`, {
         method: 'POST',
@@ -477,13 +486,29 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         },
       });
       if (res.ok) {
-        await fetchDashboardStats(sessionToken);
-        await fetchLoginHistory(sessionToken);
-        await fetchOffers(sessionToken);
-        await fetchActiveTask(sessionToken);
+        const data = await res.json();
+        if (data && data.status) {
+          setIsOnline(data.status === 'available');
+        }
+        // Run secondary background history / task updates
+        Promise.allSettled([
+          fetchLoginHistory(sessionToken),
+          fetchOffers(sessionToken),
+          fetchActiveTask(sessionToken),
+        ]);
+      } else {
+        // Revert on server rejection
+        setIsOnline(!targetOnline);
       }
     } catch (err) {
       console.error('Toggle status network error', err);
+      // Revert on network error
+      setIsOnline(!targetOnline);
+    } finally {
+      // Keep lock active for 1.5s so background polling does not cause glitching / bouncing
+      setTimeout(() => {
+        isTogglingRef.current = false;
+      }, 1500);
     }
   };
 

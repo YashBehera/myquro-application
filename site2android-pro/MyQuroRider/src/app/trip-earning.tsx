@@ -13,7 +13,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 
 import {
-  Alert,
   TextInput,
   Modal,
   Keyboard,
@@ -23,6 +22,7 @@ import {
 } from 'react-native';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function TripEarningScreen() {
   const router = useRouter();
@@ -32,6 +32,35 @@ export default function TripEarningScreen() {
   const [disputeModalVisible, setDisputeModalVisible] = useState(false);
   const [selectedDayName, setSelectedDayName] = useState('');
   const [disputeReason, setDisputeReason] = useState('');
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
 
   // Dynamically generate the past 7 days
   const daysList = React.useMemo(() => {
@@ -77,7 +106,13 @@ export default function TripEarningScreen() {
   const handleSubmitDispute = async () => {
     Keyboard.dismiss();
     if (!disputeReason.trim()) {
-      Alert.alert('Error', 'Please describe the order fare issue.');
+      showAlertModal({
+        type: 'warning',
+        title: 'Description Required',
+        subtitle: 'Please describe the order fare or distance discrepancy before submitting.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
       return;
     }
 
@@ -109,9 +144,16 @@ export default function TripEarningScreen() {
       }
     }
 
-    Alert.alert('Dispute Submitted', `Your trip earning dispute (Ticket #${ticketId}) for ${selectedDayName} has been submitted. Our team will verify the trip distance & fare breakdown.`, [
-      { text: 'OK' },
-    ]);
+    showAlertModal({
+      type: 'success_online',
+      title: 'Dispute Submitted 🎉',
+      subtitle: `Your trip earning dispute (Ticket #${ticketId}) for ${selectedDayName} has been submitted. Our team will verify the trip distance & fare breakdown within 2-4 hours.`,
+      primaryButtonText: 'Got It',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        setDisputeReason('');
+      },
+    });
   };
 
   return (
@@ -257,6 +299,17 @@ export default function TripEarningScreen() {
             </TouchableOpacity>
           </KeyboardAvoidingView>
         </Modal>
+
+        {/* REUSABLE CUSTOM ALERT UI MODAL */}
+        <CustomAlertModal
+          visible={customAlert.visible}
+          type={customAlert.type}
+          title={customAlert.title}
+          subtitle={customAlert.subtitle}
+          primaryButtonText={customAlert.primaryButtonText}
+          onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+          onClose={hideAlertModal}
+        />
       </View>
     </TouchableWithoutFeedback>
   );

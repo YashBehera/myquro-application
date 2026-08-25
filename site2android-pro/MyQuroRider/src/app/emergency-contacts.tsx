@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useRider } from '@/context/RiderContext';
+import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
 
 export default function EmergencyContactsScreen() {
   const router = useRouter();
@@ -26,29 +27,61 @@ export default function EmergencyContactsScreen() {
     }
   };
 
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    subtitle: '',
+  });
+
+  const showAlertModal = (config: {
+    type?: ModalType;
+    title: string;
+    subtitle: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+  }) => {
+    setCustomAlert({
+      ...config,
+      visible: true,
+    });
+  };
+
+  const hideAlertModal = () => {
+    setCustomAlert((prev) => ({ ...prev, visible: false }));
+  };
+
   const hasContact = !!(
     driverProfile.emergencyContactName && driverProfile.emergencyContactPhone
   );
 
   const handleDeleteContact = () => {
-    Alert.alert(
-      'Remove Contact',
-      'Are you sure you want to remove your emergency contact?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => {
-            updateDriverProfile({
-              emergencyContactName: '',
-              emergencyContactPhone: '',
-              emergencyContactRelationship: '',
-            });
-          },
-        },
-      ]
-    );
+    showAlertModal({
+      type: 'shift_cancel',
+      title: 'Remove Contact?',
+      subtitle: 'Are you sure you want to remove your emergency contact details?',
+      primaryButtonText: 'Remove',
+      onPrimaryPress: () => {
+        hideAlertModal();
+        updateDriverProfile({
+          emergencyContactName: '',
+          emergencyContactPhone: '',
+          emergencyContactRelationship: '',
+        });
+      },
+      secondaryButtonText: 'Cancel',
+      onSecondaryPress: hideAlertModal,
+    });
   };
 
   return (
@@ -178,6 +211,19 @@ export default function EmergencyContactsScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* REUSABLE CUSTOM ALERT UI MODAL */}
+      <CustomAlertModal
+        visible={customAlert.visible}
+        type={customAlert.type}
+        title={customAlert.title}
+        subtitle={customAlert.subtitle}
+        primaryButtonText={customAlert.primaryButtonText}
+        onPrimaryPress={customAlert.onPrimaryPress || hideAlertModal}
+        secondaryButtonText={customAlert.secondaryButtonText}
+        onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
+        onClose={hideAlertModal}
+      />
     </View>
   );
 }
