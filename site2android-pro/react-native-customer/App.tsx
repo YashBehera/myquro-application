@@ -7,7 +7,7 @@
  * - /app/src/main/java/com/example/MainActivity.kt
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   StyleSheet,
@@ -20,6 +20,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   useFonts,
   Urbanist_400Regular,
@@ -69,8 +70,9 @@ const MainAppContent: React.FC = () => {
   const { isDarkMode, authState, cartItems, allRestaurants, syncCartItems } = useViewModel();
   const theme = isDarkMode ? THEME.dark : THEME.light;
 
+  const [isAppReady, setIsAppReady] = useState(false);
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
-  const [showOnboarding, setShowOnboarding] = useState(true);
   const [activeScreen, setActiveScreen] = useState<ScreenId>('home');
   const [selectedRestaurantId, setSelectedRestaurantId] = useState<string | null>(null);
   const [prevScreen, setPrevScreen] = useState<ScreenId>('home');
@@ -78,6 +80,24 @@ const MainAppContent: React.FC = () => {
   const [autoOpenCheckout, setAutoOpenCheckout] = useState(false);
   const [checkoutCart, setCheckoutCart] = useState<SimCartItem[]>([]);
   const [checkoutRestaurantId, setCheckoutRestaurantId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkAppInit = async () => {
+      try {
+        const onboarded = await AsyncStorage.getItem('@has_completed_onboarding');
+        if (onboarded === 'true') {
+          setHasSeenOnboarding(true);
+        } else {
+          setHasSeenOnboarding(false);
+        }
+      } catch (e) {
+        console.warn('Error reading onboarding status:', e);
+      } finally {
+        setIsAppReady(true);
+      }
+    };
+    checkAppInit();
+  }, []);
 
   const navigateToRestaurant = (id: string, orderId?: string | null, openCheckout?: boolean) => {
     if (activeScreen !== 'restaurant-detail') {
@@ -107,16 +127,34 @@ const MainAppContent: React.FC = () => {
     setActiveScreen('tracking');
   };
 
-  if (showSplash) {
-    return <SplashScreen onAnimationEnd={() => setShowSplash(false)} />;
+  if (!isAppReady) {
+    return <View style={{ flex: 1, backgroundColor: '#000000' }} />;
   }
 
-  if (showOnboarding) {
-    return <OnboardingScreen onFinished={() => setShowOnboarding(false)} />;
+  // 1. First time app open after installation -> Show onboarding
+  if (!hasSeenOnboarding) {
+    return (
+      <OnboardingScreen
+        onFinished={async () => {
+          setHasSeenOnboarding(true);
+          try {
+            await AsyncStorage.setItem('@has_completed_onboarding', 'true');
+          } catch (e) {
+            console.warn('Error saving onboarding status:', e);
+          }
+        }}
+      />
+    );
   }
 
+  // 2. If user is not authenticated -> Show login
   if (authState.type !== 'Authenticated') {
     return <LoginScreen onBack={() => setActiveScreen('home')} />;
+  }
+
+  // 3. If already logged in, the ONLY screen shown before HomeScreen is the Figma Location Splash:
+  if (showSplash) {
+    return <SplashScreen onAnimationEnd={() => setShowSplash(false)} />;
   }
 
   const renderScreen = () => {

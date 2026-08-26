@@ -278,7 +278,6 @@ export const HomeScreen = ({
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        stickyHeaderIndices={[3, 8]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1147,7 +1146,7 @@ const styles = StyleSheet.create({
   absolutePizzaLeft: {
     position: 'absolute',
     left: -BANNER_WIDTH * 0.02,
-    top: BANNER_HEIGHT * 0.15,
+    top: BANNER_HEIGHT * 0.2,
     width: BANNER_HEIGHT * 0.52,
     height: BANNER_HEIGHT * 0.52,
     resizeMode: 'contain',
