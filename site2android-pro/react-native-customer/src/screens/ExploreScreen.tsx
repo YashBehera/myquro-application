@@ -24,6 +24,15 @@ import { getOptimizedImageUrl } from '../utils/imageUtils';
 import { LazyImage } from '../components/LazyImage';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
+import {
   Search,
   X,
   MapPin,
@@ -295,6 +304,9 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({ onNavigateToDining
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
   topCard: {
     marginHorizontal: 24,

@@ -18,7 +18,15 @@ import { io } from 'socket.io-client';
 import { BACKEND_URL } from '../config';
 import { useViewModel } from '../state/MainViewModel';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 const BRAND_RED = '#FF181F';
 
 interface LoaderProps {

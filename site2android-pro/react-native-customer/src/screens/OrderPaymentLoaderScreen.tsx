@@ -42,8 +42,15 @@ import { BACKEND_URL } from '../config';
 import { useViewModel } from '../state/MainViewModel';
 import { SimCartItem } from './CheckoutScreen';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SCALE = Math.min(Math.max(SCREEN_WIDTH / 390, 0.88), 1.15);
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 // Fixed loader dimensions across ALL phases
 const SPINNER_SIZE = 206 * SCALE;

@@ -27,6 +27,15 @@ import {
   Frown,
   ChevronRight,
 } from 'lucide-react-native';
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 interface FavouritesScreenProps {
   onNavigateToExplore: () => void;
@@ -158,6 +167,9 @@ export const FavouritesScreen: React.FC<FavouritesScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
   header: {
     paddingHorizontal: 24,

@@ -10,7 +10,6 @@ import {
   Dimensions,
   Platform,
   SafeAreaView,
-  Modal,
   TouchableWithoutFeedback,
   Keyboard,
   Image,
@@ -22,11 +21,18 @@ import {
   RotateCcw,
   X,
   ChevronRight,
-  Utensils,
 } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 interface TopSearchSheetOverlayProps {
   visible: boolean;
@@ -44,27 +50,23 @@ const DEFAULT_RECENT_SEARCHES = [
   'Apna Dhaba',
 ];
 
-// Helper function to render text with matching query highlighted in bold
+// Helper function to render text with matching query highlighted in bold gold
 const renderBoldedText = (text: string, query: string) => {
   if (!query.trim()) {
-    return <Text style={{ color: '#0F172A', fontSize: 15.5, fontFamily: 'Urbanist-Bold' }}>{text}</Text>;
+    return <Text style={styles.boldTextMatch}>{text}</Text>;
   }
 
   const regex = new RegExp(`(${query.trim().replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
   const parts = text.split(regex);
 
   return (
-    <Text style={{ fontSize: 15.5, color: '#475569', fontFamily: 'Urbanist-Medium' }}>
+    <Text style={styles.boldTextContainer}>
       {parts.map((part, index) => {
         const isMatch = part.toLowerCase() === query.toLowerCase().trim();
         return (
           <Text
             key={index}
-            style={{
-              fontFamily: isMatch ? 'Urbanist-Bold' : 'Urbanist-Medium',
-              color: isMatch ? '#0F172A' : '#64748B',
-              fontWeight: isMatch ? '800' : '400',
-            }}
+            style={isMatch ? styles.matchHighlightText : styles.normalPartText}
           >
             {part}
           </Text>
@@ -94,14 +96,15 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
     if (visible) {
       setQuery('');
       Animated.parallel([
-        Animated.timing(animY, {
+        Animated.spring(animY, {
           toValue: 0,
-          duration: 280,
+          friction: 8,
+          tension: 65,
           useNativeDriver: true,
         }),
         Animated.timing(animOpacity, {
           toValue: 1,
-          duration: 280,
+          duration: 220,
           useNativeDriver: true,
         }),
       ]).start(() => {
@@ -113,12 +116,12 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
       Animated.parallel([
         Animated.timing(animY, {
           toValue: -600,
-          duration: 220,
+          duration: 200,
           useNativeDriver: true,
         }),
         Animated.timing(animOpacity, {
           toValue: 0,
-          duration: 220,
+          duration: 200,
           useNativeDriver: true,
         }),
       ]).start();
@@ -253,7 +256,7 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
           { transform: [{ translateY: animY }] },
         ]}
       >
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#0E0D0B' }}>
           {/* 1. TOP HEADER ROW */}
           <View style={styles.topHeaderRow}>
             <TouchableOpacity
@@ -261,7 +264,7 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
               onPress={handleClose}
               activeOpacity={0.7}
             >
-              <ArrowLeft size={22} color="#1E293B" strokeWidth={2.2} />
+              <ArrowLeft size={20} color="#DEA430" strokeWidth={2.2} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>
               Search for dishes & restaurants
@@ -271,32 +274,36 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
           {/* 2. SEARCH INPUT BOX */}
           <View style={styles.inputCardWrapper}>
             <View style={styles.inputInnerRow}>
-              {/* Active Cursor Accent */}
-              <View style={styles.activeCursorLine} />
+              {/* Gold Search Icon */}
+              <SearchIcon size={18} color="#DEA430" style={{ marginRight: 8 }} />
               <TextInput
                 ref={inputRef}
                 style={styles.textInput}
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Search, Order, Enjoy, Repeat!"
-                placeholderTextColor="#94A3B8"
+                placeholder="Search for 'Pizza' or 'Biryani'"
+                placeholderTextColor="#78716C"
                 returnKeyType="search"
                 onSubmitEditing={handleSubmitSearch}
                 autoCorrect={false}
+                selectionColor="#DEA430"
               />
               {query.length > 0 ? (
                 <TouchableOpacity
                   onPress={() => setQuery('')}
                   style={styles.clearBtn}
+                  activeOpacity={0.7}
                 >
-                  <X size={18} color="#64748B" />
+                  <View style={styles.clearBtnCircle}>
+                    <X size={12} color="#D1D5DB" strokeWidth={2.4} />
+                  </View>
                 </TouchableOpacity>
               ) : null}
 
               <View style={styles.micSection}>
                 <View style={styles.micDivider} />
-                <TouchableOpacity style={styles.micBtn}>
-                  <Mic size={18} color="#F97316" strokeWidth={2.2} />
+                <TouchableOpacity style={styles.micBtn} activeOpacity={0.7}>
+                  <Mic size={18} color="#DEA430" strokeWidth={2.2} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -313,10 +320,10 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
                   <TouchableOpacity
                     key={idx}
                     style={styles.chipItem}
-                    activeOpacity={0.8}
+                    activeOpacity={0.75}
                     onPress={() => handleChipPress(item)}
                   >
-                    <RotateCcw size={13} color="#64748B" strokeWidth={2} />
+                    <RotateCcw size={12} color="#DEA430" strokeWidth={2.2} />
                     <Text style={styles.chipText} numberOfLines={1}>
                       {item}
                     </Text>
@@ -325,9 +332,10 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
               </View>
             </View>
           ) : (
-            /* 4. SWIGGY-STYLE AUTOCOMPLETE SUGGESTIONS FULL-SCREEN TRANSITION */
+            /* 4. AUTOCOMPLETE SUGGESTIONS FULL-SCREEN TRANSITION */
             <ScrollView
               style={styles.suggestionsScrollView}
+              contentContainerStyle={{ paddingBottom: 40 }}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
@@ -356,6 +364,8 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
                     {renderBoldedText(s.name, query)}
                     <Text style={styles.suggestionSubtitle}>{s.subtitle}</Text>
                   </View>
+
+                  <ChevronRight size={16} color="#524C42" />
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -378,24 +388,28 @@ const styles = StyleSheet.create({
   },
   backdropScrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
   },
   floatingTopCard: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#FFFFFF',
-    elevation: 12,
+    maxWidth: isTablet ? 680 : undefined,
+    alignSelf: 'center',
+    backgroundColor: '#0E0D0B',
+    borderBottomWidth: 1,
+    borderBottomColor: '#26221A',
+    elevation: 16,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
     overflow: 'hidden',
   },
   compactCard: {
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
   fullScreenCard: {
     height: SCREEN_HEIGHT,
@@ -406,50 +420,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 8 : 16,
+    paddingTop: Platform.OS === 'ios' ? 10 : 16,
     paddingBottom: 12,
   },
   backBtn: {
-    padding: 6,
-    marginRight: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#181613',
+    borderWidth: 1,
+    borderColor: '#2E2920',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
   headerTitle: {
     fontSize: 16,
     fontFamily: 'Urbanist-Bold',
-    color: '#1E293B',
+    color: '#FFFFFF',
     flex: 1,
   },
   inputCardWrapper: {
     paddingHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   inputInnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
+    backgroundColor: '#181613',
+    borderWidth: 1.2,
+    borderColor: '#2E2920',
     borderRadius: 16,
-    height: 50,
+    height: 52,
     paddingHorizontal: 14,
-  },
-  activeCursorLine: {
-    width: 2,
-    height: 18,
-    backgroundColor: '#F97316',
-    marginRight: 8,
-    borderRadius: 1,
   },
   textInput: {
     flex: 1,
     fontSize: 15,
     fontFamily: 'Urbanist-Medium',
-    color: '#0F172A',
+    color: '#FFFFFF',
     paddingVertical: 8,
   },
   clearBtn: {
     padding: 6,
-    marginRight: 4,
+    marginRight: 2,
+  },
+  clearBtnCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#2A2620',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   micSection: {
     flexDirection: 'row',
@@ -458,21 +480,22 @@ const styles = StyleSheet.create({
   micDivider: {
     width: 1,
     height: 20,
-    backgroundColor: '#E2E8F0',
+    backgroundColor: '#2E2920',
     marginRight: 10,
+    marginLeft: 6,
   },
   micBtn: {
     padding: 4,
   },
   recentlySearchedSection: {
     paddingHorizontal: 16,
-    paddingBottom: 22,
+    paddingBottom: 24,
   },
   recentlySearchedLabel: {
     fontSize: 11,
     fontFamily: 'Urbanist-Bold',
-    color: '#475569',
-    letterSpacing: 0.8,
+    color: '#C49530',
+    letterSpacing: 1,
     marginBottom: 12,
   },
   chipsWrapContainer: {
@@ -483,19 +506,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    backgroundColor: '#181613',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#2E2920',
     borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
     marginRight: 8,
     marginBottom: 10,
-    backgroundColor: '#FFFFFF',
   },
   chipText: {
     fontSize: 13,
     fontFamily: 'Urbanist-Medium',
-    color: '#334155',
+    color: '#E2DCD5',
     maxWidth: SCREEN_WIDTH * 0.42,
   },
   suggestionsScrollView: {
@@ -505,15 +528,17 @@ const styles = StyleSheet.create({
   suggestionRowItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: '#1A1815',
   },
   suggestionImageAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#F1F5F9',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#1C1A17',
+    borderWidth: 1,
+    borderColor: '#2E2920',
   },
   suggestionTextColumn: {
     flex: 1,
@@ -523,7 +548,27 @@ const styles = StyleSheet.create({
   suggestionSubtitle: {
     fontSize: 12.5,
     fontFamily: 'Urbanist-Medium',
-    color: '#64748B',
-    marginTop: 3,
+    color: '#8E8A80',
+    marginTop: 2,
+  },
+  boldTextMatch: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontFamily: 'Urbanist-Bold',
+  },
+  boldTextContainer: {
+    fontSize: 15,
+    color: '#9CA3AF',
+    fontFamily: 'Urbanist-Medium',
+  },
+  matchHighlightText: {
+    fontFamily: 'Urbanist-Bold',
+    color: '#F2CA50',
+    fontWeight: '800',
+  },
+  normalPartText: {
+    fontFamily: 'Urbanist-Medium',
+    color: '#D1D5DB',
   },
 });
+

@@ -36,8 +36,15 @@ import Svg, { Circle, Line, Polyline, Path, Rect } from 'react-native-svg';
 
 import { getOptimizedImageUrl } from '../utils/imageUtils';
 import { LazyImage } from '../components/LazyImage';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 interface SearchScreenProps {
   onBack: () => void;

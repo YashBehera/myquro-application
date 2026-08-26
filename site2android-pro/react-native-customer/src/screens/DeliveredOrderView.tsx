@@ -15,8 +15,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-
-const { width } = Dimensions.get('window');
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 interface DeliveredOrderViewProps {
   orderId?: string;
@@ -357,6 +364,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 6,
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
 
   /* HERO 3D RIDER */
@@ -366,8 +376,8 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   heroRiderImage: {
-    width: width * 0.76,
-    height: (width * 0.76) * 0.8,
+    width: Math.min(SCREEN_WIDTH * 0.76, 380),
+    height: Math.min(SCREEN_WIDTH * 0.76, 380) * 0.8,
   },
   deliveredBadgeRow: {
     flexDirection: 'row',

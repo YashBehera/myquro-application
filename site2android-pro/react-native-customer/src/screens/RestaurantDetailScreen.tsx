@@ -55,9 +55,16 @@ import { BACKEND_URL } from '../config';
 import { CheckoutScreen, SimFoodItem, SimCartItem } from './CheckoutScreen';
 import { RestaurantRepository } from '../data/RestaurantRepository';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const SCALE = Math.min(Math.max(SCREEN_WIDTH / 390, 0.88), 1.15);
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 // ─── Figma Node 3026:889 Assets ───────────────────────────────────────────────
 const imgImage22      = require('../assets/restaurant_detail/figma/imgImage22.png'); // Back Arrow Chevron
@@ -1629,6 +1636,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 170,
     backgroundColor: '#000000',
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
 
   // ── 1. TOP NAV BAR ─────────────────────────────────────────────

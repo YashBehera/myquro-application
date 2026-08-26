@@ -36,8 +36,15 @@ import { LocationSelectorSheet } from './LocationSelectorSheet';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
 import { Restaurant } from '../types';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SCALE = Math.min(Math.max(SCREEN_WIDTH / 390, 0.88), 1.15);
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 // ─── Direct Figma Asset Imports (Node 3019:288 - Pixel-identical to HomeScreen) ───
 const imgImage44      = require('../assets/home/figma/imgImage44.png'); // Gold Chevron
@@ -940,6 +947,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 110,
     backgroundColor: '#000000',
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
 
   // ── 1. HEADER (Pixel-Identical to HomeScreen.tsx) ──────────────

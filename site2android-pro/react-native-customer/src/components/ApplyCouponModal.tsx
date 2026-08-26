@@ -34,9 +34,15 @@ import {
   ToastAndroid,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SCALE = Math.min(SCREEN_WIDTH / 393, 1.15);
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 // ─── Figma Node 3029:1641 Coupon Assets ───────────────────────────────────────
 const couponTicketIcon      = require('../assets/coupons/couponTicketIcon.png');
@@ -545,6 +551,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16 * SCALE,
     paddingTop: 10 * SCALE,
     paddingBottom: 40 * SCALE,
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
 
   // ── 1. HEADER ──────────────────────────────────────────────────
@@ -554,6 +563,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16 * SCALE,
     paddingVertical: 12 * SCALE,
     backgroundColor: '#000000',
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
   backBtn: {
     padding: 6 * SCALE,

@@ -5,7 +5,7 @@
  * Connected to ViewModel state, live filters, database, favorites, location, search, and navigation.
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,6 +13,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  Animated,
   Dimensions,
   StatusBar,
   Platform,
@@ -25,9 +26,18 @@ import { useViewModel } from '../state/MainViewModel';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
 import { Restaurant } from '../types';
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SCALE = Math.min(Math.max(SCREEN_WIDTH / 390, 0.88), 1.15);
+const BANNER_WIDTH = Math.min(SCREEN_WIDTH - 28, isTablet ? 640 : SCREEN_WIDTH - 28);
+const BANNER_HEIGHT = BANNER_WIDTH * (941 / 1672);
 
 // ─── Direct Figma Asset Imports (Node 3019:288) ────────────────────────────────
 const imgImage44      = require('../assets/home/figma/imgImage44.png'); // Gold Chevron
@@ -61,12 +71,13 @@ const imgBackground6  = require('../assets/home/figma/imgBackground6.png');
 const imgBackground5  = require('../assets/home/figma/imgBackground5.png');
 
 // 70% OFF Hero Banner Assets
-const imgImage26      = require('../assets/home/figma/imgImage26.png'); // Burger
+const imgImage26      = require('../assets/hero_floating_burger.png'); // New Burger
 const imgImage25      = require('../assets/home/figma/imgImage25.png'); // Sparkle top-right burger
 const imgImage24      = require('../assets/home/figma/imgImage24.png'); // Sparkle bottom-right burger
 const imgBackground4  = require('../assets/home/figma/imgBackground4.png'); // Line left
 const imgBackground3  = require('../assets/home/figma/imgBackground3.png'); // Line right
-const imgImage23      = require('../assets/home/figma/imgImage23.png'); // Pizza with sparkles
+const imgImage23      = require('../assets/hero_floating_pizza.png'); // New Pizza
+const imgNew70OffCenter = require('../assets/hero_banner_70off.png'); // New 70% Off Center
 
 // Deals Row Assets
 const imgImage22      = require('../assets/home/figma/imgImage22.png'); // 70% Ring Graphic
@@ -128,6 +139,25 @@ export const HomeScreen = ({
   const [activeSegment, setActiveSegment]         = useState<'reorder' | 'food15'>('reorder');
   const [activeExploreCat, setActiveExploreCat]   = useState('Specials');
   const [activeDealOffer, setActiveDealOffer]     = useState<string | null>(null);
+
+  // Floating bounce loop animation
+  const bounceAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounceAnim, {
+          toValue: 1,
+          duration: 1800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(bounceAnim, {
+          toValue: 0,
+          duration: 1800,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [bounceAnim]);
 
   const isFav = useCallback(
     (id: string) => {
@@ -537,27 +567,48 @@ export const HomeScreen = ({
           activeOpacity={0.95}
           onPress={handleHeroBannerPress}
         >
-          {/* Left: Burger + Sparkles */}
-          <View style={styles.heroLeftWrap}>
-            <Image source={imgImage26} style={styles.heroBurgerImg} />
-            <Image source={imgImage25} style={styles.heroSparkleTop} />
-            <Image source={imgImage24} style={styles.heroSparkleBottom} />
+          {/* Main 70% Off Banner Background wrapped to clip borders */}
+          <View style={styles.heroBgWrapper}>
+            <Image source={imgNew70OffCenter} style={styles.heroCenterBg} />
           </View>
 
-          {/* Center: 70%OFF + Lines + UP TO ₹140 */}
-          <View style={styles.heroCenterWrap}>
-            <Text style={styles.hero70OffText}>70%OFF</Text>
-            <View style={styles.heroSubRow}>
-              <Image source={imgBackground4} style={styles.heroAccentLine} />
-              <Text style={styles.heroUpToText}>UP TO ₹140</Text>
-              <Image source={imgBackground3} style={styles.heroAccentLine} />
-            </View>
-          </View>
+          {/* Floating Pizza over the left guide */}
+          <Animated.Image
+            source={imgImage23}
+            style={[
+              styles.absolutePizzaLeft,
+              {
+                transform: [
+                  { rotate: '-10deg' },
+                  {
+                    translateY: bounceAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, -12],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
 
-          {/* Right: Pizza Slice + Sparkles */}
-          <View style={styles.heroRightWrap}>
-            <Image source={imgImage23} style={styles.heroPizzaImg} />
-          </View>
+          {/* Floating Burger over the right guide */}
+          <Animated.Image
+            source={imgImage26}
+            style={[
+              styles.absoluteBurgerRight,
+              {
+                transform: [
+                  { rotate: '12deg' },
+                  {
+                    translateY: bounceAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-8, 4],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
         </TouchableOpacity>
 
         {/* ════════════════════════════════════════════════════════════════════════
@@ -893,6 +944,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 110,
     backgroundColor: '#000000',
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
 
   // ── 1. HEADER ──────────────────────────────────────────────────
@@ -1257,80 +1311,46 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 36 * SCALE,
     borderBottomLeftRadius: 14 * SCALE,
     borderBottomRightRadius: 28 * SCALE,
-    height: 104 * SCALE,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 8 * SCALE,
+    height: BANNER_HEIGHT,
+    position: 'relative',
+    overflow: 'visible',
+  },
+  heroBgWrapper: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: 18 * SCALE,
+    borderTopRightRadius: 36 * SCALE,
+    borderBottomLeftRadius: 14 * SCALE,
+    borderBottomRightRadius: 28 * SCALE,
     overflow: 'hidden',
   },
-  heroLeftWrap: {
-    width: 80 * SCALE,
-    height: 80 * SCALE,
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  heroBurgerImg: {
-    width: 75 * SCALE,
-    height: 70 * SCALE,
-    resizeMode: 'contain',
-  },
-  heroSparkleTop: {
+  heroCenterBg: {
     position: 'absolute',
-    top: 4,
-    right: 2,
-    width: 14 * SCALE,
-    height: 14 * SCALE,
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
     resizeMode: 'contain',
   },
-  heroSparkleBottom: {
+  absolutePizzaLeft: {
     position: 'absolute',
-    bottom: 8,
-    right: 4,
-    width: 11 * SCALE,
-    height: 11 * SCALE,
+    left: -BANNER_WIDTH * 0.02,
+    top: BANNER_HEIGHT * 0.15,
+    width: BANNER_HEIGHT * 0.52,
+    height: BANNER_HEIGHT * 0.52,
     resizeMode: 'contain',
   },
-  heroCenterWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  hero70OffText: {
-    fontFamily: 'Urbanist-Black',
-    fontSize: 38 * SCALE,
-    color: '#D3A036',
-    letterSpacing: -0.5,
-    lineHeight: 42 * SCALE,
-    includeFontPadding: false,
-  },
-  heroSubRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-    gap: 4,
-  },
-  heroAccentLine: {
-    width: 32 * SCALE,
-    height: 1,
-    resizeMode: 'stretch',
-  },
-  heroUpToText: {
-    fontFamily: 'Urbanist-Regular',
-    fontSize: 10.5 * SCALE,
-    color: '#806839',
-    letterSpacing: 0.2,
-  },
-  heroRightWrap: {
-    width: 85 * SCALE,
-    height: 80 * SCALE,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  heroPizzaImg: {
-    width: 82 * SCALE,
-    height: 75 * SCALE,
+  absoluteBurgerRight: {
+    position: 'absolute',
+    right: -BANNER_WIDTH * 0.04,
+    top: BANNER_HEIGHT * 0.05,
+    width: BANNER_HEIGHT * 0.58,
+    height: BANNER_HEIGHT * 0.58,
     resizeMode: 'contain',
   },
 

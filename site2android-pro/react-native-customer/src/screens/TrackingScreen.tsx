@@ -73,9 +73,15 @@ import { useViewModel } from '../state/MainViewModel';
 
 // Strict Figma Assets
 const deliveryBoyImg = require('../assets/tracking/delivery_boy.png');
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SCALE = Math.min(Math.max(SCREEN_WIDTH / 390, 0.85), 1.15);
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 const BRAND_RED = '#E03546';
 const BRAND_GREEN = '#149E55';

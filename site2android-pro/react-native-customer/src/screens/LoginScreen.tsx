@@ -23,9 +23,17 @@ import Svg, {
   Stop,
 } from "react-native-svg";
 import { useViewModel } from "../state/MainViewModel";
+import {
+  SCALE,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  MAX_CONTENT_WIDTH,
+} from "../utils/responsive";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-const scale = Math.min(Math.max(SCREEN_WIDTH / 390, 0.9), 1.15);
+const scale = SCALE;
 
 export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const { login, sendOtp, verifyOtp, setAuthenticatedState } = useViewModel();
@@ -520,6 +528,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    width: "100%",
+    maxWidth: isTablet ? 540 : undefined,
+    alignSelf: "center",
   },
   backArrowAbsolute: {
     position: "absolute",

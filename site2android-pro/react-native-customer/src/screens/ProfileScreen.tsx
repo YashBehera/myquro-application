@@ -35,6 +35,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKEND_URL } from '../config';
 import { useViewModel } from '../state/MainViewModel';
+import { isTablet } from '../utils/responsive';
 
 import { EditProfileSubView } from './profile/EditProfileSubView';
 import { AddressesSubView } from './profile/AddressesSubView';
@@ -1127,6 +1128,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingBottom: 30,
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
   userBannerContainer: {
     position: 'relative',

@@ -21,10 +21,17 @@ import Svg, {
   SvgXml,
 } from "react-native-svg";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+import {
+  SCALE,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  MAX_CONTENT_WIDTH,
+} from "../utils/responsive";
 
-// 440px is the original Figma artboard width
-const scale = Math.min(Math.max(SCREEN_WIDTH / 390, 0.9), 1.15);
+const scale = SCALE;
 
 interface OnboardingScreenProps {
   onFinished: () => void;

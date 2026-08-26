@@ -1,7 +1,16 @@
-import { Dimensions, Platform, StatusBar } from 'react-native';
+import { Platform, StatusBar } from 'react-native';
+import {
+  SCALE,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  SCREEN_HEIGHT,
+  MAX_CONTENT_WIDTH,
+} from '../../utils/responsive';
 
-export const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-export const scale = Math.min(Math.max(SCREEN_WIDTH / 390, 0.9), 1.15);
+export const scale = SCALE;
+export { SCALE, moderateScale, isTablet, isSmallDevice, SCREEN_WIDTH, SCREEN_HEIGHT, MAX_CONTENT_WIDTH };
 export const STATUSBAR_HEIGHT = Platform.OS === 'ios' ? 44 : (StatusBar.currentHeight || 0);
 
 export const getInitials = (name: string) => {

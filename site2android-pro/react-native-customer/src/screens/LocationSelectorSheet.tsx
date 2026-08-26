@@ -33,7 +33,15 @@ import {
   detectCurrentLocationWithOla,
 } from '../services/LocationService';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 // ─── Crisp Vector SVG Icons matching Figma Node 3029:1843 ───────────────────────
 const GoldGpsIcon = ({ size = 20 }: { size?: number }) => (
@@ -1112,6 +1120,9 @@ const styles = StyleSheet.create({
   figmaLocRoot: {
     flex: 1,
     backgroundColor: '#000000',
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
   figmaLocSafeArea: {
     flex: 1,

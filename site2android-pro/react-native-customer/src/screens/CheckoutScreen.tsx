@@ -50,9 +50,15 @@ import { useViewModel } from '../state/MainViewModel';
 import { BACKEND_URL } from '../config';
 import { ApplyCouponModal } from '../components/ApplyCouponModal';
 import { OrderPaymentLoaderScreen } from './OrderPaymentLoaderScreen';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SCALE = Math.min(Math.max(SCREEN_WIDTH / 390, 0.88), 1.15);
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 // ─── Figma Node 3027:1289 & 3027:1201 Assets ───────────────────────────────────
 const checkBack             = require('../assets/checkout/figma/checkBack.png');             // Back Arrow
@@ -1199,6 +1205,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14 * SCALE,
     paddingTop: 8,
     paddingBottom: 24,
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
 
   // ── 1. TOP HEADER ──────────────────────────────────────────────

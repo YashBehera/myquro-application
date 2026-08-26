@@ -23,9 +23,15 @@ import {
 } from 'lucide-react-native';
 
 import { useViewModel } from '../state/MainViewModel';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SCALE = Math.min(Math.max(SCREEN_WIDTH / 390, 0.88), 1.15);
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 // ─── Direct Figma Assets from Node 3043:106 ─────────────────────────────────
 const figmaBackArrow    = require('../assets/reorder/figma_back_arrow.png');
@@ -561,6 +567,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 110,
     backgroundColor: '#010101',
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
 
   // ─── [1] TOP HEADER ─── (node 3043:202)

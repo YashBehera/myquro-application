@@ -8,7 +8,7 @@
  */
 
 import React, { useState } from 'react';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   StyleSheet,
   View,
@@ -31,6 +31,7 @@ import {
 } from '@expo-google-fonts/urbanist';
 import { ViewModelProvider, useViewModel } from './src/state/MainViewModel';
 import { THEME, COLORS } from './src/theme/Theme';
+import { moderateScale, scale, isTablet, isSmallDevice, SCREEN_WIDTH } from './src/utils/responsive';
 
 // Screen Imports
 import { SplashScreen } from './src/screens/SplashScreen';
@@ -54,8 +55,6 @@ import {
   X,
 } from 'lucide-react-native';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
 type ScreenId = 'home' | 'explore' | 'favourites' | 'profile' | 'login' | 'search' | 'restaurant-detail' | 'cart' | 'checkout' | 'dining' | 'tracking' | 'reorder';
 
 // Direct Figma Bottom Nav Assets
@@ -65,9 +64,8 @@ const navStoreImg    = require('./src/assets/home/figma/imgImage5.png');
 const navEatRightImg = require('./src/assets/home/figma/imgImage2.png');
 const navReorderImg  = require('./src/assets/home/figma/imgImage1.png');
 
-
-
 const MainAppContent: React.FC = () => {
+  const insets = useSafeAreaInsets();
   const { isDarkMode, authState, cartItems, allRestaurants, syncCartItems } = useViewModel();
   const theme = isDarkMode ? THEME.dark : THEME.light;
 
@@ -280,7 +278,7 @@ const MainAppContent: React.FC = () => {
 
       {/* ── FIGMA BOTTOM NAV BAR ── (node 3019:296–316) */}
       {activeScreen !== 'restaurant-detail' && activeScreen !== 'checkout' && activeScreen !== 'cart' && activeScreen !== 'search' && activeScreen !== 'dining' && activeScreen !== 'tracking' && activeScreen !== 'profile' && (
-        <View style={styles.bottomNavBar}>
+        <View style={[styles.bottomNavBar, { bottom: Math.max(insets.bottom, 14) }]}>
           {/* Food */}
           <TouchableOpacity
             style={styles.navItem}
@@ -321,7 +319,17 @@ const MainAppContent: React.FC = () => {
 
       {/* Floating Cart Summary Bar with Upsell Banner on Top */}
       {cartItems.length > 0 && activeScreen !== 'checkout' && activeScreen !== 'cart' && activeScreen !== 'login' && activeScreen !== 'dining' && activeScreen !== 'profile' && (
-        <View style={[styles.fcWrapper, { bottom: activeScreen === 'restaurant-detail' || activeScreen === 'search' ? 24 : 98 }]}>
+        <View
+          style={[
+            styles.fcWrapper,
+            {
+              bottom:
+                activeScreen === 'restaurant-detail' || activeScreen === 'search'
+                  ? Math.max(insets.bottom + 12, 20)
+                  : 66 + Math.max(insets.bottom, 14) + 10,
+            },
+          ]}
+        >
           {/* Upsell discount banner directly on top */}
           {(() => {
             const cartTotalPrice = cartItems.reduce((acc, i) => acc + (i.price * i.quantity), 0);
@@ -475,11 +483,13 @@ const styles = StyleSheet.create({
   },
 
   // ── FIGMA BOTTOM NAV ──────────────────────────────────────────
+  // ── FIGMA BOTTOM NAV ──────────────────────────────────────────
   bottomNavBar: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 24 : 20,
     left: 16,
     right: 16,
+    maxWidth: isTablet ? 480 : undefined,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -565,6 +575,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
+    maxWidth: isTablet ? 580 : undefined,
+    alignSelf: 'center',
     zIndex: 25,
     gap: 8,
   },

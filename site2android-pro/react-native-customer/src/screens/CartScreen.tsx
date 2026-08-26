@@ -30,8 +30,16 @@ import {
   Plus,
   Minus,
 } from 'lucide-react-native';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  SCALE,
+  scale,
+  moderateScale,
+  isTablet,
+  isSmallDevice,
+  SCREEN_WIDTH,
+  MAX_CONTENT_WIDTH,
+} from '../utils/responsive';
 
 interface CartScreenProps {
   onBack: () => void;
@@ -50,6 +58,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
   onNavigateToRestaurant,
   onNavigateToTracking,
 }) => {
+  const insets = useSafeAreaInsets();
   const {
     isDarkMode,
     cartItems,
@@ -507,7 +516,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
       </ScrollView>
 
       {/* ─── 7. STICKY BOTTOM CHECKOUT BAR ─── */}
-      <View style={[styles.checkoutBar, isDarkMode && styles.checkoutBarDark]}>
+      <View style={[styles.checkoutBar, isDarkMode && styles.checkoutBarDark, { bottom: Math.max(insets.bottom, 12) }]}>
 
         {/* Left Side: Pricing details */}
         <View style={styles.checkoutLeft}>
@@ -704,7 +713,7 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: '#D32F2F',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingTop: Platform.OS === 'ios' ? 44 : 20,
     paddingBottom: 20,
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,
@@ -712,6 +721,9 @@ const styles = StyleSheet.create({
   headerTop: {
     flexDirection: 'row',
     alignItems: 'center',
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
   backButton: {
     padding: 8,
@@ -733,6 +745,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 120,
+    width: '100%',
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -1130,9 +1145,10 @@ const styles = StyleSheet.create({
   },
   checkoutBar: {
     position: 'absolute',
-    bottom: 38,
     left: 0,
     right: 0,
+    maxWidth: isTablet ? 720 : undefined,
+    alignSelf: 'center',
     height: 72,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
