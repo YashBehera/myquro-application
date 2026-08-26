@@ -24,7 +24,7 @@ import {
   MapPin,
   ArrowLeft,
 } from 'lucide-react-native';
-import MapView from 'react-native-maps';
+import { OlaMapView, OlaMapViewRef } from '../components/OlaMapView';
 import { useViewModel, SavedAddress } from '../state/MainViewModel';
 import {
   fetchPlaceSuggestions,
@@ -195,6 +195,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const hasCenteredOnUserRef = useRef(false);
   const geocodeTimeoutRef = useRef<any>(null);
+  const olaMapRef = useRef<OlaMapViewRef>(null);
 
   // User's saved addresses
   const effectiveAddresses = savedAddresses || [];
@@ -308,12 +309,18 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
           latitudeDelta: 0.005,
           longitudeDelta: 0.005,
         });
+        setUserLocation({
+          latitude: locationResult.latitude,
+          longitude: locationResult.longitude,
+        });
         setSelectedLocationInfo({
           label: locationResult.label,
           address: locationResult.address,
         });
         setArea(locationResult.label);
         setCity(locationResult.address.split(',')[1]?.trim() || '');
+        olaMapRef.current?.recenter(locationResult.latitude, locationResult.longitude, 16.5);
+        olaMapRef.current?.setUserLocation(locationResult.latitude, locationResult.longitude);
         return;
       }
     } catch (err) {
@@ -324,6 +331,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
   };
 
   const detectCurrentLocationForMap = async () => {
+    setIsResolvingAddress(true);
     try {
       const locationResult = await detectCurrentLocationWithOla();
       if (locationResult) {
@@ -333,17 +341,49 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
           latitudeDelta: 0.005,
           longitudeDelta: 0.005,
         });
+        setUserLocation({
+          latitude: locationResult.latitude,
+          longitude: locationResult.longitude,
+        });
         setSelectedLocationInfo({
           label: locationResult.label,
           address: locationResult.address,
         });
         setArea(locationResult.label);
         setCity(locationResult.address.split(',')[1]?.trim() || '');
+        olaMapRef.current?.recenter(locationResult.latitude, locationResult.longitude, 16.5);
+        olaMapRef.current?.setUserLocation(locationResult.latitude, locationResult.longitude);
         return;
       }
     } catch (err) {
       console.error("Ola Maps map detect error:", err);
+    } finally {
+      setIsResolvingAddress(false);
     }
+  };
+
+  const handleMapRegionChange = (coords: { latitude: number; longitude: number }) => {
+    setMapRegion((prev) => ({
+      ...prev,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    }));
+    if (geocodeTimeoutRef.current) clearTimeout(geocodeTimeoutRef.current);
+    setIsResolvingAddress(true);
+    geocodeTimeoutRef.current = setTimeout(async () => {
+      try {
+        const info = await reverseGeocode(coords.latitude, coords.longitude);
+        if (info) {
+          setSelectedLocationInfo(info);
+          setArea(info.label);
+          setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
+        }
+      } catch (err) {
+        console.error("Ola reverse geocode error on map drag:", err);
+      } finally {
+        setIsResolvingAddress(false);
+      }
+    }, 350);
   };
 
   const handleSelectSuggestion = async (item: any, navigateToMap: boolean = false) => {
@@ -377,6 +417,8 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
         });
         setArea(resolvedLabel);
         setCity(resolvedAddress.split(',').slice(-3, -2)[0]?.trim() || resolvedAddress.split(',')[1]?.trim() || '');
+
+        olaMapRef.current?.recenter(lat, lng, 16.5);
 
         if (navigateToMap) {
           setMapSearchQuery('');
@@ -852,32 +894,17 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
                   )}
                 </View>
 
-                {/* Map View */}
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                  <MapView
+                {/* Ola Map View */}
+                <View style={{ flex: 1 }}>
+                  <OlaMapView
+                    ref={olaMapRef}
+                    initialLatitude={mapRegion.latitude}
+                    initialLongitude={mapRegion.longitude}
+                    onRegionChangeComplete={handleMapRegionChange}
+                    userLocation={userLocation}
+                    showCenterMarker={true}
+                    showLocateMeButton={false}
                     style={StyleSheet.absoluteFillObject}
-                    region={mapRegion}
-                    showsUserLocation={hasLocationPermission}
-                    showsMyLocationButton={false}
-                    onRegionChangeComplete={(region) => {
-                      setMapRegion(region);
-                      if (geocodeTimeoutRef.current) clearTimeout(geocodeTimeoutRef.current);
-                      geocodeTimeoutRef.current = setTimeout(async () => {
-                        setIsResolvingAddress(true);
-                        try {
-                          const info = await reverseGeocode(region.latitude, region.longitude);
-                          if (info) {
-                            setSelectedLocationInfo(info);
-                            setArea(info.label);
-                            setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
-                          }
-                        } catch (err) {
-                          console.error(err);
-                        } finally {
-                          setIsResolvingAddress(false);
-                        }
-                      }, 600);
-                    }}
                   />
 
                   {/* Floating Re-center GPS Button on Map */}
@@ -888,11 +915,6 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
                   >
                     <GoldGpsIcon size={22} />
                   </TouchableOpacity>
-
-                  {/* Center Adjustable Pin */}
-                  <View style={styles.centerPinContainer} pointerEvents="none">
-                    <MapPin size={34} color="#C49530" />
-                  </View>
                 </View>
 
                 {/* Bottom Address Confirmation Bar */}

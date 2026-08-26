@@ -668,7 +668,7 @@ export const FavouritesSubView: React.FC<FavouritesSubViewProps> = ({
 const styles = StyleSheet.create({
   favContainer: {
     flex: 1,
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   favHeader: {
     flexDirection: 'row',
@@ -676,7 +676,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingVertical: 13,
-    paddingTop: Platform.OS === 'ios' ? 52 : 16,
+    paddingTop: Platform.OS === 'ios' ? 8 : 14,
+    backgroundColor: '#000000',
   },
   favHeaderBackBtn: {
     padding: 6,

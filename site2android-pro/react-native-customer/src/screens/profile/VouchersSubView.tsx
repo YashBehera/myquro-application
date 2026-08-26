@@ -133,10 +133,10 @@ export const VouchersSubView: React.FC<VouchersSubViewProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#000000',
   },
   containerDark: {
-    backgroundColor: '#0F0F12',
+    backgroundColor: '#000000',
   },
   standardHeader: {
     height: 56,
@@ -144,9 +144,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 8 : 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#EBEBEB',
-    backgroundColor: '#FFFFFF',
+    borderBottomColor: '#1A1817',
+    backgroundColor: '#000000',
   },
   backButton: {
     padding: 4,
@@ -154,7 +155,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: '#eae1d4',
     letterSpacing: 0.5,
   },
   scrollView: {
@@ -164,36 +165,36 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   cardContainer: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0D0C0A',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#EBEBEB',
+    borderColor: '#26221A',
   },
   orderCardDark: {
-    backgroundColor: '#1E1E24',
-    borderColor: '#2C2C2E',
+    backgroundColor: '#0D0C0A',
+    borderColor: '#26221A',
   },
   orderRestaurantName: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#FFFFFF',
   },
   textWhite: {
     color: '#FFFFFF',
   },
   profileFigmaVouchersScreenContainer: {
     flex: 1,
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   profileFigmaVouchersHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
+    borderBottomColor: '#1A1817',
     paddingHorizontal: 24,
     paddingVertical: 13,
-    paddingTop: Platform.OS === 'ios' ? 50 : 24,
+    paddingTop: Platform.OS === 'ios' ? 8 : 14,
     justifyContent: 'space-between',
   },
   profileFigmaVouchersHeaderBackBtn: {

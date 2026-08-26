@@ -23,7 +23,7 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({ onBack }) => {
   if (selectedRefund) {
     return (
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#191919" />
+        <StatusBar barStyle="light-content" backgroundColor="#000000" />
         
         {/* Header */}
         <View style={styles.header}>
@@ -140,7 +140,7 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({ onBack }) => {
   // ─── REFUND LIST VIEW ───
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#191919" />
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
       
       {/* Header */}
       <View style={styles.header}>
@@ -203,7 +203,7 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({ onBack }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   header: {
     flexDirection: 'row',
@@ -211,9 +211,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingVertical: 13,
-    paddingTop: Platform.OS === 'ios' ? 20 : 13,
+    paddingTop: Platform.OS === 'ios' ? 8 : 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
+    borderBottomColor: '#1A1817',
+    backgroundColor: '#000000',
   },
   backButton: {
     padding: 6,
@@ -375,7 +376,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 2,
     borderColor: '#10b981',
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
     marginTop: 6,
   },
   timelineVerticalLine: {

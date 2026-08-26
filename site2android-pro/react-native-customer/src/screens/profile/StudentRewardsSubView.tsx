@@ -150,17 +150,17 @@ export const StudentRewardsSubView: React.FC<StudentRewardsSubViewProps> = ({
 const styles = StyleSheet.create({
   profileFigmaStudentScreenContainer: {
     flex: 1,
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   profileFigmaStudentHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
+    borderBottomColor: '#1A1817',
     paddingHorizontal: 24,
     paddingVertical: 13,
-    paddingTop: Platform.OS === 'ios' ? 50 : 24,
+    paddingTop: Platform.OS === 'ios' ? 8 : 14,
     justifyContent: 'space-between',
   },
   profileFigmaStudentHeaderBackBtn: {
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     borderColor: '#f2ca50',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   profileFigmaStepCircleText: {
     fontSize: 14,

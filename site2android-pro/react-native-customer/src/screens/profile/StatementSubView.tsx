@@ -187,17 +187,17 @@ export const StatementSubView: React.FC<StatementSubViewProps> = ({
 const styles = StyleSheet.create({
   profileFigmaStatementScreenContainer: {
     flex: 1,
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   profileFigmaStatementHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
+    borderBottomColor: '#1A1817',
     paddingHorizontal: 24,
     paddingVertical: 13,
-    paddingTop: Platform.OS === 'ios' ? 50 : 24,
+    paddingTop: Platform.OS === 'ios' ? 8 : 14,
     justifyContent: 'space-between',
   },
   profileFigmaStatementHeaderBackBtn: {
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
   },
   profileFigmaStatementScrollContent: {
     paddingHorizontal: 24,
-    paddingTop: 40,
+    paddingTop: 16,
     paddingBottom: 60,
   },
   profileFigmaStatementMainTitleWhite: {

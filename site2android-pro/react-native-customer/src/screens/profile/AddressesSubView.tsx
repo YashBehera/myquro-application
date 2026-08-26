@@ -14,7 +14,7 @@ import {
   PermissionsAndroid,
   Image,
 } from 'react-native';
-import MapView, { PROVIDER_GOOGLE } from 'react-native-maps';
+import { OlaMapView, OlaMapViewRef } from '../../components/OlaMapView';
 import Svg, { Path } from 'react-native-svg';
 import {
   Plus,
@@ -100,6 +100,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
 
   const hasCenteredOnUserRef = useRef(false);
   const geocodeTimeoutRef = useRef<any>(null);
+  const olaMapRef = useRef<OlaMapViewRef>(null);
 
   const requestLocationPermission = async () => {
     if (Platform.OS === 'android') {
@@ -161,6 +162,30 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
     };
   }, []);
 
+  const handleMapRegionChange = (coords: { latitude: number; longitude: number }) => {
+    setMapRegion((prev) => ({
+      ...prev,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    }));
+    if (geocodeTimeoutRef.current) clearTimeout(geocodeTimeoutRef.current);
+    setIsResolvingAddress(true);
+    geocodeTimeoutRef.current = setTimeout(async () => {
+      try {
+        const info = await reverseGeocode(coords.latitude, coords.longitude);
+        if (info) {
+          setSelectedLocationInfo(info);
+          setArea(info.label);
+          setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
+        }
+      } catch (err) {
+        console.warn(err);
+      } finally {
+        setIsResolvingAddress(false);
+      }
+    }, 350);
+  };
+
   const detectCurrentLocation = async (silent = false) => {
     if (!silent) {
       setIsResolvingAddress(true);
@@ -174,12 +199,18 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
           latitudeDelta: 0.005,
           longitudeDelta: 0.005,
         });
+        setUserLocation({
+          latitude: locationResult.latitude,
+          longitude: locationResult.longitude,
+        });
         setSelectedLocationInfo({
           label: locationResult.label,
           address: locationResult.address,
         });
         setArea(locationResult.label);
         setCity(locationResult.address.split(',')[1]?.trim() || 'Bhubaneswar');
+        olaMapRef.current?.recenter(locationResult.latitude, locationResult.longitude, 16.5);
+        olaMapRef.current?.setUserLocation(locationResult.latitude, locationResult.longitude);
         setIsResolvingAddress(false);
         return;
       }
@@ -194,6 +225,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
         setSelectedLocationInfo(info);
         setArea(info.label);
         setCity(info.address.split(',')[1]?.trim() || 'Bhubaneswar');
+        olaMapRef.current?.recenter(20.2520, 85.7820, 16);
       }
     } catch (_) {}
     setIsResolvingAddress(false);
@@ -216,6 +248,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
         setSelectedLocationInfo({ label: item.mainText, address: item.description });
         setArea(item.mainText);
         setCity(item.description.split(',').slice(-3, -2)[0]?.trim() || item.description.split(',')[1]?.trim() || '');
+        olaMapRef.current?.recenter(coords.lat, coords.lng, 16.5);
         setIsResolvingAddress(false);
       }
     } catch (err) {
@@ -433,76 +466,16 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
       {addressStep === 'map' && (
         <View style={styles.profileFigmaMapScreenContainer}>
           <View style={StyleSheet.absoluteFillObject}>
-            <MapView
-              provider={PROVIDER_GOOGLE}
+            <OlaMapView
+              ref={olaMapRef}
+              initialLatitude={mapRegion.latitude}
+              initialLongitude={mapRegion.longitude}
+              onRegionChangeComplete={handleMapRegionChange}
+              userLocation={userLocation}
+              showCenterMarker={true}
+              showLocateMeButton={false}
               style={StyleSheet.absoluteFillObject}
-              region={mapRegion}
-              showsUserLocation={hasLocationPermission}
-              showsMyLocationButton={false}
-              onUserLocationChange={(event) => {
-                if (event.nativeEvent?.coordinate) {
-                  let { latitude, longitude } = event.nativeEvent.coordinate;
-                  const isOutsideIndia = latitude < 6.0 || latitude > 38.0 || longitude < 68.0 || longitude > 98.0;
-                  if (isOutsideIndia) {
-                    latitude = 12.9343;
-                    longitude = 77.6243;
-                  }
-                  setUserLocation({ latitude, longitude });
-
-                  if (!hasCenteredOnUserRef.current) {
-                    hasCenteredOnUserRef.current = true;
-                    setMapRegion({
-                      latitude,
-                      longitude,
-                      latitudeDelta: 0.005,
-                      longitudeDelta: 0.005,
-                    });
-                    setIsResolvingAddress(true);
-                    reverseGeocode(latitude, longitude).then(info => {
-                      if (info) {
-                        setSelectedLocationInfo(info);
-                        setArea(info.label);
-                        setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
-                      }
-                    }).catch(err => {
-                      console.warn(err);
-                    }).finally(() => {
-                      setIsResolvingAddress(false);
-                    });
-                  }
-                }
-              }}
-              onRegionChangeComplete={(region) => {
-                const latDiff = Math.abs(region.latitude - mapRegion.latitude);
-                const lngDiff = Math.abs(region.longitude - mapRegion.longitude);
-                if (latDiff < 0.0001 && lngDiff < 0.0001) return;
-
-                setMapRegion(region);
-                setIsResolvingAddress(true);
-                if (geocodeTimeoutRef.current) {
-                  clearTimeout(geocodeTimeoutRef.current);
-                }
-                geocodeTimeoutRef.current = setTimeout(async () => {
-                  try {
-                    const info = await reverseGeocode(region.latitude, region.longitude);
-                    if (info) {
-                      setSelectedLocationInfo(info);
-                      setArea(info.label);
-                      setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
-                    }
-                  } catch (err) {
-                    console.warn(err);
-                  } finally {
-                    setIsResolvingAddress(false);
-                  }
-                }, 300);
-              }}
             />
-
-            <View style={styles.profileFigmaCenteredMarkerContainer}>
-              <MapPin size={40} color={COLORS.quroRedPrimary} strokeWidth={2.5} />
-              <View style={styles.profileFigmaPinShadow} />
-            </View>
           </View>
 
           <SafeAreaView style={styles.profileFigmaTopHeaderArea} pointerEvents="box-none">
@@ -550,28 +523,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
           <TouchableOpacity
             style={styles.profileFigmaCurrentLocationBtn}
             onPress={() => {
-              if (userLocation) {
-                setMapRegion({
-                  latitude: userLocation.latitude,
-                  longitude: userLocation.longitude,
-                  latitudeDelta: 0.005,
-                  longitudeDelta: 0.005,
-                });
-                setIsResolvingAddress(true);
-                reverseGeocode(userLocation.latitude, userLocation.longitude).then(info => {
-                  if (info) {
-                    setSelectedLocationInfo(info);
-                    setArea(info.label);
-                    setCity(info.address.split(',').slice(-3, -2)[0]?.trim() || info.address.split(',')[1]?.trim() || '');
-                  }
-                }).catch(err => {
-                  console.warn(err);
-                }).finally(() => {
-                  setIsResolvingAddress(false);
-                });
-              } else {
-                detectCurrentLocation(false);
-              }
+              detectCurrentLocation(false);
             }}
           >
             <Navigation size={22} color="#FFFFFF" fill="#FFFFFF" />
@@ -863,7 +815,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
 const styles = StyleSheet.create({
   favContainer: {
     flex: 1,
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   favHeader: {
     flexDirection: 'row',
@@ -871,7 +823,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingVertical: 13,
-    paddingTop: Platform.OS === 'ios' ? 52 : 16,
+    paddingTop: Platform.OS === 'ios' ? 8 : 14,
+    backgroundColor: '#000000',
   },
   favHeaderBackBtn: {
     padding: 6,
@@ -1029,10 +982,10 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#000000',
   },
   containerDark: {
-    backgroundColor: '#0F0F12',
+    backgroundColor: '#000000',
   },
   header: {
     height: 56,
@@ -1142,7 +1095,7 @@ const styles = StyleSheet.create({
   },
   profileFigmaMapScreenContainer: {
     flex: 1,
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
     position: 'relative',
   },
   profileFigmaCenteredMarkerContainer: {
@@ -1163,7 +1116,7 @@ const styles = StyleSheet.create({
   },
   profileFigmaTopHeaderArea: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 12 : 24,
+    top: Platform.OS === 'ios' ? 8 : 14,
     left: 24,
     right: 24,
     zIndex: 99,
@@ -1177,7 +1130,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#1c1c1c',
+    backgroundColor: '#000000',
     borderWidth: 1,
     borderColor: '#2a2a2a',
     justifyContent: 'center',
@@ -1192,7 +1145,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1c1c1c',
+    backgroundColor: '#000000',
     borderWidth: 1,
     borderColor: '#2a2a2a',
     borderRadius: 9999,
@@ -1213,7 +1166,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Medium',
   },
   profileFigmaSuggestionsDropdown: {
-    backgroundColor: '#1c1c1c',
+    backgroundColor: '#000000',
     borderWidth: 1,
     borderColor: '#2a2a2a',
     borderRadius: 16,
@@ -1270,7 +1223,7 @@ const styles = StyleSheet.create({
     zIndex: 97,
   },
   profileFigmaInfoCard: {
-    backgroundColor: '#151515',
+    backgroundColor: '#000000',
     borderWidth: 1,
     borderColor: '#2a2a2a',
     borderRadius: 24,
@@ -1321,17 +1274,17 @@ const styles = StyleSheet.create({
   },
   profileFigmaFormScreenContainer: {
     flex: 1,
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   profileFigmaFormTopBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
     borderBottomWidth: 1,
     borderBottomColor: '#4d4635',
     paddingHorizontal: 24,
     paddingVertical: 13,
-    paddingTop: Platform.OS === 'ios' ? 50 : 24,
+    paddingTop: Platform.OS === 'ios' ? 8 : 14,
   },
   profileFigmaFormBackBtn: {
     padding: 6,
@@ -1478,7 +1431,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#8d8d8d',
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
@@ -1550,7 +1503,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Regular',
   },
   profileFigmaPhotoThumb: {
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
     borderWidth: 1,
     borderColor: '#4d4635',
     borderRadius: 8,
@@ -1573,7 +1526,7 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#191919',
+    backgroundColor: '#000000',
   },
   profileFigmaInstructionAddBtnText: {
     fontSize: 14,

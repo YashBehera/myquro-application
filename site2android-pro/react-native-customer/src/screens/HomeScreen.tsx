@@ -57,32 +57,15 @@ const imgImage35      = require('../assets/home/figma/imgImage35.png'); // Searc
 const imgImage34      = require('../assets/home/figma/imgImage34.png'); // Yellow Mic
 const imgBackground11 = require('../assets/home/figma/imgBackground11.png'); // Divider
 
-// Filter Tabs Assets
-const imgImage31      = require('../assets/home/figma/imgImage31.png'); // ALL Gold Grid
-const imgBackground10 = require('../assets/home/figma/imgBackground10.png'); // Active Underline
-const imgImage30      = require('../assets/home/figma/imgImage30.png'); // STORE
-const imgImage29      = require('../assets/home/figma/imgImage29.png'); // OFFERS
-const imgImage28      = require('../assets/home/figma/imgImage28.png'); // BOLT
-const imgImage27      = require('../assets/home/figma/imgImage27.png'); // GOURMET
-const imgBackground9  = require('../assets/home/figma/imgBackground9.png');  // Separators
-const imgBackground8  = require('../assets/home/figma/imgBackground8.png');
-const imgBackground7  = require('../assets/home/figma/imgBackground7.png');
-const imgBackground6  = require('../assets/home/figma/imgBackground6.png');
-const imgBackground5  = require('../assets/home/figma/imgBackground5.png');
-
 // 70% OFF Hero Banner Assets
 const imgImage26      = require('../assets/hero_floating_burger.png'); // New Burger
-const imgImage25      = require('../assets/home/figma/imgImage25.png'); // Sparkle top-right burger
-const imgImage24      = require('../assets/home/figma/imgImage24.png'); // Sparkle bottom-right burger
-const imgBackground4  = require('../assets/home/figma/imgBackground4.png'); // Line left
-const imgBackground3  = require('../assets/home/figma/imgBackground3.png'); // Line right
 const imgImage23      = require('../assets/hero_floating_pizza.png'); // New Pizza
 const imgNew70OffCenter = require('../assets/hero_banner_70off.png'); // New 70% Off Center
 
 // Deals Row Assets
-const imgImage22      = require('../assets/home/figma/imgImage22.png'); // 70% Ring Graphic
-const imgImage21      = require('../assets/home/figma/imgImage21.png'); // Gulab Jamun + Shake
-const imgImage20      = require('../assets/home/figma/imgImage20.png'); // Whole Pizza
+const imgImage22      = require('../assets/home/deal_delightful_70off.png'); // Delightful Deals (70% Off Badge)
+const imgImage21      = require('../assets/home/deal_free_treat.png'); // Get A Free Treat (Gulab Jamun + Shake)
+const imgImage20      = require('../assets/home/deal_min200_pizza.png'); // Min. ₹200 OFF (Whole Pizza)
 
 // Reorder Restaurant Cards Icons
 const imgImage17      = require('../assets/home/figma/imgImage17.png'); // Star icon
@@ -135,7 +118,6 @@ export const HomeScreen = ({
   const [isSearchSheetOpen, setIsSearchSheetOpen] = useState(false);
   const [isVegOnly, setIsVegOnly]                 = useState(false);
   const [refreshing, setRefreshing]               = useState(false);
-  const [activeFilter, setActiveFilter]           = useState('ALL');
   const [activeSegment, setActiveSegment]         = useState<'reorder' | 'food15'>('reorder');
   const [activeExploreCat, setActiveExploreCat]   = useState('Specials');
   const [activeDealOffer, setActiveDealOffer]     = useState<string | null>(null);
@@ -220,23 +202,7 @@ export const HomeScreen = ({
         if (isNonVeg && !/veg/i.test(res.name)) return false;
       }
 
-      // 2. Tab Filter (ALL, STORE, OFFERS, BOLT, GOURMET)
-      if (activeFilter === 'STORE') {
-        const isStore = /store|bakery|cafe|fast food|mart|grocery/i.test(`${res.category} ${res.cuisine}`);
-        if (!isStore) return false;
-      } else if (activeFilter === 'OFFERS') {
-        // Offer eligible places
-        const hasOffer = Boolean(res.offer || res.rating >= 4.0 || res.tags?.includes('offers'));
-        if (!hasOffer) return false;
-      } else if (activeFilter === 'BOLT') {
-        const isFast = (res.deliveryTime && res.deliveryTime <= 25) || /fast|bolt/i.test(`${res.category}`);
-        if (!isFast) return false;
-      } else if (activeFilter === 'GOURMET') {
-        const isGourmet = res.rating >= 4.3 || /gourmet|fine dining|royal/i.test(`${res.category} ${res.name}`);
-        if (!isGourmet) return false;
-      }
-
-      // 3. Category Filter (Specials, Biryani, Pizzas, Burgers, Rolls)
+      // 2. Category Filter (Specials, Biryani, Pizzas, Burgers, Rolls)
       if (activeExploreCat && activeExploreCat !== 'Specials') {
         const matchesCategory = new RegExp(activeExploreCat, 'i').test(
           `${res.cuisine} ${res.dishesCategory} ${res.name} ${res.category || ''}`
@@ -244,7 +210,7 @@ export const HomeScreen = ({
         if (!matchesCategory) return false;
       }
 
-      // 4. Deal Filter
+      // 3. Deal Filter
       if (activeDealOffer === '70OFF') {
         const has70 = Boolean(res.offer?.includes('70%') || res.rating >= 4.0);
         if (!has70) return false;
@@ -255,7 +221,7 @@ export const HomeScreen = ({
 
       return true;
     });
-  }, [sourceRestaurants, isVegOnly, activeFilter, activeExploreCat, activeDealOffer]);
+  }, [sourceRestaurants, isVegOnly, activeExploreCat, activeDealOffer]);
 
   // Horizontal cards based on active segment (Reorder vs Food in 15 mins)
   const horizontalCardList = useMemo(() => {
@@ -271,7 +237,6 @@ export const HomeScreen = ({
   }, [sourceRestaurants, activeSegment, favouriteRestaurantsList, isFav]);
 
   const handleHeroBannerPress = () => {
-    setActiveFilter('OFFERS');
     setActiveDealOffer('70OFF');
     if (Platform.OS === 'android') {
       ToastAndroid.show('Showing 70% OFF UPTO ₹140 Deals!', ToastAndroid.SHORT);
@@ -384,16 +349,15 @@ export const HomeScreen = ({
         <View style={styles.categoryRow}>
           {/* Tile 1: Food (Active Highlight) */}
           <TouchableOpacity
-            style={[styles.catTile, activeFilter === 'ALL' && styles.catTileActive]}
+            style={[styles.catTile, styles.catTileActive]}
             activeOpacity={0.85}
             onPress={() => {
-              setActiveFilter('ALL');
               setActiveExploreCat('Specials');
               setActiveDealOffer(null);
             }}
           >
             <Image source={imgImage39} style={styles.catBurgerImg} />
-            <Text style={[styles.catTileLabel, activeFilter === 'ALL' && styles.catTileLabelActive]}>
+            <Text style={[styles.catTileLabel, styles.catTileLabelActive]}>
               Food
             </Text>
           </TouchableOpacity>
@@ -472,95 +436,7 @@ export const HomeScreen = ({
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════
-            [CHILD 3 - NATIVELY STICKY] FILTER TABS (ALL, STORE, OFFERS, BOLT, GOURMET)
-            ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.filterTabsWrapper}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterTabsScroll}
-          >
-            {/* Tab 1: ALL */}
-            <TouchableOpacity
-              style={styles.tabItem}
-              activeOpacity={0.8}
-              onPress={() => {
-                setActiveFilter('ALL');
-                setActiveDealOffer(null);
-              }}
-            >
-              <Image source={imgImage31} style={styles.tabIconAll} />
-              <Text style={[styles.tabText, activeFilter === 'ALL' && styles.tabTextActive]}>ALL</Text>
-            </TouchableOpacity>
-            <Image source={imgBackground9} style={styles.tabSepImg} />
-
-            {/* Tab 2: STORE */}
-            <TouchableOpacity
-              style={styles.tabItem}
-              activeOpacity={0.8}
-              onPress={() => {
-                setActiveFilter('STORE');
-                setActiveDealOffer(null);
-              }}
-            >
-              <Image source={imgImage30} style={styles.tabIconStore} />
-              <Text style={[styles.tabText, activeFilter === 'STORE' && styles.tabTextActive]}>STORE</Text>
-            </TouchableOpacity>
-            <Image source={imgBackground8} style={styles.tabSepImg} />
-
-            {/* Tab 3: OFFERS */}
-            <TouchableOpacity
-              style={styles.tabItem}
-              activeOpacity={0.8}
-              onPress={() => {
-                setActiveFilter('OFFERS');
-                setActiveDealOffer('70OFF');
-              }}
-            >
-              <Image source={imgImage29} style={styles.tabIconOffers} />
-              <Text style={[styles.tabText, activeFilter === 'OFFERS' && styles.tabTextActive]}>OFFERS</Text>
-            </TouchableOpacity>
-            <Image source={imgBackground7} style={styles.tabSepImg} />
-
-            {/* Tab 4: BOLT */}
-            <TouchableOpacity
-              style={styles.tabItem}
-              activeOpacity={0.8}
-              onPress={() => {
-                setActiveFilter('BOLT');
-                setActiveDealOffer(null);
-              }}
-            >
-              <Image source={imgImage28} style={styles.tabIconBolt} />
-              <Text style={[styles.tabText, activeFilter === 'BOLT' && styles.tabTextActive]}>BOLT</Text>
-            </TouchableOpacity>
-            <Image source={imgBackground6} style={styles.tabSepImg} />
-
-            {/* Tab 5: GOURMET */}
-            <TouchableOpacity
-              style={styles.tabItem}
-              activeOpacity={0.8}
-              onPress={() => {
-                setActiveFilter('GOURMET');
-                setActiveDealOffer(null);
-              }}
-            >
-              <Image source={imgImage27} style={styles.tabIconGourmet} />
-              <Text style={[styles.tabText, activeFilter === 'GOURMET' && styles.tabTextActive]}>GOURMET</Text>
-            </TouchableOpacity>
-          </ScrollView>
-
-          {/* Active indicator underline */}
-          {activeFilter === 'ALL' && (
-            <Image source={imgBackground10} style={styles.tabActiveUnderlineImg} />
-          )}
-
-          {/* Full-width bottom separator line */}
-          <Image source={imgBackground5} style={styles.tabsBottomLineImg} />
-        </View>
-
-        {/* ════════════════════════════════════════════════════════════════════════
-            [CHILD 4] 70% OFF HERO BANNER (Interactive Deals Activation)
+            [CHILD 3] 70% OFF HERO BANNER (Interactive Deals Activation)
             ════════════════════════════════════════════════════════════════════════ */}
         <TouchableOpacity
           style={styles.heroBanner}
@@ -621,8 +497,10 @@ export const HomeScreen = ({
             activeOpacity={0.88}
             onPress={() => handleDealPress('DELIGHT', 'Delightful Deals')}
           >
-            <Text style={styles.dealTitle1}>Delightful</Text>
-            <Text style={styles.dealTitleGold}>Deals</Text>
+            <View style={styles.dealTextWrap}>
+              <Text style={styles.dealTitle1}>Delightful</Text>
+              <Text style={styles.dealTitleGold}>Deals</Text>
+            </View>
             <Image source={imgImage22} style={styles.dealRingImg} />
           </TouchableOpacity>
 
@@ -632,8 +510,10 @@ export const HomeScreen = ({
             activeOpacity={0.88}
             onPress={() => handleDealPress('FREETREAT', 'Get A Free Treat with one')}
           >
-            <Text style={styles.dealTitle1}>Get A</Text>
-            <Text style={styles.dealTitleGold}>Free Treat</Text>
+            <View style={styles.dealTextWrap}>
+              <Text style={styles.dealTitle1}>Get A</Text>
+              <Text style={styles.dealTitleGold}>Free Treat</Text>
+            </View>
             <Image source={imgImage21} style={styles.dealTreatImg} />
           </TouchableOpacity>
 
@@ -643,8 +523,10 @@ export const HomeScreen = ({
             activeOpacity={0.88}
             onPress={() => handleDealPress('MIN200', 'Min. ₹200 OFF on Orders')}
           >
-            <Text style={styles.dealTitle1}>Min.</Text>
-            <Text style={styles.dealTitleGold}>₹200 OFF</Text>
+            <View style={styles.dealTextWrap}>
+              <Text style={styles.dealTitle1}>Min.</Text>
+              <Text style={styles.dealTitleGold}>₹200 OFF</Text>
+            </View>
             <Image source={imgImage20} style={styles.dealPizzaImg} />
           </TouchableOpacity>
         </View>
@@ -813,7 +695,6 @@ export const HomeScreen = ({
                 style={styles.resetFiltersBtn}
                 onPress={() => {
                   setIsVegOnly(false);
-                  setActiveFilter('ALL');
                   setActiveExploreCat('Specials');
                   setActiveDealOffer(null);
                 }}
@@ -1225,81 +1106,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
 
-  // ── 4. FILTER TABS (NATIVELY STICKY) ───────────────────────────
-  filterTabsWrapper: {
-    backgroundColor: '#000000',
-    paddingTop: 4,
-    paddingBottom: 2,
-    zIndex: 100,
-  },
-  filterTabsScroll: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingBottom: 8,
-  },
-  tabItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8 * SCALE,
-    paddingVertical: 4,
-    gap: 5 * SCALE,
-  },
-  tabIconAll: {
-    width: 15 * SCALE,
-    height: 14 * SCALE,
-    resizeMode: 'contain',
-  },
-  tabIconStore: {
-    width: 15 * SCALE,
-    height: 14 * SCALE,
-    resizeMode: 'contain',
-  },
-  tabIconOffers: {
-    width: 15 * SCALE,
-    height: 14 * SCALE,
-    resizeMode: 'contain',
-  },
-  tabIconBolt: {
-    width: 13 * SCALE,
-    height: 14 * SCALE,
-    resizeMode: 'contain',
-  },
-  tabIconGourmet: {
-    width: 15 * SCALE,
-    height: 14 * SCALE,
-    resizeMode: 'contain',
-  },
-  tabText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 12 * SCALE,
-    color: '#5F5F5F',
-    letterSpacing: 0.3,
-  },
-  tabTextActive: {
-    color: '#AE913E',
-  },
-  tabSepImg: {
-    width: 1,
-    height: 16 * SCALE,
-    resizeMode: 'contain',
-    marginHorizontal: 2,
-  },
-  tabActiveUnderlineImg: {
-    position: 'absolute',
-    bottom: 0,
-    left: 14,
-    width: 60 * SCALE,
-    height: 3,
-    resizeMode: 'stretch',
-  },
-  tabsBottomLineImg: {
-    width: '100%',
-    height: 1,
-    resizeMode: 'stretch',
-  },
-
-  // ── 5. 70% OFF HERO BANNER ─────────────────────────────────────
+  // ── 4. 70% OFF HERO BANNER ─────────────────────────────────────
   heroBanner: {
     marginHorizontal: 14,
     marginTop: 6,
@@ -1366,47 +1173,58 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A0905',
     borderWidth: 1,
     borderColor: '#252218',
-    borderRadius: 20 * SCALE,
-    paddingTop: 12 * SCALE,
-    paddingHorizontal: 8 * SCALE,
-    minHeight: 162 * SCALE,
-    alignItems: 'flex-start',
+    borderRadius: 18 * SCALE,
+    paddingTop: 10 * SCALE,
+    paddingHorizontal: 10 * SCALE,
+    height: 122 * SCALE,
+    minHeight: 122 * SCALE,
+    position: 'relative',
     overflow: 'hidden',
+    justifyContent: 'flex-start',
   },
   dealCardActive: {
     borderColor: '#CBA143',
     backgroundColor: '#14110B',
   },
+  dealTextWrap: {
+    zIndex: 2,
+  },
   dealTitle1: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 13.5 * SCALE,
+    fontSize: 13 * SCALE,
     color: '#B8B8B7',
-    lineHeight: 16 * SCALE,
+    lineHeight: 15 * SCALE,
   },
   dealTitleGold: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 13.5 * SCALE,
+    fontSize: 13 * SCALE,
     color: '#A48133',
-    lineHeight: 16 * SCALE,
+    lineHeight: 15 * SCALE,
     marginBottom: 4,
   },
   dealRingImg: {
-    width: '100%',
-    height: 102 * SCALE,
+    position: 'absolute',
+    right: -45 * SCALE,
+    bottom: -12 * SCALE,
+    width: 180 * SCALE,
+    height: 110 * SCALE,
     resizeMode: 'contain',
-    alignSelf: 'center',
   },
   dealTreatImg: {
-    width: '100%',
+    position: 'absolute',
+    right: -12 * SCALE,
+    bottom: -10 * SCALE,
+    width: 104 * SCALE,
     height: 104 * SCALE,
     resizeMode: 'contain',
-    alignSelf: 'center',
   },
   dealPizzaImg: {
-    width: '100%',
-    height: 100 * SCALE,
+    position: 'absolute',
+    right: -14 * SCALE,
+    bottom: -12 * SCALE,
+    width: 106 * SCALE,
+    height: 106 * SCALE,
     resizeMode: 'contain',
-    alignSelf: 'center',
   },
 
   // ── 7. REORDER / FOOD IN 15 MINS SWITCH ────────────────────────
