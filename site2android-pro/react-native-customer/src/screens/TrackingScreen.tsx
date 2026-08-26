@@ -782,8 +782,27 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     });
 
     socket.on('delivery-update', (data: any) => {
-      if (data.delivery) setTrackingData(data.delivery);
+      // Backend sends a flat object { orderId, status, currentLat, currentLng, riderName, riderPhone }
+      // OR { delivery: {...}, rider: {...} } — handle both shapes.
+      if (data.delivery) {
+        setTrackingData((prev: any) => ({ ...prev, ...data.delivery }));
+      } else if (data.status) {
+        // Flat payload from /api/delivery/status/update and /api/delivery/accept
+        setTrackingData((prev: any) => ({
+          ...prev,
+          status: data.status,
+          currentLat: data.currentLat ?? prev?.currentLat,
+          currentLng: data.currentLng ?? prev?.currentLng,
+        }));
+      }
       if (data.rider) setRiderInfo(data.rider);
+      if (data.riderName || data.riderPhone) {
+        setRiderInfo((prev: any) => ({
+          ...prev,
+          name: data.riderName ?? prev?.name,
+          phone: data.riderPhone ?? prev?.phone,
+        }));
+      }
     });
 
     socket.on('order-update', (data: any) => {
@@ -888,11 +907,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     }
   };
 
-  const isDelivered =
-    riderStatus === 'delivered' ||
-    kitchenStatus === 'served' ||
-    kitchenStatus === 'delivered' ||
-    currentStatus === 'delivered';
+  // Only show DeliveredOrderView when the rider explicitly marks delivery complete.
+  // Do NOT trigger on kitchenStatus==='served' — that fires when the rider picks up the food.
+  const isDelivered = riderStatus === 'delivered';
 
   if (isDelivered) {
     return (

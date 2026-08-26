@@ -997,10 +997,13 @@ router.post("/accept", requireAuth, async (req: any, res) => {
     }
 
     emitToOrder(orderId, "delivery-update", {
-      orderId,
-      status: "assigned",
-      currentLat: activeRider.latitude,
-      currentLng: activeRider.longitude,
+      delivery: {
+        orderId,
+        status: "assigned",
+        currentLat: activeRider.latitude,
+        currentLng: activeRider.longitude,
+        updatedAt: new Date().toISOString(),
+      },
       riderName: activeRider.name,
       riderPhone: activeRider.phone,
     });
@@ -1147,7 +1150,8 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
       .where(eq(orderDeliveries.orderId, orderId));
 
     if (nextDeliveryStatus === "picked_up") {
-      // Rider picked up food — order is now picked up / served from restaurant
+      // Rider picked up food — order is now picked up / served from restaurant perspective.
+      // Update the order status in DB for restaurant tracking.
       await db.update(orders).set({ status: "served", updatedAt: new Date() }).where(eq(orders.id, orderId));
       
       const orderRecord = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
@@ -1160,8 +1164,8 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
           updatedAt: new Date().toISOString()
         });
       }
-      emitToOrder(orderId, "order-status", { orderId, status: "served" });
-      emitToOrder(orderId, "order-status-update", { orderId, status: "served" });
+      // NOTE: Do NOT emit order-status 'served' to the customer order room here.
+      // That would incorrectly show the DeliveredOrderView before actual delivery.
     } else if (nextDeliveryStatus === "out_for_delivery") {
       // Rider has left the restaurant
     } else if (nextDeliveryStatus === "delivered") {
@@ -1197,10 +1201,13 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
     const activeRider = (await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, user.id)))[0];
 
     emitToOrder(orderId, "delivery-update", {
-      orderId,
-      status: nextDeliveryStatus,
-      currentLat: activeRider.latitude,
-      currentLng: activeRider.longitude,
+      delivery: {
+        orderId,
+        status: nextDeliveryStatus,
+        currentLat: activeRider.latitude,
+        currentLng: activeRider.longitude,
+        updatedAt: new Date().toISOString(),
+      },
       riderName: activeRider.name,
       riderPhone: activeRider.phone,
     });
