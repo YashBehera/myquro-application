@@ -41,6 +41,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { Video, ResizeMode } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io } from 'socket.io-client';
 import {
@@ -57,6 +58,9 @@ import {
   ChefHat,
   MapPin,
   CheckCircle2,
+  ShoppingBag,
+  Home,
+  Check,
 } from 'lucide-react-native';
 import { DeliveredOrderView } from './DeliveredOrderView';
 import Svg, {
@@ -65,6 +69,7 @@ import Svg, {
   Circle,
   Defs,
   LinearGradient,
+  RadialGradient,
   Stop,
 } from 'react-native-svg';
 
@@ -421,6 +426,84 @@ const calculateDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: num
   return R * c;
 };
 
+// ─── Default Rich Mock Data for Instant Preview / Design Editing ─────────────
+const DEFAULT_MOCK_ORDER = {
+  id: 'ORD-98421',
+  orderId: 'ORD-98421',
+  restaurantName: 'The Maharaja Restaurant',
+  restaurantAddress: 'Plot 42, Patrapada, Bhubaneswar',
+  restaurantPhone: '+91 98765 43210',
+  restaurantLatitude: 20.3009,
+  restaurantLongitude: 85.8199,
+  deliveryAddress: 'Flat 402, Royal Palms, Infocity, Bhubaneswar',
+  customerLatitude: 20.2505,
+  customerLongitude: 85.7882,
+  status: 'out_for_delivery',
+  etaMinutes: 18,
+  createdAt: new Date().toISOString(),
+  totalAmount: 589,
+  itemTotal: 520,
+  tax: 26,
+  deliveryFee: 0,
+  platformFee: 5,
+  discount: 140,
+  couponCode: 'DELULU4FOOD',
+  paymentMethod: 'UPI (PhonePe)',
+  items: [
+    {
+      id: 'item_1',
+      menuItemName: 'Paneer Butter Masala (Special)',
+      name: 'Paneer Butter Masala (Special)',
+      quantity: 1,
+      price: 280,
+      isVeg: true,
+      customization: 'Spicy • Extra Butter',
+    },
+    {
+      id: 'item_2',
+      menuItemName: 'Butter Garlic Naan',
+      name: 'Butter Garlic Naan',
+      quantity: 2,
+      price: 60,
+      isVeg: true,
+    },
+    {
+      id: 'item_3',
+      menuItemName: 'Hyderabadi Veg Dum Biryani',
+      name: 'Hyderabadi Veg Dum Biryani',
+      quantity: 1,
+      price: 220,
+      isVeg: true,
+      customization: 'With Raita & Salan',
+    },
+  ],
+};
+
+const DEFAULT_MOCK_RIDER = {
+  id: 'rider_901',
+  name: 'RAJA RAM',
+  fullName: 'RAJA RAM',
+  phone: '+91 98765 43210',
+  contactNumber: '+91 98765 43210',
+  rating: 4.9,
+  totalDeliveries: 1420,
+  vehicleModel: 'Honda Activa 6G',
+  vaccinated: true,
+};
+
+const DEFAULT_MOCK_TRACKING = {
+  orderId: 'ORD-98421',
+  status: 'out_for_delivery',
+  riderId: 'rider_901',
+  currentLat: 20.2750,
+  currentLng: 85.8040,
+  restaurantLat: 20.3009,
+  restaurantLng: 85.8199,
+  customerLat: 20.2505,
+  customerLng: 85.7882,
+  etaMinutes: 18,
+};
+
 interface TrackingScreenProps {
   orderId: string | null;
   onBack: () => void;
@@ -431,10 +514,10 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const { authState, currentLocation, savedAddresses, allRestaurants, cartItems } = useViewModel();
   const sessionToken = authState.type === 'Authenticated' ? authState.sessionToken : '';
 
-  const [loading, setLoading] = useState(true);
-  const [orderDetail, setOrderDetail] = useState<any>(null);
-  const [trackingData, setTrackingData] = useState<any>(null);
-  const [riderInfo, setRiderInfo] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [orderDetail, setOrderDetail] = useState<any>(DEFAULT_MOCK_ORDER);
+  const [trackingData, setTrackingData] = useState<any>(DEFAULT_MOCK_TRACKING);
+  const [riderInfo, setRiderInfo] = useState<any>(DEFAULT_MOCK_RIDER);
   const [olaEtaMins, setOlaEtaMins] = useState<number | null>(null);
   const socketRef = useRef<any>(null);
 
@@ -456,7 +539,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const chatScrollRef = useRef<any>(null);
 
   // Dev Testing Panel
-  const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
+  const [isDevPanelOpen, setIsDevPanelOpen] = useState(true);
   const [simulating, setSimulating] = useState(false);
 
   const currentRestaurant = allRestaurants?.find(r => 
@@ -767,6 +850,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   };
 
   useEffect(() => {
+    if (!orderId || orderId === 'ORD-98421') return;
     fetchInitialData();
     const interval = setInterval(() => {
       fetchInitialData();
@@ -889,28 +973,96 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   };
 
   const simulateStep = async (status: string) => {
-    if (!orderId) return;
     setSimulating(true);
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/delivery/simulate/step`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-        },
-        body: JSON.stringify({ orderId, status }),
+
+    // 1. Immediately apply local stage state so UI updates in real-time
+    if (status === 'placed') {
+      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'placed' }));
+      setTrackingData(null);
+      setRiderInfo(null);
+    } else if (status === 'assigned') {
+      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'preparing' }));
+      setTrackingData({
+        orderId: orderId || 'ORD-98421',
+        status: 'assigned',
+        riderId: 'rider_901',
+        currentLat: restLat + 0.005,
+        currentLng: restLng - 0.004,
+        etaMinutes: 22,
       });
-      if (res.ok) {
-        await fetchInitialData();
-        if (Platform.OS === 'android') {
-          ToastAndroid.show(`Simulated status: ${status}`, ToastAndroid.SHORT);
-        }
-      }
-    } catch (err) {
-      console.error('Simulation error:', err);
-    } finally {
-      setSimulating(false);
+      setRiderInfo(DEFAULT_MOCK_RIDER);
+    } else if (status === 'arrived_at_store') {
+      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'ready' }));
+      setTrackingData({
+        orderId: orderId || 'ORD-98421',
+        status: 'arrived_at_store',
+        riderId: 'rider_901',
+        currentLat: restLat,
+        currentLng: restLng,
+        etaMinutes: 18,
+      });
+      setRiderInfo(DEFAULT_MOCK_RIDER);
+    } else if (status === 'picked_up') {
+      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'ready' }));
+      setTrackingData({
+        orderId: orderId || 'ORD-98421',
+        status: 'picked_up',
+        riderId: 'rider_901',
+        currentLat: restLat * 0.8 + custLat * 0.2,
+        currentLng: restLng * 0.8 + custLng * 0.2,
+        etaMinutes: 14,
+      });
+      setRiderInfo(DEFAULT_MOCK_RIDER);
+    } else if (status === 'out_for_delivery') {
+      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'out_for_delivery' }));
+      setTrackingData({
+        orderId: orderId || 'ORD-98421',
+        status: 'out_for_delivery',
+        riderId: 'rider_901',
+        currentLat: restLat * 0.4 + custLat * 0.6,
+        currentLng: restLng * 0.4 + custLng * 0.6,
+        etaMinutes: 8,
+      });
+      setRiderInfo(DEFAULT_MOCK_RIDER);
+    } else if (status === 'delivered') {
+      setOrderDetail((prev: any) => ({
+        ...(prev || DEFAULT_MOCK_ORDER),
+        status: 'delivered',
+        updatedAt: new Date().toISOString(),
+      }));
+      setTrackingData({
+        orderId: orderId || 'ORD-98421',
+        status: 'delivered',
+        riderId: 'rider_901',
+        currentLat: custLat,
+        currentLng: custLng,
+        etaMinutes: 0,
+        updatedAt: new Date().toISOString(),
+      });
+      setRiderInfo(DEFAULT_MOCK_RIDER);
     }
+
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(`Simulated: ${status.toUpperCase().replace(/_/g, ' ')}`, ToastAndroid.SHORT);
+    }
+
+    // 2. Also forward to backend if running a real backend order
+    if (orderId && orderId !== 'ORD-98421') {
+      try {
+        await fetch(`${BACKEND_URL}/api/delivery/simulate/step`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+          },
+          body: JSON.stringify({ orderId, status }),
+        });
+      } catch (err) {
+        // Silently handled
+      }
+    }
+
+    setSimulating(false);
   };
 
   // Only show DeliveredOrderView when the rider explicitly marks delivery complete.
@@ -993,9 +1145,14 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         bounces={false}
       >
         {/* ════════════════════════════════════════════════════════════════════════
-            [2] HERO MEDIA AREA (WITH TOP & BOTTOM BLACK GRADIENT FADE)
+            [2] HERO MEDIA AREA (FULL HEIGHT VIDEO WITH ACCENT GRADIENTS)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={[styles.heroMediaContainer, { height: 380 * SCALE }]}>
+        <View
+          style={[
+            styles.heroMediaContainer,
+            { height: isMapExpanded ? 380 * SCALE : Math.round(SCREEN_WIDTH * (912 / 576)) },
+          ]}
+        >
           {isMapExpanded ? (
             /* Live Interactive Full Ola MapView Mode (matching IncomingRequestModal UI) */
             <View style={StyleSheet.absoluteFillObject}>
@@ -1026,93 +1183,51 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               </View>
             </View>
           ) : (
-            /* Delivery Scene matching Figma Hero */
+            /* Delivery Scene with Full-Height Background Video */
             <View style={styles.heroSceneWrapper}>
-              {/* Real-World Grocery/Store Visual Background */}
-              <Image
-                source={{
-                  uri: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=800&auto=format&fit=crop&q=80',
-                }}
-                style={styles.heroBgImage}
+              {/* Full-Height Looping Background Video */}
+              <Video
+                source={require('../assets/tracking/hero_background.mp4')}
+                style={styles.heroBgVideo}
+                resizeMode={ResizeMode.COVER}
+                isLooping
+                isMuted={isMuted}
+                shouldPlay={isPlaying}
               />
 
-              {/* ── TOP FADE GRADIENT (Dispersing into Black at Top) ──────── */}
-              <Svg width="100%" height={140 * SCALE} style={styles.heroTopFadeGradient}>
+              {/* ── TOP SUBTLE STATUS BAR SHADING (Keeps top of video crystal clear) ── */}
+              <Svg
+                width="100%"
+                height={Math.max(topHeaderPadding + 24 * SCALE, 60)}
+                style={styles.heroTopFadeGradient}
+                pointerEvents="none"
+              >
                 <Defs>
                   <LinearGradient id="heroTopGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <Stop offset="0%" stopColor="#000000" stopOpacity="0.95" />
-                    <Stop offset="45%" stopColor="#000000" stopOpacity="0.75" />
+                    <Stop offset="0%" stopColor="#000000" stopOpacity="0.45" />
+                    <Stop offset="60%" stopColor="#000000" stopOpacity="0.15" />
                     <Stop offset="100%" stopColor="#000000" stopOpacity="0" />
                   </LinearGradient>
                 </Defs>
                 <Rect width="100%" height="100%" fill="url(#heroTopGrad)" />
               </Svg>
 
-              {/* ── BOTTOM FADE GRADIENT (Dispersing into Black at Bottom) ───── */}
-              <Svg width="100%" height={160 * SCALE} style={styles.heroBottomFadeGradient}>
+              {/* ── BOTTOM FADE GRADIENT (Smooth transition into status card) ───── */}
+              <Svg
+                width="100%"
+                height={120 * SCALE}
+                style={styles.heroBottomFadeGradient}
+                pointerEvents="none"
+              >
                 <Defs>
                   <LinearGradient id="heroBottomGrad" x1="0%" y1="0%" x2="0%" y2="100%">
                     <Stop offset="0%" stopColor="#000000" stopOpacity="0" />
-                    <Stop offset="50%" stopColor="#000000" stopOpacity="0.7" />
+                    <Stop offset="60%" stopColor="#000000" stopOpacity="0.65" />
                     <Stop offset="100%" stopColor="#000000" stopOpacity="1" />
                   </LinearGradient>
                 </Defs>
                 <Rect width="100%" height="100%" fill="url(#heroBottomGrad)" />
               </Svg>
-
-              {/* Hand Holding Smartphone Graphic */}
-              <View
-                style={[
-                  styles.phoneMockupContainer,
-                  { top: topHeaderPadding + 44 * SCALE },
-                ]}
-              >
-                {/* Wristbands */}
-                <View style={styles.handWristBands}>
-                  <View style={styles.wristBandGreen} />
-                  <View style={styles.wristBandPurple} />
-                </View>
-
-                {/* Smartphone Device Frame */}
-                <View style={styles.phoneDeviceFrame}>
-                  <View style={styles.phoneInnerScreen}>
-                    {/* Top Kiwi status bar */}
-                    <View style={styles.phoneScreenTopRow}>
-                      <Text style={styles.phoneBackChevron}>‹</Text>
-                      <Text style={styles.phoneKiwiBrand}>kiwi</Text>
-                      <View style={styles.phoneTopPill} />
-                    </View>
-
-                    {/* Green Checkmark Circle Badge */}
-                    <View style={styles.phoneCenterCheckCircle}>
-                      <Text style={styles.phoneCheckmarkSign}>✓</Text>
-                    </View>
-
-                    {/* Paid to details */}
-                    <Text style={styles.phonePaidToLabel}>Paid to</Text>
-                    <Text style={styles.phonePaidToName}>{restaurantName}</Text>
-
-                    {/* Bottom DONE Button */}
-                    <View style={styles.phoneDoneBtn}>
-                      <Text style={styles.phoneDoneBtnText}>DONE</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-
-              {/* Hero Promotional Text on Right */}
-              <View
-                style={[
-                  styles.heroPromoTextWrap,
-                  { top: topHeaderPadding + 54 * SCALE },
-                ]}
-              >
-                <Text style={styles.heroPayWithText}>Pay with UPI on</Text>
-                <View style={styles.heroKiwiCreditCardRow}>
-                  <Text style={styles.heroKiwiLimeText}>kiwi </Text>
-                  <Text style={styles.heroCreditCardWhiteText}>credit card</Text>
-                </View>
-              </View>
             </View>
           )}
 
@@ -1295,13 +1410,13 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                       },
                     ]}
                   >
-                    {/* ON TIME Badge Row */}
+                    {/* ON TIME Badge Row (Gold Checkmark & Gold Text) */}
                     <View style={styles.onTimeBadgeRow}>
-                      <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
+                      <Svg width={13 * SCALE} height={13 * SCALE} viewBox="0 0 24 24" fill="none">
                         <Path
                           d="M20 6L9 17L4 12"
-                          stroke="#139D54"
-                          strokeWidth="3.2"
+                          stroke="#E5B842"
+                          strokeWidth="3.4"
                           strokeLinecap="round"
                           strokeLinejoin="round"
                         />
@@ -1309,66 +1424,70 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                       <Text style={styles.onTimeBadgeText}>{statusInfo.badge || 'ON TIME'}</Text>
                     </View>
 
-                    {/* Main Status Title */}
+                    {/* Main Status Title: Partner is on the way */}
                     <Text style={styles.partnerStatusTitle}>{statusInfo.title}</Text>
 
                     {/* Subtitle Description */}
                     <Text style={styles.partnerStatusDesc}>{statusInfo.description}</Text>
                   </Animated.View>
 
-                  {/* Right: Vibrant Emerald-Lime Green ETA Card */}
-                  <View style={styles.etaGreenBadgeCard}>
+                  {/* Right: Gold ETA Badge (Matching Screenshot) */}
+                  <View style={styles.etaGoldBadgeCard}>
                     <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
                       <Defs>
-                        <LinearGradient id="etaGreenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <Stop offset="0%" stopColor="#12B35B" />
-                          <Stop offset="100%" stopColor="#0B8F4A" />
+                        <LinearGradient id="etaGoldGradPartner" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <Stop offset="0%" stopColor="#F5BE38" />
+                          <Stop offset="100%" stopColor="#DE9E22" />
                         </LinearGradient>
                       </Defs>
-                      <Rect width="100%" height="100%" rx={20 * SCALE} fill="url(#etaGreenGrad)" />
+                      <Rect width="100%" height="100%" rx={20 * SCALE} fill="url(#etaGoldGradPartner)" />
                     </Svg>
-                    <Text style={styles.etaNumberLarge}>{etaMinutes}</Text>
-                    <Text style={styles.etaMinsUnit}>mins</Text>
+                    <Text style={styles.etaNumberBlack}>{etaMinutes}</Text>
+                    <Text style={styles.etaMinsUnitBlack}>mins</Text>
                   </View>
                 </View>
 
-                {/* Divider Line */}
+                {/* Subtle Divider Line */}
                 <View style={styles.statusCardDividerLine} />
 
-                {/* Bottom Row: Add Delivery Instructions + Contact Buttons */}
+                {/* Bottom Row: Add Delivery Instructions + Unified Action Capsule */}
                 <View style={styles.statusCardBottomSection}>
                   <TouchableOpacity
                     style={styles.addInstructionsRow}
                     activeOpacity={0.8}
                     onPress={() => setShowDeliveryInstructionsModal(true)}
                   >
-                    <Text style={styles.addInstructionsGoldText}>Add Delivery Instructions</Text>
-                    <Text style={styles.addInstructionsGoldChevron}>›</Text>
+                    <Text style={styles.addInstructionsText}>Add Delivery Instructions</Text>
+                    <ChevronRight size={15 * SCALE} color="#9A9AA2" />
                   </TouchableOpacity>
 
-                  {/* Right Quick Actions */}
-                  <View style={styles.quickActionsGroup}>
+                  {/* Right Unified Action Capsule (Call | Chat | Avatar) */}
+                  <View style={styles.unifiedActionCapsule}>
                     {/* Call Button */}
                     <TouchableOpacity
-                      style={styles.circleActionBtn}
+                      style={styles.capsuleIconBtn}
                       activeOpacity={0.8}
                       onPress={handleCallRider}
                     >
-                      <Phone size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
+                      <Phone size={15 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
                     </TouchableOpacity>
+
+                    <View style={styles.capsuleDivider} />
 
                     {/* Chat Button */}
                     <TouchableOpacity
-                      style={styles.circleActionBtn}
+                      style={styles.capsuleIconBtn}
                       activeOpacity={0.8}
                       onPress={() => setShowChatModal(true)}
                     >
-                      <MessageSquare size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
+                      <MessageSquare size={15 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
                     </TouchableOpacity>
 
-                    {/* Strict Figma Asset: Delivery Boy Avatar beside Message button */}
+                    <View style={styles.capsuleDivider} />
+
+                    {/* Delivery Partner Avatar */}
                     <TouchableOpacity
-                      style={styles.driverAvatarWrap}
+                      style={styles.capsuleAvatarBtn}
                       activeOpacity={0.85}
                       onPress={handleCallRider}
                     >
@@ -1385,126 +1504,223 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           </View>
 
           {/* ══════════════════════════════════════════════════════════════════════
-              [4] SAVINGS PILL BANNER (FIGMA NODE 3046:153)
+              [4] SAVINGS PILL BANNER (PREMIUM EMERALD GLOW CAPSULE)
               ══════════════════════════════════════════════════════════════════════ */}
           <View style={styles.savingsPillBanner}>
-            <Text style={styles.savingsSparkleStar}>✦</Text>
+            {/* Ambient Emerald Glass Glow Background */}
+            <View style={StyleSheet.absoluteFill} pointerEvents="none">
+              <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                <Defs>
+                  <LinearGradient id="savingsBaseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <Stop offset="0%" stopColor="#08140B" />
+                    <Stop offset="50%" stopColor="#0E2816" />
+                    <Stop offset="100%" stopColor="#08140B" />
+                  </LinearGradient>
+                  <RadialGradient id="savingsCenterGlow" cx="50%" cy="50%" r="55%" fx="50%" fy="50%">
+                    <Stop offset="0%" stopColor="#22C55E" stopOpacity="0.22" />
+                    <Stop offset="100%" stopColor="#08140B" stopOpacity="0" />
+                  </RadialGradient>
+                </Defs>
+                <Rect width="100%" height="100%" fill="url(#savingsBaseGrad)" />
+                <Rect width="100%" height="100%" fill="url(#savingsCenterGlow)" />
+              </Svg>
+            </View>
+
+            {/* Left Glowing Diamond Star */}
+            <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
+                fill="#34D399"
+              />
+            </Svg>
+
+            {/* Banner Text with Highlighted Savings */}
             <Text style={styles.savingsBannerText}>
-              {orderDetail?.discount > 0
-                ? `Yay! ₹${orderDetail.discount} saved on this order`
-                : 'Yay! FREE delivery applied to this order'}
+              Yay!{' '}
+              <Text style={styles.savingsAmountHighlight}>
+                {orderDetail?.discount > 0 ? `₹${orderDetail.discount} saved` : 'FREE delivery'}
+              </Text>
+              {' '}on this order
             </Text>
-            <Text style={styles.savingsSparkleStar}>✦</Text>
+
+            {/* Right Glowing Diamond Star */}
+            <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
+                fill="#34D399"
+              />
+            </Svg>
           </View>
 
           {/* ══════════════════════════════════════════════════════════════════════
-              [5] KIWI CASHBACK PROMO CARD (FIGMA NODE 3046:145)
+              [5] MYQURO REAL CASHBACK PROMO CARD (WITH 3D WALLET & GOLD AURA)
               ══════════════════════════════════════════════════════════════════════ */}
-          <View style={styles.kiwiCashbackCard}>
-            {/* Deep Purple Gradient Background */}
-            <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-              <Defs>
-                <LinearGradient id="kiwiCardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <Stop offset="0%" stopColor="#14112E" />
-                  <Stop offset="55%" stopColor="#0B091E" />
-                  <Stop offset="100%" stopColor="#060512" />
-                </LinearGradient>
-              </Defs>
-              <Rect width="100%" height="100%" rx={26 * SCALE} fill="url(#kiwiCardGrad)" />
-            </Svg>
-
-            {/* Top-Right "kiwi" Stylized Brand Logo */}
-            <Text style={styles.kiwiTopBrandText}>kiwi</Text>
-
-            {/* Left Text Column */}
-            <View style={styles.kiwiLeftCol}>
-              <Text style={styles.kiwiRealCashbackTitle}>
-                Real cashback{'\n'}on every spend
-              </Text>
-              <Text style={styles.kiwiNoExpiringSub}>
-                No expiring points or{'\n'}coupon scratching
-              </Text>
-
-              {/* "APPLY NOW" Button */}
-              <TouchableOpacity
-                style={styles.kiwiApplyNowBtn}
-                activeOpacity={0.88}
-                onPress={() => {
-                  if (Platform.OS === 'android') {
-                    ToastAndroid.show('Opening Kiwi Credit Card Application...', ToastAndroid.SHORT);
-                  }
-                }}
-              >
-                <Text style={styles.kiwiApplyNowBtnText}>APPLY NOW</Text>
-              </TouchableOpacity>
+          <View style={styles.myquroCashbackCard}>
+            {/* Seamless Dark Obsidian Base with Centered Gold Aura Behind Wallet */}
+            <View style={StyleSheet.absoluteFill} pointerEvents="none">
+              <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                <Defs>
+                  <LinearGradient id="cashbackBaseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <Stop offset="0%" stopColor="#0A0A0C" />
+                    <Stop offset="45%" stopColor="#09080A" />
+                    <Stop offset="72%" stopColor="#221806" />
+                    <Stop offset="88%" stopColor="#151004" />
+                    <Stop offset="100%" stopColor="#0A0A0C" />
+                  </LinearGradient>
+                  <RadialGradient
+                    id="walletGoldAura"
+                    cx="72%"
+                    cy="50%"
+                    r="40%"
+                    fx="72%"
+                    fy="50%"
+                  >
+                    <Stop offset="0%" stopColor="#E5B842" stopOpacity="0.45" />
+                    <Stop offset="35%" stopColor="#A37B1B" stopOpacity="0.22" />
+                    <Stop offset="70%" stopColor="#3D2B06" stopOpacity="0.06" />
+                    <Stop offset="100%" stopColor="#0A0A0C" stopOpacity="0" />
+                  </RadialGradient>
+                </Defs>
+                <Rect width="100%" height="100%" fill="url(#cashbackBaseGrad)" />
+                <Rect width="100%" height="100%" fill="url(#walletGoldAura)" />
+              </Svg>
             </View>
 
-            {/* Right 3D Visual: Neon Lime Credit Card + Chrome Sphere + Device Reflection */}
-            <View style={styles.kiwi3DVisualWrap}>
-              {/* Chrome Sphere Reflection */}
-              <View style={styles.chromeSphere}>
-                <Svg width={26 * SCALE} height={26 * SCALE} viewBox="0 0 26 26">
-                  <Defs>
-                    <LinearGradient id="sphereGrad" x1="20%" y1="20%" x2="80%" y2="80%">
-                      <Stop offset="0%" stopColor="#FFFFFF" />
-                      <Stop offset="40%" stopColor="#A8A8B4" />
-                      <Stop offset="100%" stopColor="#3C3B4E" />
-                    </LinearGradient>
-                  </Defs>
-                  <Circle cx="13" cy="13" r="12" fill="url(#sphereGrad)" />
-                </Svg>
+            {/* Left Column: Heading & Subtext */}
+            <View style={styles.cashbackLeftCol}>
+              <View style={styles.cashbackTitleGroup}>
+                <Text style={styles.cashbackTitleWhite}>Real cashback</Text>
+                <Text style={styles.cashbackTitleGold}>on every spend</Text>
               </View>
 
-              {/* Neon Lime Green Kiwi Credit Card (Tilted 3D View) */}
-              <View style={styles.kiwiLimeCard3D}>
-                <Text style={styles.kiwiCardLogoSmall}>kiwi</Text>
-                <View style={styles.kiwiCardChipGold} />
-                <View style={styles.kiwiCardBottomRow}>
-                  <Text style={styles.kiwiCardVisaText}>VISA</Text>
-                </View>
-              </View>
+              <Text style={styles.cashbackSubtext}>
+                No expiring points or coupon scratching
+              </Text>
+            </View>
 
-              {/* Device Platform Reflection underneath */}
-              <View style={styles.deviceReflectBase} />
+            {/* Right Column: 3D MyQuro Wallet Asset */}
+            <View style={styles.cashbackWalletWrap}>
+              <Image
+                source={require('../assets/wallet.png')}
+                style={styles.cashbackWalletImg}
+                resizeMode="contain"
+              />
             </View>
           </View>
 
-          {/* Developer Simulator Drawer */}
-          <View style={styles.devSimulatorSection}>
-            <TouchableOpacity
-              style={styles.devHeaderToggle}
-              activeOpacity={0.8}
-              onPress={() => setIsDevPanelOpen(!isDevPanelOpen)}
-            >
-              <Text style={styles.devHeaderText}>⚡ Developer Live Stage Simulator</Text>
-              <ChevronRight size={14} color="#666" />
-            </TouchableOpacity>
+          {/* ══════════════════════════════════════════════════════════════════════
+              [6] ORDER DETAILS SECTION (EXACT PIXEL-BY-PIXEL DESIGN)
+              ══════════════════════════════════════════════════════════════════════ */}
+          
+          {/* Section Header with Organic Gold Underline */}
+          <View style={styles.orderDetailsSectionHeader}>
+            <Text style={styles.orderDetailsSectionTitle}>ORDER DETAILS</Text>
+            {/* Organic Gold Curved Accent Underline */}
+            <Svg width={110 * SCALE} height={8 * SCALE} viewBox="0 0 110 8" fill="none" style={styles.goldUnderlineSvg}>
+              <Path
+                d="M 2 5 Q 55 1 108 5"
+                stroke="#DEA430"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+            </Svg>
+          </View>
 
-            {isDevPanelOpen && (
-              <View style={styles.devButtonsGrid}>
-                <TouchableOpacity style={styles.devBtn} onPress={() => simulateStep('placed')}>
-                  <Text style={styles.devBtnText}>0. Order Received (Initial)</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.devBtn} onPress={() => simulateStep('assigned')}>
-                  <Text style={styles.devBtnText}>1. Partner Assigned</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.devBtn} onPress={() => simulateStep('arrived_at_store')}>
-                  <Text style={styles.devBtnText}>2. At Restaurant</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.devBtn} onPress={() => simulateStep('picked_up')}>
-                  <Text style={styles.devBtnText}>3. Picked Up</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.devBtn} onPress={() => simulateStep('out_for_delivery')}>
-                  <Text style={styles.devBtnText}>4. Out for Delivery</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.devBtn, { backgroundColor: BRAND_GREEN }]}
-                  onPress={() => simulateStep('delivered')}
-                >
-                  <Text style={[styles.devBtnText, { color: '#FFF' }]}>5. Delivered 🎉</Text>
-                </TouchableOpacity>
+          {/* ── CARD 1: STORE & DESTINATION ADDRESS DETAILS ── */}
+          <View style={styles.orderDetailsCard}>
+            {/* Store / Restaurant Row */}
+            <View style={styles.addressDetailRow}>
+              {/* Store Icon Pill */}
+              <View style={styles.addressIconWrap}>
+                <ShoppingBag size={18 * SCALE} color="#E5B842" strokeWidth={2.2} />
               </View>
-            )}
+
+              {/* Store Information */}
+              <View style={styles.addressTextCol}>
+                <Text style={styles.addressNameTitle} numberOfLines={1}>
+                  {restaurantName || 'The Maharaja Restaurant'}
+                </Text>
+                <Text style={styles.addressSubtitle} numberOfLines={1}>
+                  Plot No- 475(P) Cosmopolis Road Dumduma, Khandagiri
+                </Text>
+              </View>
+            </View>
+
+            {/* Dotted / Dashed Divider Line */}
+            <View style={styles.dashedDividerLine} />
+
+            {/* Delivery Destination Row */}
+            <View style={styles.addressDetailRow}>
+              {/* Destination Home / Pin Icon Pill */}
+              <View style={styles.addressIconWrap}>
+                <Home size={18 * SCALE} color="#E5B842" strokeWidth={2.2} />
+              </View>
+
+              {/* Destination Information */}
+              <View style={styles.addressTextCol}>
+                <Text style={styles.addressNameTitle} numberOfLines={1}>
+                  Delivering to Home
+                </Text>
+                <Text style={styles.addressSubtitle} numberOfLines={1}>
+                  {deliveryAddress || 'The Iron Fist GYM, L.S Complex, Plot No – 784, 2nd Floor'}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* ── CARD 2: ITEMS SUMMARY & ORDER METADATA ── */}
+          <View style={styles.orderDetailsCard}>
+            {/* Items Count Header */}
+            <Text style={styles.itemsCountHeader}>
+              {itemsCount > 0 ? itemsCount : 1} item(s)
+            </Text>
+
+            {/* List of Ordered Items */}
+            <View style={styles.itemsListContainer}>
+              {(orderItemsList && orderItemsList.length > 0 ? orderItemsList : DEFAULT_MOCK_ORDER.items).map((item: any, idx: number) => {
+                const itemName = item.name || item.menuItemName || 'MuscleBlaze Micronised Creatine Monohydrate CreAMP Powder (Citrus Blast)';
+                const itemQty = item.quantity || 1;
+                const itemPrice = item.price ? item.price * itemQty : 999;
+                return (
+                  <View key={item.id || idx} style={styles.orderDetailItemRow}>
+                    {/* Gold Check Circle Badge */}
+                    <View style={styles.itemCheckCircleBadge}>
+                      <Check size={10 * SCALE} color="#000000" strokeWidth={3.8} />
+                    </View>
+
+                    {/* Item Quantity and Name */}
+                    <Text style={styles.orderDetailItemName} numberOfLines={2}>
+                      {itemQty} x {itemName}
+                    </Text>
+
+                    {/* Item Price */}
+                    <Text style={styles.orderDetailItemPrice}>₹{itemPrice}</Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Dotted / Dashed Divider Line */}
+            <View style={styles.dashedDividerLine} />
+
+            {/* Footer Row: Placed Time & Order ID */}
+            <View style={styles.orderMetadataFooterRow}>
+              {/* Placed At */}
+              <Text style={styles.metaLabelText}>
+                Placed at{' '}
+                <Text style={styles.metaValueGold}>
+                  {placedTimeFormatted || '05:56 PM'}
+                </Text>
+              </Text>
+
+              {/* Order ID */}
+              <Text style={styles.metaLabelText}>
+                Order{' '}
+                <Text style={styles.metaValueGold}>
+                  #246543925184003
+                </Text>
+              </Text>
+            </View>
           </View>
 
           {/* Bottom iOS Home Bar Indicator */}
@@ -1745,9 +1961,8 @@ const styles = StyleSheet.create({
     height: '100%',
     position: 'relative',
   },
-  heroBgImage: {
+  heroBgVideo: {
     ...StyleSheet.absoluteFillObject,
-    opacity: 0.55,
   },
   heroTopFadeGradient: {
     position: 'absolute',
@@ -1932,7 +2147,7 @@ const styles = StyleSheet.create({
   // ── LIVE MINIMIZED OLA MAP DISC STYLES ──────────────────────────
   floatingMiniMapDiscContainer: {
     position: 'absolute',
-    bottom: 50 * SCALE,
+    bottom: 96 * SCALE,
     right: 14 * SCALE,
     width: 72 * SCALE,
     height: 72 * SCALE,
@@ -2061,7 +2276,7 @@ const styles = StyleSheet.create({
   // ── 3. Overlapping Content Container ───────────────────────────
   overlappingCardContainer: {
     paddingHorizontal: 16 * SCALE,
-    marginTop: -42 * SCALE,
+    marginTop: -88 * SCALE,
     zIndex: 20,
   },
 
@@ -2173,47 +2388,25 @@ const styles = StyleSheet.create({
   onTimeBadgeText: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 13 * SCALE,
-    color: '#139D54',
+    color: '#E5B842',
     letterSpacing: 0.6,
   },
   partnerStatusTitle: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 20 * SCALE,
-    color: '#EDEDED',
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 22 * SCALE,
+    color: '#FFFFFF',
     letterSpacing: -0.3,
     marginBottom: 4 * SCALE,
   },
   partnerStatusDesc: {
     fontFamily: 'Urbanist-Medium',
-    fontSize: 13.5 * SCALE,
-    color: '#909090',
-    lineHeight: 18.5 * SCALE,
-  },
-  etaGreenBadgeCard: {
-    width: 76 * SCALE,
-    height: 76 * SCALE,
-    borderRadius: 22 * SCALE,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#22C55E',
-  },
-  etaNumberLarge: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 32 * SCALE,
-    color: '#FFFFFF',
-    lineHeight: 34 * SCALE,
-  },
-  etaMinsUnit: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 13 * SCALE,
-    color: '#D1FAE5',
-    marginTop: -2,
+    fontSize: 14 * SCALE,
+    color: '#A6A6AC',
+    lineHeight: 19.5 * SCALE,
   },
   statusCardDividerLine: {
     height: 1,
-    backgroundColor: '#1E1E1E',
+    backgroundColor: '#1E1E22',
     marginTop: 16 * SCALE,
     marginBottom: 14 * SCALE,
   },
@@ -2227,6 +2420,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4 * SCALE,
   },
+  addInstructionsText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 14 * SCALE,
+    color: '#E0E0E0',
+  },
   addInstructionsGoldText: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 13.5 * SCALE,
@@ -2238,29 +2436,39 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     marginTop: -2,
   },
-  quickActionsGroup: {
+
+  // ── Unified Action Capsule (Call | Chat | Avatar) ───────────────
+  unifiedActionCapsule: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10 * SCALE,
+    backgroundColor: '#161619',
+    borderWidth: 1.2,
+    borderColor: '#2C2A34',
+    borderRadius: 24 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    paddingVertical: 5 * SCALE,
+    gap: 6 * SCALE,
   },
-  circleActionBtn: {
-    width: 42 * SCALE,
-    height: 42 * SCALE,
-    borderRadius: 21 * SCALE,
-    backgroundColor: '#121215',
-    borderWidth: 1,
-    borderColor: '#24242A',
+  capsuleIconBtn: {
+    width: 30 * SCALE,
+    height: 30 * SCALE,
+    borderRadius: 15 * SCALE,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  driverAvatarWrap: {
-    width: 44 * SCALE,
-    height: 44 * SCALE,
-    borderRadius: 22 * SCALE,
-    borderWidth: 1.8,
-    borderColor: '#FF7A00',
+  capsuleDivider: {
+    width: 1,
+    height: 16 * SCALE,
+    backgroundColor: '#2C2A34',
+  },
+  capsuleAvatarBtn: {
+    width: 32 * SCALE,
+    height: 32 * SCALE,
+    borderRadius: 16 * SCALE,
+    borderWidth: 1.5,
+    borderColor: '#D4AF37',
     overflow: 'hidden',
-    backgroundColor: '#000000',
+    backgroundColor: '#1E1E24',
   },
   deliveryBoyExactImg: {
     width: '100%',
@@ -2269,139 +2477,222 @@ const styles = StyleSheet.create({
 
   // ── 4. Savings Pill Banner (Figma Node 3046:153) ────────────────
   savingsPillBanner: {
-    backgroundColor: '#0E0E0E',
-    borderRadius: 30 * SCALE,
-    borderWidth: 1,
-    borderColor: '#1C1C1C',
-    paddingVertical: 13 * SCALE,
-    paddingHorizontal: 20 * SCALE,
+    backgroundColor: '#07150C',
+    borderRadius: 24 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#194523',
+    paddingVertical: 12 * SCALE,
+    paddingHorizontal: 18 * SCALE,
     marginBottom: 12 * SCALE,
+    position: 'relative',
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  savingsSparkleStar: {
-    color: '#4A9C4E',
-    fontSize: 16 * SCALE,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
   },
   savingsBannerText: {
-    fontFamily: 'Urbanist-Bold',
+    fontFamily: 'Urbanist-SemiBold',
     fontSize: 13.5 * SCALE,
-    color: '#4A9C4E',
+    color: '#86EFAC',
+    letterSpacing: 0.2,
+  },
+  savingsAmountHighlight: {
+    fontFamily: 'Urbanist-ExtraBold',
+    color: '#4ADE80',
   },
 
-  // ── 5. Kiwi Cashback Promo Card (Figma Node 3046:145) ───────────
-  kiwiCashbackCard: {
-    height: 245 * SCALE,
-    borderRadius: 26 * SCALE,
+  // ── 5. MyQuro Real Cashback Promo Card ─────────────────────────
+  myquroCashbackCard: {
+    height: 168 * SCALE,
+    borderRadius: 24 * SCALE,
     borderWidth: 1.2,
-    borderColor: '#241F48',
+    borderColor: '#242018',
+    backgroundColor: '#09090B',
     paddingHorizontal: 20 * SCALE,
-    paddingVertical: 20 * SCALE,
+    paddingVertical: 18 * SCALE,
     marginBottom: 14 * SCALE,
     position: 'relative',
     overflow: 'hidden',
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  kiwiTopBrandText: {
-    position: 'absolute',
-    top: 16 * SCALE,
-    right: 20 * SCALE,
-    fontFamily: 'Urbanist-Bold',
+  cashbackLeftCol: {
+    flex: 1,
+    height: '100%',
+    justifyContent: 'space-between',
+    paddingRight: 8 * SCALE,
+    paddingVertical: 4 * SCALE,
+  },
+  cashbackTitleGroup: {
+    gap: 2 * SCALE,
+  },
+  cashbackTitleWhite: {
+    fontFamily: 'Urbanist-ExtraBold',
     fontSize: 22 * SCALE,
     color: '#FFFFFF',
+    letterSpacing: -0.3,
+    lineHeight: 26 * SCALE,
   },
-  kiwiLeftCol: {
-    flex: 1,
-    paddingRight: 10 * SCALE,
+  cashbackTitleGold: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 22 * SCALE,
+    color: '#DEA430',
+    letterSpacing: -0.3,
+    lineHeight: 26 * SCALE,
   },
-  kiwiRealCashbackTitle: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 21 * SCALE,
-    color: '#E0E0E4',
-    lineHeight: 25 * SCALE,
-    marginBottom: 6 * SCALE,
-  },
-  kiwiNoExpiringSub: {
-    fontFamily: 'Urbanist-Regular',
+  cashbackSubtext: {
+    fontFamily: 'Urbanist-Medium',
     fontSize: 12.5 * SCALE,
-    color: '#8A8B9B',
-    lineHeight: 17 * SCALE,
-  },
-  kiwiApplyNowBtn: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12 * SCALE,
-    paddingHorizontal: 18 * SCALE,
-    paddingVertical: 10 * SCALE,
-    alignSelf: 'flex-start',
-    marginTop: 18 * SCALE,
-  },
-  kiwiApplyNowBtnText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 12.5 * SCALE,
-    color: '#6F5EB2',
-    letterSpacing: 0.4,
+    color: '#8E8E96',
+    lineHeight: 16.5 * SCALE,
   },
 
-  // Kiwi 3D Graphic (Right Side)
-  kiwi3DVisualWrap: {
+  // ── 3D Wallet Visual (Right Side) ──────────────────────────────
+  cashbackWalletWrap: {
     width: 140 * SCALE,
     height: '100%',
-    position: 'relative',
-    alignItems: 'flex-end',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  chromeSphere: {
-    position: 'absolute',
-    top: 65 * SCALE,
-    left: 8 * SCALE,
-    zIndex: 10,
+  cashbackWalletImg: {
+    width: 135 * SCALE,
+    height: 135 * SCALE,
+    transform: [{ translateY: 2 * SCALE }],
   },
-  kiwiLimeCard3D: {
-    width: 125 * SCALE,
-    height: 78 * SCALE,
-    backgroundColor: '#95CD1A',
-    borderRadius: 10 * SCALE,
-    padding: 10 * SCALE,
-    justifyContent: 'space-between',
-    transform: [{ rotate: '-12deg' }, { translateY: -15 * SCALE }],
-    shadowColor: '#95CD1A',
-    shadowOffset: { width: 0, height: 6 },
+
+  // ── 6. Order Details Section Styles (Figma Node Pixel-by-Pixel) ─
+  orderDetailsSectionHeader: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 22 * SCALE,
+    marginBottom: 16 * SCALE,
+  },
+  orderDetailsSectionTitle: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 14.5 * SCALE,
+    color: '#FFFFFF',
+    letterSpacing: 2.8,
+  },
+  goldUnderlineSvg: {
+    marginTop: 4 * SCALE,
+  },
+
+  orderDetailsCard: {
+    backgroundColor: '#0A0A0C',
+    borderRadius: 22 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#201E1A',
+    paddingHorizontal: 16 * SCALE,
+    paddingVertical: 16 * SCALE,
+    marginBottom: 12 * SCALE,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 8,
-    zIndex: 5,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  kiwiCardLogoSmall: {
+
+  addressDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addressIconWrap: {
+    width: 42 * SCALE,
+    height: 42 * SCALE,
+    borderRadius: 21 * SCALE,
+    backgroundColor: '#16151A',
+    borderWidth: 1,
+    borderColor: '#26242C',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14 * SCALE,
+  },
+  addressTextCol: {
+    flex: 1,
+  },
+  addressNameTitle: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 12 * SCALE,
-    color: '#213B00',
+    fontSize: 15.5 * SCALE,
+    color: '#FFFFFF',
+    marginBottom: 3 * SCALE,
+    letterSpacing: -0.2,
   },
-  kiwiCardChipGold: {
-    width: 18 * SCALE,
-    height: 13 * SCALE,
-    backgroundColor: '#FFD700',
-    borderRadius: 3,
+  addressSubtitle: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12.5 * SCALE,
+    color: '#8A8A92',
+    lineHeight: 16.5 * SCALE,
   },
-  kiwiCardBottomRow: {
-    alignItems: 'flex-end',
+
+  dashedDividerLine: {
+    height: 1,
+    borderWidth: 1,
+    borderColor: '#26221A',
+    borderStyle: 'dashed',
+    marginVertical: 14 * SCALE,
   },
-  kiwiCardVisaText: {
+
+  itemsCountHeader: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 12 * SCALE,
+    fontSize: 15 * SCALE,
+    color: '#FFFFFF',
+    marginBottom: 12 * SCALE,
+  },
+  itemsListContainer: {
+    gap: 10 * SCALE,
+  },
+  orderDetailItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  itemCheckCircleBadge: {
+    width: 17 * SCALE,
+    height: 17 * SCALE,
+    borderRadius: 8.5 * SCALE,
+    backgroundColor: '#DEA430',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10 * SCALE,
+  },
+  orderDetailItemName: {
+    flex: 1,
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 13.5 * SCALE,
+    color: '#E8E8E8',
+    lineHeight: 18 * SCALE,
+    marginRight: 10 * SCALE,
+  },
+  orderDetailItemPrice: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14 * SCALE,
     color: '#FFFFFF',
   },
-  deviceReflectBase: {
-    position: 'absolute',
-    bottom: -15 * SCALE,
-    right: -10 * SCALE,
-    width: 135 * SCALE,
-    height: 60 * SCALE,
-    backgroundColor: '#2A2258',
-    borderRadius: 14 * SCALE,
-    transform: [{ rotate: '-12deg' }],
-    opacity: 0.4,
+
+  orderMetadataFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  metaLabelText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12.5 * SCALE,
+    color: '#8A8A92',
+  },
+  metaValueGold: {
+    fontFamily: 'Urbanist-Bold',
+    color: '#DEA430',
   },
 
   // Simulator Section
