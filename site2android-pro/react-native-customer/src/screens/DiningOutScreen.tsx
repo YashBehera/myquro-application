@@ -141,6 +141,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { authState, currentLocation, favouriteRestaurantsList, toggleFavourite, allRestaurants = [] } = useViewModel();
+  const userFirstName = authState?.type === 'Authenticated' && (authState as any).username ? (authState as any).username.split(' ')[0] : 'Foodie';
 
   // Screen Tabs: 'explore' | 'bookings'
   const [activeTab, setActiveTab] = useState<'explore' | 'bookings'>('explore');
@@ -204,28 +205,36 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
 
   // Curated Dineout Restaurants List loaded dynamically from API
   const dineoutVenues = useMemo(() => {
-    return allRestaurants.map((r, idx) => {
-      const coverUrl = r.image || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=800';
-      const CostTextMap = ['₹1,200 for two', '₹1,600 for two', '₹950 for two', '₹800 for two', '₹700 for two'];
-      const MoodMap = ['LUXURY', 'BUFFET', 'ROOFTOP', 'CAFE', 'LUXURY'];
-      const features = ['AC Dining', 'Live Kitchen', 'Valet Parking'];
+    return allRestaurants.map((r) => {
+      const coverUrl = r.image || '';
+      const moodUpper = (r.category || '').toUpperCase();
+      let mood: 'ALL' | 'LUXURY' | 'BUFFET' | 'CAFE' | 'ROOFTOP' = 'ALL';
+      if (moodUpper.includes('LUX') || moodUpper.includes('FINE')) mood = 'LUXURY';
+      else if (moodUpper.includes('BUFFET')) mood = 'BUFFET';
+      else if (moodUpper.includes('CAFE') || moodUpper.includes('COFFEE')) mood = 'CAFE';
+      else if (moodUpper.includes('ROOF')) mood = 'ROOFTOP';
+
+      const distanceStr = typeof r.distance === 'number' && !isNaN(r.distance) ? `${r.distance.toFixed(1)} km` : '';
 
       return {
         id: r.id,
-        name: r.name,
-        image: r.image ? { uri: r.image } : resDominos,
+        name: r.name || '',
+        image: r.image ? (typeof r.image === 'string' ? { uri: r.image } : r.image) : resDominos,
         coverUrl,
         rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.5,
-        reviewsCount: r.reviewCount ? `${r.reviewCount}` : '150',
-        costForTwo: CostTextMap[idx % CostTextMap.length],
-        cuisine: r.cuisine || 'Multi-cuisine',
-        location: r.address || 'Bhubaneswar',
-        distance: typeof r.distance === 'number' ? `${r.distance.toFixed(1)} km` : '1.5 km',
-        discountTag: 'Flat 20% OFF',
+        reviewsCount: r.reviewCount ? `${r.reviewCount}` : '50+',
+        costForTwo: r.offer ? `₹${r.offer} for two` : '₹800 for two',
+        cuisine: r.cuisine || r.dishesCategory || 'Multi-cuisine',
+        location: r.address || r.city || 'Bhubaneswar',
+        distance: distanceStr,
+        discountTag: r.discount || 'Flat 20% OFF',
         instantBooking: true,
-        mood: (MoodMap[idx % MoodMap.length] || 'CAFE') as 'ALL' | 'LUXURY' | 'BUFFET' | 'CAFE' | 'ROOFTOP',
-        features,
+        mood,
+        features: r.tags && r.tags.length > 0 ? r.tags : ['AC Dining', 'Live Kitchen'],
         isVegOnly: r.category === 'Veg' || false,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        phone: r.phone,
       };
     });
   }, [allRestaurants]);
@@ -235,18 +244,6 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
       const found = dineoutVenues.find((v) => v.id === venueOrId) || allRestaurants.find((r) => r.id === venueOrId);
       if (found) {
         setSelectedDineoutDetail(found);
-      } else {
-        setSelectedDineoutDetail({
-          id: venueOrId,
-          name: 'Kebabs and Kurries',
-          rating: 5.0,
-          reviewsCount: '28',
-          location: 'Welcomhotel by ITC Hotels, Dumduma, Bhubaneswar',
-          distance: '1.2 km',
-          cuisine: 'North Indian, Mughlai',
-          costForTwo: '₹1500 for two',
-          coverUrl: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=1200',
-        });
       }
     } else if (venueOrId) {
       setSelectedDineoutDetail(venueOrId);
@@ -650,7 +647,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                 ══════════════════════════════════════════════════════════════════════ */}
             <View style={styles.yashSectionContainer}>
               <Text style={styles.yashGreetingText}>
-                <Text style={styles.yashNameGold}>Yash</Text>, what's on your mind?
+                <Text style={styles.yashNameGold}>{userFirstName}</Text>, what's on your mind?
               </Text>
 
               {/* Top 2 Banners: Restaurants Near Me & Late Night Specials */}
@@ -775,110 +772,69 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.topResCarouselContainer}
               >
-                {/* Restaurant 1: Taste of China */}
-                <TouchableOpacity
-                  style={styles.carouselResCard}
-                  activeOpacity={0.9}
-                  onPress={() =>
-                    handleSelectDineoutRestaurant({
-                      id: 'res_taste_of_china',
-                      name: 'Taste of China',
-                      rating: 4.7,
-                      reviewsCount: '124',
-                      location: 'Saheed Nagar, Bhubaneswar',
-                      distance: '10 km',
-                      cuisine: 'Chinese • Asian',
-                      costForTwo: '₹1000 for two',
-                      coverUrl: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=1200',
-                    })
-                  }
-                >
-                  {/* Image Container with Floating Badges */}
-                  <View style={styles.resCardImgWrap}>
-                    <Image source={resTasteOfChina} style={styles.resCardImg} resizeMode="cover" />
-                    <View style={styles.resAdBadge}>
-                      <Text style={styles.resAdText}>AD</Text>
-                    </View>
-                    <TouchableOpacity style={styles.resHeartBadge} activeOpacity={0.8}>
-                      <Heart size={14 * SCALE} color="#FFFFFF" fill="transparent" />
+                {dineoutVenues.slice(0, 10).map((venue) => {
+                  const isFav = favouriteRestaurantsList?.some((f) => f.id === venue.id);
+                  return (
+                    <TouchableOpacity
+                      key={venue.id}
+                      style={styles.carouselResCard}
+                      activeOpacity={0.9}
+                      onPress={() => handleSelectDineoutRestaurant(venue)}
+                    >
+                      {/* Image Container with Floating Badges */}
+                      <View style={styles.resCardImgWrap}>
+                        <Image
+                          source={typeof venue.image === 'object' ? venue.image : { uri: venue.coverUrl }}
+                          style={styles.resCardImg}
+                          resizeMode="cover"
+                        />
+                        <TouchableOpacity
+                          style={styles.resHeartBadge}
+                          activeOpacity={0.8}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            toggleFavourite(venue.id);
+                          }}
+                        >
+                          <Heart
+                            size={14 * SCALE}
+                            color={isFav ? '#FF4D4D' : '#FFFFFF'}
+                            fill={isFav ? '#FF4D4D' : 'transparent'}
+                          />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Details */}
+                      <View style={styles.resCardInfo}>
+                        <View style={styles.resNameRow}>
+                          <Text style={styles.resNameText} numberOfLines={1}>{venue.name}</Text>
+                          <View style={styles.resRatingPill}>
+                            <Star size={11 * SCALE} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 3 }} />
+                            <Text style={styles.resRatingText}>{typeof venue.rating === 'number' ? venue.rating.toFixed(1) : venue.rating}</Text>
+                          </View>
+                        </View>
+
+                        <Text style={styles.resLocationText}>
+                          {venue.location}{venue.distance ? `, ${venue.distance}` : ''}
+                        </Text>
+                        <Text style={styles.resCuisineCostText}>
+                          {venue.cuisine} • {venue.costForTwo}
+                        </Text>
+
+                        {/* Offers Tag */}
+                        <View style={styles.resOfferTagRow}>
+                          <View style={styles.resPercentBox}>
+                            <Text style={styles.resPercentText}>%</Text>
+                          </View>
+                          <Text style={styles.resOfferMainText} numberOfLines={1}>
+                            {venue.discountTag || 'Flat 15% off on pre-booking'}
+                          </Text>
+                          <Text style={styles.resOfferExtraCount}>+2 offers</Text>
+                        </View>
+                      </View>
                     </TouchableOpacity>
-                  </View>
-
-                  {/* Details */}
-                  <View style={styles.resCardInfo}>
-                    <View style={styles.resNameRow}>
-                      <Text style={styles.resNameText} numberOfLines={1}>Taste of China</Text>
-                      <View style={styles.resRatingPill}>
-                        <Star size={11 * SCALE} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 3 }} />
-                        <Text style={styles.resRatingText}>4.7</Text>
-                      </View>
-                    </View>
-
-                    <Text style={styles.resLocationText}>Saheed Nagar, 10 km</Text>
-                    <Text style={styles.resCuisineCostText}>Chinese • Asian • ₹1000 for two</Text>
-
-                    {/* Offers Tag */}
-                    <View style={styles.resOfferTagRow}>
-                      <View style={styles.resPercentBox}>
-                        <Text style={styles.resPercentText}>%</Text>
-                      </View>
-                      <Text style={styles.resOfferMainText} numberOfLines={1}>Flat 15% off on pre-booking</Text>
-                      <Text style={styles.resOfferExtraCount}>+2 offers</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-
-                {/* Restaurant 2: Kruti Coffee */}
-                <TouchableOpacity
-                  style={styles.carouselResCard}
-                  activeOpacity={0.9}
-                  onPress={() =>
-                    handleSelectDineoutRestaurant({
-                      id: 'res_kruti_coffee',
-                      name: 'Kruti Coffee',
-                      rating: 4.5,
-                      reviewsCount: '89',
-                      location: 'Nayapalli, Bhubaneswar',
-                      distance: '7.2 km',
-                      cuisine: 'Beverages • Cafe • Fast Food',
-                      costForTwo: '₹600 for two',
-                      coverUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=1200',
-                    })
-                  }
-                >
-                  {/* Image Container with Floating Badges */}
-                  <View style={styles.resCardImgWrap}>
-                    <Image source={resKrutiCoffee} style={styles.resCardImg} resizeMode="cover" />
-                    <View style={styles.resAdBadge}>
-                      <Text style={styles.resAdText}>AD</Text>
-                    </View>
-                    <TouchableOpacity style={styles.resHeartBadge} activeOpacity={0.8}>
-                      <Heart size={14 * SCALE} color="#FFFFFF" fill="transparent" />
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Details */}
-                  <View style={styles.resCardInfo}>
-                    <View style={styles.resNameRow}>
-                      <Text style={styles.resNameText} numberOfLines={1}>Kruti Coffee</Text>
-                      <View style={styles.resRatingPill}>
-                        <Star size={11 * SCALE} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 3 }} />
-                        <Text style={styles.resRatingText}>4.5</Text>
-                      </View>
-                    </View>
-
-                    <Text style={styles.resLocationText}>Nayapalli, 7.2 km</Text>
-                    <Text style={styles.resCuisineCostText}>Beverages • Cafe • Fast Food</Text>
-
-                    {/* Offers Tag */}
-                    <View style={styles.resOfferTagRow}>
-                      <View style={styles.resPercentBox}>
-                        <Text style={styles.resPercentText}>%</Text>
-                      </View>
-                      <Text style={styles.resOfferMainText} numberOfLines={1}>Flat 10% off on pre-booking</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </View>
 
@@ -928,16 +884,15 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
             {/* ══════════════════════════════════════════════════════════════════════
                 [9] PREMIUM RESTAURANT CARDS (PIXEL-PERFECT FROM FIGMA SCREENSHOT)
                 ══════════════════════════════════════════════════════════════════════ */}
-            {filteredVenues.map((venue, idx) => {
+            {filteredVenues.map((venue) => {
               const isFav = favouriteRestaurantsList?.some((f) => f.id === venue.id);
               
-              // Hardcode mock details matching the mockup perfectly for first items
-              const rating = idx === 0 ? '4.4' : venue.rating;
-              const name = idx === 0 ? 'The Divan' : venue.name;
-              const cuisine = idx === 0 ? 'North Indian • Odia' : venue.cuisine;
-              const cost = idx === 0 ? '₹500 for two' : venue.costForTwo;
-              const distanceText = idx === 0 ? '7.1 km' : venue.distance;
-              const locationText = idx === 0 ? 'Nayapalli' : venue.location;
+              const rating = typeof venue.rating === 'number' ? venue.rating.toFixed(1) : venue.rating;
+              const name = venue.name;
+              const cuisine = venue.cuisine;
+              const cost = venue.costForTwo;
+              const distanceText = venue.distance;
+              const locationText = venue.location;
 
               return (
                 <TouchableOpacity

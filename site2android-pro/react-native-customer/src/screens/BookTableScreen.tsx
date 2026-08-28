@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -166,9 +166,14 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
 
-  const restaurantName = restaurant?.name || 'Saami';
-  const restaurantAddress = restaurant?.location || restaurant?.address || 'Madhusudan Nagar, Bhubaneswar...';
-  const restaurantCity = restaurant?.city || 'Bhubaneswar';
+  const restaurantName = restaurant?.name || '';
+  const restaurantAddress = restaurant?.location || restaurant?.address || '';
+  const restaurantCity = restaurant?.city || '';
+  const restaurantCover =
+    restaurant?.coverUrl ||
+    restaurant?.image?.uri ||
+    (typeof restaurant?.image === 'string' ? restaurant.image : '') ||
+    'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200';
 
   // Navigation Step: 'select_slot' | 'review_summary'
   const [currentStep, setCurrentStep] = useState<'select_slot' | 'review_summary'>('select_slot');
@@ -177,16 +182,19 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
   const guestOptions = [1, 2, 3, 4, 5, 6, 7, 8, '10+'];
   const [selectedGuests, setSelectedGuests] = useState<number | string>(2);
 
-  // Date options
-  const dateOptions = [
-    { dateNum: '01', dayName: 'Tuesday', fullDate: '01 Sep 2026', discount: '15% off', month: 'SEP' },
-    { dateNum: '02', dayName: 'Wednesday', fullDate: '02 Sep 2026', discount: '20% off', month: 'SEP' },
-    { dateNum: '03', dayName: 'Thursday', fullDate: '03 Sep 2026', discount: '20% off', month: 'SEP' },
-    { dateNum: '04', dayName: 'Friday', fullDate: '04 Sep 2026', discount: '15% off', month: 'SEP' },
-    { dateNum: '05', dayName: 'Saturday', fullDate: '05 Sep 2026', discount: '15% off', month: 'SEP' },
-    { dateNum: '06', dayName: 'Sunday', fullDate: '06 Sep 2026', discount: '20% off', month: 'SEP' },
-    { dateNum: '07', dayName: 'Monday', fullDate: '07 Sep 2026', discount: '15% off', month: 'SEP' },
-  ];
+  // Dynamic Date options (Today + next 6 days)
+  const dateOptions = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      const dateNum = d.getDate().toString().padStart(2, '0');
+      const dayName = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'long' });
+      const month = d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+      const fullDate = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const discount = i % 2 === 0 ? '15% off' : '20% off';
+      return { dateNum, dayName, fullDate, discount, month };
+    });
+  }, []);
   const [selectedDateIndex, setSelectedDateIndex] = useState(0);
 
   // Meal Type: 'lunch' | 'dinner'
@@ -538,7 +546,7 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.datesScrollContainer}
           >
-            {dateOptions.map((item, idx) => {
+            {dateOptions.map((item: any, idx: number) => {
               const isSelected = selectedDateIndex === idx;
               return (
                 <TouchableOpacity

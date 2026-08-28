@@ -44,6 +44,7 @@ import Svg, {
 } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useViewModel } from '../state/MainViewModel';
 import {
   SCALE,
   SCREEN_WIDTH,
@@ -237,13 +238,16 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const textInputRef = useRef<TextInput>(null);
+  const { authState } = useViewModel();
 
-  const restaurantName = restaurant?.name || 'Kebabs and Kurries';
+  const userFirstName = authState?.type === 'Authenticated' && (authState as any).username ? (authState as any).username.split(' ')[0] : 'User';
+  const restaurantName = restaurant?.name || '';
   const restaurantAddress =
-    restaurant?.location || restaurant?.address || 'Welcomhotel by ITC Hotels Dumduma,...';
+    restaurant?.location || restaurant?.address || '';
   const restaurantCover =
     restaurant?.coverUrl ||
     restaurant?.image?.uri ||
+    (typeof restaurant?.image === 'string' ? restaurant.image : '') ||
     'https://images.unsplash.com/photo-1544025162-d76694265947?w=1200&auto=format&fit=crop&q=80';
 
   // Navigation Step: 'enter_amount' | 'checkout_details'
@@ -528,7 +532,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
               <Text style={styles.payUsingLabel}>PAY USING</Text>
               <ChevronUp size={14 * SCALE} color="#8E8E93" style={{ marginLeft: 3 }} />
             </View>
-            <Text style={styles.cardHolderText}>Yash  ••  0484</Text>
+            <Text style={styles.cardHolderText}>{userFirstName}  ••  0484</Text>
           </View>
 
           {/* Right: Solid Gold Pay Button */}

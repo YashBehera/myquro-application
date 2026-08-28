@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -239,7 +239,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
   onNavigateToHelp,
 }) => {
   const insets = useSafeAreaInsets();
-  const { favouriteRestaurantsList, toggleFavourite } = useViewModel();
+  const { favouriteRestaurantsList, toggleFavourite, allRestaurants } = useViewModel();
 
   // Scroll tracking state for sticky header title
   const [isScrolled, setIsScrolled] = useState(false);
@@ -250,7 +250,6 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
   // Accordion Expand/Collapse States
   const [isFiveStarExpanded, setIsFiveStarExpanded] = useState(true);
   const [isNearExpanded, setIsNearExpanded] = useState(true);
-  const [isNorthIndianExpanded, setIsNorthIndianExpanded] = useState(true);
 
   // Media & Modals
   const [isMuted, setIsMuted] = useState(true);
@@ -273,60 +272,60 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
   const [paySuccessModal, setPaySuccessModal] = useState<any | null>(null);
   const [isProcessingPay, setIsProcessingPay] = useState(false);
 
-  // Normalized restaurant data matching luxury MyQuro vibe
-  const restaurantName = restaurant?.name || 'Kebabs and Kurries';
+  // Normalized restaurant data dynamically retrieved from restaurant object
+  const restaurantName = restaurant?.name || '';
   const restaurantRating = restaurant?.rating
     ? typeof restaurant.rating === 'number'
       ? restaurant.rating.toFixed(1)
       : restaurant.rating
-    : '5.0';
-  const restaurantReviewCount = restaurant?.reviewsCount || restaurant?.reviewCount || '28';
+    : '4.8';
+  const restaurantReviewCount = restaurant?.reviewsCount || (restaurant?.reviewCount ? `${restaurant.reviewCount}` : '100+');
   const restaurantDistance = restaurant?.distance
     ? typeof restaurant.distance === 'number'
       ? `${restaurant.distance.toFixed(1)} km`
       : restaurant.distance
-    : '1.2 km';
+    : 'Nearby';
   const restaurantLocation =
-    restaurant?.location || restaurant?.address || 'Welcomhotel by ITC Hotels, Dumduma, Bhubaneswar';
-  const restaurantCuisine = restaurant?.cuisine || 'North Indian, Mughlai';
-  const restaurantCost = restaurant?.costForTwo || '₹1500 for two';
-  const restaurantPhone = restaurant?.phone || '+916742398700';
+    restaurant?.location || restaurant?.address || '';
+  const restaurantCuisine = restaurant?.cuisine || 'Multi-cuisine';
+  const restaurantCost = restaurant?.costForTwo || '₹1,000 for two';
+  const restaurantPhone = restaurant?.phone || '';
 
   const restaurantLat = restaurant?.latitude || 20.2520;
   const restaurantLng = restaurant?.longitude || 85.7950;
 
   const isFav = favouriteRestaurantsList?.some((f) => f.id === restaurant?.id);
 
-  // Gallery items matching photo grid
-  const galleryItems = [
-    {
-      url:
-        restaurant?.coverUrl ||
-        restaurant?.image?.uri ||
-        'https://images.unsplash.com/photo-1544025162-d76694265947?w=1200&auto=format&fit=crop&q=80',
-      title: 'Grand Dining Hall',
-    },
-    {
-      url: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&auto=format&fit=crop&q=80',
-      title: 'Warm Table Seating',
-    },
-    {
-      url: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=1200&auto=format&fit=crop&q=80',
-      title: 'Luxury Ambience',
-    },
-    {
-      url: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=1200&auto=format&fit=crop&q=80',
-      title: 'Succulent Tandoori Skillet',
-    },
-    {
-      url: 'https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=1200&auto=format&fit=crop&q=80',
-      title: 'Dal Bukhara & Naan Platter',
-    },
-    {
-      url: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=1200&auto=format&fit=crop&q=80',
-      title: 'Evening Chandelier View',
-    },
-  ];
+  const restaurantCover =
+    restaurant?.coverUrl ||
+    restaurant?.image?.uri ||
+    (typeof restaurant?.image === 'string' ? restaurant.image : '') ||
+    'https://images.unsplash.com/photo-1544025162-d76694265947?w=1200&auto=format&fit=crop&q=80';
+
+  // Dynamic gallery items
+  const galleryItems = useMemo(() => {
+    if (restaurant?.gallery && Array.isArray(restaurant.gallery) && restaurant.gallery.length > 0) {
+      return restaurant.gallery.map((item: any, idx: number) => ({
+        url: typeof item === 'string' ? item : item.url || restaurantCover,
+        title: item.title || `${restaurantName} ${idx + 1}`,
+      }));
+    }
+    const defaultPhotos = [
+      'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=1200&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=1200&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=1200&auto=format&fit=crop&q=80',
+      'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=1200&auto=format&fit=crop&q=80',
+    ];
+    return [
+      { url: restaurantCover || defaultPhotos[0], title: 'Grand Dining Hall' },
+      { url: defaultPhotos[0], title: 'Warm Table Seating' },
+      { url: defaultPhotos[1], title: 'Luxury Ambience' },
+      { url: defaultPhotos[2], title: 'Signature Specialties' },
+      { url: defaultPhotos[3], title: 'Chef Curations' },
+      { url: defaultPhotos[4], title: 'Evening View' },
+    ];
+  }, [restaurant, restaurantCover, restaurantName]);
 
   // AI Prompt Pills
   const aiPromptPills = [
@@ -349,68 +348,42 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
     'AC Dining Area',
   ];
 
-  // 5 Star Recommendations
-  const fiveStarList = [
-    {
-      id: 'res_swizzle',
-      name: 'Swizzle Welcomho...',
-      rating: '4.8',
-      cuisine: 'Finger Food',
-      distance: '1.1 km',
-      discount: 'FLAT 25% OFF',
-      image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600',
-    },
-    {
-      id: 'res_flavour',
-      name: 'Flavour by Prachi...',
-      rating: '4.9',
-      cuisine: 'North Indian',
-      distance: '4.3 km',
-      isAd: true,
-      discount: 'FLAT 25% OFF',
-      image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=600',
-    },
-    {
-      id: 'res_orchid',
-      name: 'Orchid By Fortune...',
-      rating: '4.4',
-      cuisine: 'North Indian',
-      distance: '9.3 km',
-      discount: 'FLAT 30% OFF',
-      image: 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600',
-    },
-  ];
+  // Dynamic 5 Star Recommendations from real database
+  const fiveStarList = useMemo(() => {
+    const others = (allRestaurants || []).filter((r) => r.id !== restaurant?.id);
+    const sorted = [...others].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    return sorted.slice(0, 4).map((r) => {
+      const imgUri = typeof r.image === 'string' ? r.image : (r.image as any)?.uri || restaurantCover;
+      return {
+        id: r.id,
+        name: r.name,
+        rating: r.rating ? (typeof r.rating === 'number' ? r.rating.toFixed(1) : r.rating) : '4.5',
+        cuisine: r.cuisine || 'Multi-cuisine',
+        distance: typeof r.distance === 'number' ? `${r.distance.toFixed(1)} km` : (r.distance || '1.0 km'),
+        discount: 'FLAT 25% OFF',
+        image: imgUri,
+        isAd: false,
+      };
+    });
+  }, [allRestaurants, restaurant?.id, restaurantCover]);
 
-  // Near list
-  const nearList = [
-    {
-      id: 'res_swizzle_near',
-      name: 'Swizzle Welcomho...',
-      rating: '4.8',
-      cuisine: 'Finger Food',
-      distance: '1.1 km',
-      discount: 'FLAT 25% OFF',
-      image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600',
-    },
-    {
-      id: 'res_welcomcafe',
-      name: 'Welcomcafe Welc...',
-      rating: '4.1',
-      cuisine: 'Multi Cuisine',
-      distance: '1.1 km',
-      discount: 'FLAT 25% OFF',
-      image: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=600',
-    },
-    {
-      id: 'res_pratyush',
-      name: 'Pratyush Bar & Re...',
-      rating: '4.0',
-      cuisine: 'Chinese',
-      distance: '2 km',
-      discount: 'FLAT 10% OFF',
-      image: 'https://images.unsplash.com/photo-1578474846511-04ba529f0b88?w=600',
-    },
-  ];
+  // Dynamic Near Recommendations from real database
+  const nearList = useMemo(() => {
+    const others = (allRestaurants || []).filter((r) => r.id !== restaurant?.id);
+    const sorted = [...others].sort((a, b) => (a.distance || 99) - (b.distance || 99));
+    return sorted.slice(0, 4).map((r) => {
+      const imgUri = typeof r.image === 'string' ? r.image : (r.image as any)?.uri || restaurantCover;
+      return {
+        id: r.id,
+        name: r.name,
+        rating: r.rating ? (typeof r.rating === 'number' ? r.rating.toFixed(1) : r.rating) : '4.5',
+        cuisine: r.cuisine || 'Multi-cuisine',
+        distance: typeof r.distance === 'number' ? `${r.distance.toFixed(1)} km` : (r.distance || '1.0 km'),
+        discount: 'FLAT 20% OFF',
+        image: imgUri,
+      };
+    });
+  }, [allRestaurants, restaurant?.id, restaurantCover]);
 
   // Dynamic Date Options
   const dateOptions = Array.from({ length: 7 }, (_, i) => {
@@ -591,7 +564,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
         <View style={styles.heroMediaContainer}>
           {/* Sharp Hero Image */}
           <Image
-            source={{ uri: galleryItems[activeMediaIndex].url }}
+            source={{ uri: galleryItems[activeMediaIndex]?.url || restaurantCover }}
             style={styles.heroMediaCover}
             resizeMode="cover"
           />
@@ -929,9 +902,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
               ══════════════════════════════════════════════════════════════════ */}
           <View style={styles.menusTailoredCard}>
             <Image
-              source={{
-                uri: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=1000&auto=format&fit=crop&q=80',
-              }}
+              source={{ uri: restaurantCover }}
               style={styles.menusTailoredBgImg}
               resizeMode="cover"
             />
@@ -977,7 +948,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
                     setGalleryModalVisible(true);
                   }}
                 >
-                  <Image source={{ uri: galleryItems[0].url }} style={styles.fullImg} resizeMode="cover" />
+                  <Image source={{ uri: galleryItems[0]?.url || restaurantCover }} style={styles.fullImg} resizeMode="cover" />
                 </TouchableOpacity>
 
                 <View style={styles.photosRightCol}>
@@ -989,7 +960,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
                       setGalleryModalVisible(true);
                     }}
                   >
-                    <Image source={{ uri: galleryItems[1].url }} style={styles.fullImg} resizeMode="cover" />
+                    <Image source={{ uri: galleryItems[1]?.url || restaurantCover }} style={styles.fullImg} resizeMode="cover" />
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -1000,7 +971,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
                       setGalleryModalVisible(true);
                     }}
                   >
-                    <Image source={{ uri: galleryItems[2].url }} style={styles.fullImg} resizeMode="cover" />
+                    <Image source={{ uri: galleryItems[2]?.url || restaurantCover }} style={styles.fullImg} resizeMode="cover" />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1014,7 +985,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
                     setGalleryModalVisible(true);
                   }}
                 >
-                  <Image source={{ uri: galleryItems[3].url }} style={styles.fullImg} resizeMode="cover" />
+                  <Image source={{ uri: galleryItems[3]?.url || restaurantCover }} style={styles.fullImg} resizeMode="cover" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1025,7 +996,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
                     setGalleryModalVisible(true);
                   }}
                 >
-                  <Image source={{ uri: galleryItems[4].url }} style={styles.fullImg} resizeMode="cover" />
+                  <Image source={{ uri: galleryItems[4]?.url || restaurantCover }} style={styles.fullImg} resizeMode="cover" />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1036,7 +1007,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
                     setGalleryModalVisible(true);
                   }}
                 >
-                  <Image source={{ uri: galleryItems[5].url }} style={styles.fullImg} resizeMode="cover" />
+                  <Image source={{ uri: galleryItems[5]?.url || restaurantCover }} style={styles.fullImg} resizeMode="cover" />
                   <View style={styles.photoOverlayBadge}>
                     <Text style={styles.photoOverlayText}>+3</Text>
                   </View>
@@ -1134,7 +1105,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
 
             {isFiveStarExpanded && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalResScroll}>
-                {fiveStarList.map((item) => (
+                {fiveStarList.map((item: any) => (
                   <TouchableOpacity
                     key={item.id}
                     style={styles.recCard}
@@ -1185,7 +1156,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
 
             {isNearExpanded && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalResScroll}>
-                {nearList.map((item) => (
+                {nearList.map((item: any) => (
                   <TouchableOpacity
                     key={item.id}
                     style={styles.recCard}
@@ -1477,7 +1448,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
           </View>
 
           <ScrollView contentContainerStyle={styles.galleryGrid}>
-            {galleryItems.map((item, idx) => (
+            {galleryItems.map((item: any, idx: number) => (
               <TouchableOpacity
                 key={idx}
                 style={styles.galleryItemBox}
@@ -1487,7 +1458,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
                   setGalleryModalVisible(false);
                 }}
               >
-                <Image source={{ uri: item.url }} style={styles.fullImg} resizeMode="cover" />
+                <Image source={{ uri: item?.url || restaurantCover }} style={styles.fullImg} resizeMode="cover" />
                 <View style={styles.galleryLabelOverlay}>
                   <Text style={styles.galleryItemLabel}>{item.title}</Text>
                 </View>
