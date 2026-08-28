@@ -28,6 +28,9 @@ import {
   X,
   Sparkles,
   HelpCircle,
+  CornerDownLeft,
+  CornerDownRight,
+  ArrowRightLeft,
 } from 'lucide-react-native';
 import Svg, {
   Polygon,
@@ -40,6 +43,7 @@ import Svg, {
   Text as SvgText,
 } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   SCALE,
   SCREEN_WIDTH,
@@ -76,6 +80,38 @@ const DineCashHexagon: React.FC<{ size?: number }> = ({ size = 32 }) => {
           fontSize="48"
           fontWeight="bold"
           fill="#DEA430"
+        >
+          ₹
+        </SvgText>
+      </Svg>
+    </View>
+  );
+};
+
+// ─── Emerald Green Hexagon Icon for DineCash (Checkout View) ─────────────────
+const EmeraldDineCashHexagon: React.FC<{ size?: number }> = ({ size = 32 }) => {
+  return (
+    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+      <Svg width={size} height={size} viewBox="0 0 100 100">
+        <Polygon
+          points="50,4 92,26 92,74 50,96 8,74 8,26"
+          fill="#06281E"
+          stroke="#10B981"
+          strokeWidth="6"
+        />
+        <Polygon
+          points="50,13 84,30 84,70 50,87 16,70 16,30"
+          fill="#0A3628"
+          stroke="#10B981"
+          strokeWidth="2.5"
+        />
+        <SvgText
+          x="50"
+          y="63"
+          textAnchor="middle"
+          fontSize="48"
+          fontWeight="bold"
+          fill="#34D399"
         >
           ₹
         </SvgText>
@@ -204,7 +240,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
 
   const restaurantName = restaurant?.name || 'Kebabs and Kurries';
   const restaurantAddress =
-    restaurant?.location || restaurant?.address || 'Welcomhotel by ITC Hotels, Dumduma, Bhubaneswar';
+    restaurant?.location || restaurant?.address || 'Welcomhotel by ITC Hotels Dumduma,...';
   const restaurantCover =
     restaurant?.coverUrl ||
     restaurant?.image?.uri ||
@@ -225,9 +261,11 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
 
   // Computed Values
   const numericAmount = parseFloat(billAmount) > 0 ? parseFloat(billAmount) : 50;
-  const regularDiscount = Math.round(numericAmount * 0.10); // 10% Regular discount
+  const regularDiscount = Math.round(numericAmount * 0.10); // 10% Regular discount = 5 on 50
+  const postDiscountBill = numericAmount - regularDiscount; // 45
   const convenienceFee = 8.48;
   const gstFee = 1.52;
+  const earnedDineCash = Math.round(postDiscountBill * 0.10); // 10% of 45 = 4
   const dineCashDeduction = useDineCash && numericAmount >= 1000 ? Math.min(200, Math.round(numericAmount * 0.1)) : 0;
   
   // Total To Pay rounded off matching screenshot
@@ -236,7 +274,6 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
   const totalSavings = regularDiscount + dineCashDeduction;
 
   const handleApplyOffersAndProceed = () => {
-    // If no amount was typed, default to 50 as in screenshot
     if (!billAmount || parseFloat(billAmount) <= 0) {
       setBillAmount('50');
     }
@@ -275,7 +312,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
   };
 
   // ════════════════════════════════════════════════════════════════════════════
-  // [VIEW 2] BILL DETAILS & PAYMENT CHECKOUT (ON CLICKING APPLY OFFERS & PAY)
+  // [VIEW 2] BILL DETAILS & PAYMENT CHECKOUT (PIXEL-PERFECT MATCHING SCREENSHOT)
   // ════════════════════════════════════════════════════════════════════════════
   if (payStep === 'checkout_details') {
     return (
@@ -324,10 +361,56 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
           contentContainerStyle={styles.scrollInner}
           showsVerticalScrollIndicator={false}
         >
-          {/* ─── CARD 1: Use DineCash ─── */}
-          <View style={styles.dineCashToggleCard}>
-            <View style={styles.dineCashToggleTopRow}>
-              <DineCashHexagon size={32 * SCALE} />
+          {/* ─── TOP HERO CARD: Your bill & Big Green Amount with Full Gold Gradient ─── */}
+          <LinearGradient
+            colors={['#4E3314', '#2E1C0B', '#160E07', '#0E0904']}
+            locations={[0, 0.35, 0.72, 1]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={styles.yourBillHeroCard}
+          >
+            <Text style={styles.yourBillLabel}>Your bill</Text>
+            <Text style={styles.strikethroughOriginalAmount}>₹ {numericAmount}</Text>
+            <Text style={styles.bigGreenDiscountedAmount}>₹{postDiscountBill}</Text>
+
+            {/* Speech bubble pointer */}
+            <View style={styles.speechBubblePointer} />
+
+            {/* Mint Green Savings Banner */}
+            <View style={styles.savingsBannerMint}>
+              <Text style={{ fontSize: 16 * SCALE, marginRight: 6 }}>😎</Text>
+              <Text style={styles.savingsBannerText}>
+                Woah! you're saving <Text style={styles.savingsBannerBold}>₹{regularDiscount}</Text>
+              </Text>
+            </View>
+          </LinearGradient>
+
+          {/* ─── CARD 2: You will earn 10% DineCash + Use DineCash Toggle ─── */}
+          <View style={styles.dineCashCompositeCard}>
+            {/* Top Earn Row */}
+            <View style={styles.earnDineCashRow}>
+              <Text style={styles.earnDineCashLeftText}>
+                You will earn <Text style={styles.earnDineCashGreen}>10% DineCash</Text>
+              </Text>
+              <View style={styles.earnAmountRightRow}>
+                <Svg width={18 * SCALE} height={18 * SCALE} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16"
+                    stroke="#10B981"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+                <Text style={styles.earnAmountValText}>₹{earnedDineCash}</Text>
+              </View>
+            </View>
+
+            <View style={styles.dottedDivider} />
+
+            {/* Middle Use DineCash Toggle Row */}
+            <View style={styles.dineCashToggleRow}>
+              <EmeraldDineCashHexagon size={32 * SCALE} />
               <View style={styles.dineCashToggleTextCol}>
                 <Text style={styles.dineCashToggleTitle}>Use DineCash</Text>
                 <Text style={styles.dineCashToggleSub}>Available balance ₹200</Text>
@@ -337,8 +420,8 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
                 <Switch
                   value={useDineCash}
                   onValueChange={(val) => setUseDineCash(val)}
-                  trackColor={{ false: '#333333', true: '#4A3B18' }}
-                  thumbColor={useDineCash ? '#DEA430' : '#888888'}
+                  trackColor={{ false: '#333333', true: '#064E3B' }}
+                  thumbColor={useDineCash ? '#10B981' : '#888888'}
                   style={{ transform: [{ scaleX: 0.9 }, { scaleY: 0.9 }] }}
                 />
                 <Text style={styles.dineCashAppliedAmount}>
@@ -355,7 +438,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
             </View>
           </View>
 
-          {/* ─── SECTION 2: Additional Offers ─── */}
+          {/* ─── SECTION 3: Additional Offers ─── */}
           <View style={styles.sectionBlock}>
             <Text style={styles.sectionTitleHeader}>Additional Offers</Text>
             <TouchableOpacity
@@ -364,9 +447,9 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
               onPress={() => setInfoModalVisible(true)}
             >
               <View style={styles.additionalOffersLeftCol}>
-                <Text style={styles.applyCouponTitle}>Apply coupon & Bank Offers</Text>
-                <View style={styles.bankOfferSubRow}>
-                  <MiniBankLogoIcon size={20 * SCALE} />
+                <MiniBankLogoIcon size={26 * SCALE} />
+                <View style={styles.bankOfferTextGroup}>
+                  <Text style={styles.applyCouponTitle}>Apply coupon & Bank Offers</Text>
                   <Text style={styles.bankOfferSubText} numberOfLines={1}>
                     Up to 10% off with HDFC Bank Credit Cards
                   </Text>
@@ -376,7 +459,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
             </TouchableOpacity>
           </View>
 
-          {/* ─── SECTION 3: Bill Details ─── */}
+          {/* ─── SECTION 4: Bill Details ─── */}
           <View style={styles.sectionBlock}>
             <Text style={styles.sectionTitleHeader}>Bill Details</Text>
             <View style={styles.billDetailsCard}>
@@ -391,18 +474,20 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
               {/* 10% Regular discount */}
               <View style={styles.billDetailRow}>
                 <Text style={styles.billDetailLabel}>10% Regular discount</Text>
-                <Text style={[styles.billDetailValue, { color: '#4ADE80' }]}>
+                <Text style={[styles.billDetailValue, { color: '#10B981' }]}>
                   -₹{regularDiscount}
                 </Text>
               </View>
 
               <View style={styles.dottedDivider} />
 
-              {/* Convenience fee & GST */}
+              {/* Convenience fee */}
               <View style={styles.billDetailRow}>
                 <Text style={styles.billDetailLabel}>Convenience fee</Text>
                 <Text style={styles.billDetailValue}>₹{convenienceFee.toFixed(2)}</Text>
               </View>
+
+              {/* GST on convenience fee */}
               <View style={[styles.billDetailRow, { marginTop: 8 * SCALE }]}>
                 <Text style={styles.billDetailLabel}>GST on convenience fee</Text>
                 <Text style={styles.billDetailValue}>₹{gstFee.toFixed(2)}</Text>
@@ -422,16 +507,6 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
                 </View>
                 <Text style={styles.billDetailValue}>₹{tipAmount}</Text>
               </TouchableOpacity>
-
-              <View style={styles.dottedDivider} />
-
-              {/* To Pay (Rounded off) */}
-              <View style={styles.toPayTotalRow}>
-                <Text style={styles.toPayTotalLabel}>
-                  To Pay <Text style={styles.roundedOffSub}>(Rounded off)</Text>
-                </Text>
-                <Text style={styles.toPayTotalValue}>₹{totalToPayRounded}</Text>
-              </View>
             </View>
           </View>
 
@@ -568,8 +643,8 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
                   <Text style={styles.receiptVal}>₹{successReceiptModal?.billAmount?.toFixed(2)}</Text>
                 </View>
                 <View style={styles.receiptRow}>
-                  <Text style={[styles.receiptLabel, { color: '#4ADE80' }]}>10% Regular Discount</Text>
-                  <Text style={[styles.receiptVal, { color: '#4ADE80' }]}>
+                  <Text style={[styles.receiptLabel, { color: '#10B981' }]}>10% Regular Discount</Text>
+                  <Text style={[styles.receiptVal, { color: '#10B981' }]}>
                     -₹{successReceiptModal?.regularDiscount?.toFixed(2)}
                   </Text>
                 </View>
@@ -933,7 +1008,310 @@ const styles = StyleSheet.create({
     paddingBottom: 20 * SCALE,
   },
 
-  // ─── Header Title Section ───
+  // ─── NEW Top Hero Card: Your bill ───
+  yourBillHeroCard: {
+    borderRadius: 18 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#4A3718',
+    paddingTop: 18 * SCALE,
+    paddingBottom: 14 * SCALE,
+    paddingHorizontal: 16 * SCALE,
+    alignItems: 'center',
+    marginTop: 8 * SCALE,
+    marginBottom: 16 * SCALE,
+    overflow: 'hidden',
+  },
+  yourBillLabel: {
+    color: '#FFFFFF',
+    fontSize: 15 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  strikethroughOriginalAmount: {
+    color: '#8E8E93',
+    fontSize: 19 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    textDecorationLine: 'line-through',
+    marginTop: 4 * SCALE,
+  },
+  bigGreenDiscountedAmount: {
+    color: '#A7F3D0',
+    fontSize: 54 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '900',
+    lineHeight: 60 * SCALE,
+  },
+  speechBubblePointer: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8 * SCALE,
+    borderRightWidth: 8 * SCALE,
+    borderBottomWidth: 8 * SCALE,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#A3E6C5',
+    alignSelf: 'center',
+    marginBottom: -1,
+    zIndex: 3,
+  },
+  savingsBannerMint: {
+    backgroundColor: '#A3E6C5',
+    borderRadius: 14 * SCALE,
+    paddingVertical: 10 * SCALE,
+    paddingHorizontal: 16 * SCALE,
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savingsBannerText: {
+    color: '#064E3B',
+    fontSize: 14.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  savingsBannerBold: {
+    color: '#064E3B',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+  },
+
+  // ─── CARD 2: DineCash Composite Card ───
+  dineCashCompositeCard: {
+    backgroundColor: '#121212',
+    borderRadius: 16 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#2A2210',
+    overflow: 'hidden',
+    marginBottom: 16 * SCALE,
+  },
+  earnDineCashRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16 * SCALE,
+    paddingTop: 14 * SCALE,
+    paddingBottom: 10 * SCALE,
+  },
+  earnDineCashLeftText: {
+    color: '#FFFFFF',
+    fontSize: 14.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  earnDineCashGreen: {
+    color: '#10B981',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  earnAmountRightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6 * SCALE,
+  },
+  earnAmountValText: {
+    color: '#FFFFFF',
+    fontSize: 15.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  dineCashToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16 * SCALE,
+    paddingVertical: 12 * SCALE,
+  },
+  dineCashToggleTextCol: {
+    flex: 1,
+    marginLeft: 12 * SCALE,
+  },
+  dineCashToggleTitle: {
+    color: '#FFFFFF',
+    fontSize: 15.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  dineCashToggleSub: {
+    color: '#8E8E93',
+    fontSize: 13 * SCALE,
+    fontFamily: 'Urbanist-Regular',
+    marginTop: 2,
+  },
+  switchAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6 * SCALE,
+  },
+  dineCashAppliedAmount: {
+    color: '#8E8E93',
+    fontSize: 15.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    minWidth: 26 * SCALE,
+    textAlign: 'right',
+  },
+  dineCashConditionBanner: {
+    backgroundColor: '#1A1408',
+    paddingHorizontal: 14 * SCALE,
+    paddingVertical: 8 * SCALE,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(222, 164, 48, 0.15)',
+  },
+  dineCashConditionText: {
+    color: '#DEA430',
+    fontSize: 12 * SCALE,
+    fontFamily: 'Urbanist-Medium',
+  },
+
+  // ─── Section Block Shared ───
+  sectionBlock: {
+    marginBottom: 16 * SCALE,
+  },
+  sectionTitleHeader: {
+    color: '#FFFFFF',
+    fontSize: 16 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    marginBottom: 12 * SCALE,
+  },
+
+  // ─── Additional Offers Card (View 2) ───
+  additionalOffersCard: {
+    backgroundColor: '#121212',
+    borderRadius: 16 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#2A2210',
+    padding: 16 * SCALE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  additionalOffersLeftCol: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 10 * SCALE,
+  },
+  bankOfferTextGroup: {
+    marginLeft: 12 * SCALE,
+    flex: 1,
+  },
+  applyCouponTitle: {
+    color: '#FFFFFF',
+    fontSize: 15 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    marginBottom: 4 * SCALE,
+  },
+  bankOfferSubText: {
+    color: '#8E8E93',
+    fontSize: 12.5 * SCALE,
+    fontFamily: 'Urbanist-Regular',
+  },
+
+  // ─── Bill Details Card (View 2) ───
+  billDetailsCard: {
+    backgroundColor: '#121212',
+    borderRadius: 16 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#2A2210',
+    padding: 16 * SCALE,
+  },
+  billDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  billDetailLabel: {
+    color: '#FFFFFF',
+    fontSize: 14.5 * SCALE,
+    fontFamily: 'Urbanist-Medium',
+  },
+  billDetailValue: {
+    color: '#FFFFFF',
+    fontSize: 14.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  dottedDivider: {
+    borderBottomWidth: 1.2,
+    borderStyle: 'dotted',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    marginVertical: 12 * SCALE,
+  },
+  addTipLabel: {
+    color: '#DEA430',
+    fontSize: 14.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  tipSubText: {
+    color: '#8E8E93',
+    fontSize: 12 * SCALE,
+    fontFamily: 'Urbanist-Regular',
+    marginTop: 2,
+  },
+
+  // ─── Split Payment Bottom Bar (View 2) ───
+  splitPaymentBottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#121212',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    borderTopLeftRadius: 20 * SCALE,
+    borderTopRightRadius: 20 * SCALE,
+    paddingHorizontal: 16 * SCALE,
+    paddingTop: 14 * SCALE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 30,
+  },
+  payUsingCol: {
+    flex: 1,
+  },
+  payUsingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4 * SCALE,
+  },
+  payUsingLabel: {
+    color: '#8E8E93',
+    fontSize: 11 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  cardHolderText: {
+    color: '#FFFFFF',
+    fontSize: 14.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  checkoutPayBtn: {
+    backgroundColor: '#DEA430',
+    height: 52 * SCALE,
+    borderRadius: 14 * SCALE,
+    paddingHorizontal: 28 * SCALE,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#DEA430',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  checkoutPayBtnText: {
+    color: '#000000',
+    fontSize: 17 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+
+  // ─── Header Title Section (View 1) ───
   headerTitleSection: {
     alignItems: 'center',
     paddingHorizontal: 20 * SCALE,
@@ -978,7 +1356,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // ─── Massive Gold Amount Input ───
+  // ─── Massive Gold Amount Input (View 1) ───
   amountInputBlock: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1101,235 +1479,6 @@ const styles = StyleSheet.create({
   },
   goldHighlight: {
     color: '#DEA430',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-
-  // ─── CARD 1: Use DineCash (View 2) ───
-  dineCashToggleCard: {
-    backgroundColor: '#141414',
-    borderRadius: 16 * SCALE,
-    borderWidth: 1.2,
-    borderColor: 'rgba(222, 164, 48, 0.4)',
-    overflow: 'hidden',
-    marginTop: 10 * SCALE,
-    marginBottom: 20 * SCALE,
-  },
-  dineCashToggleTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16 * SCALE,
-  },
-  dineCashToggleTextCol: {
-    flex: 1,
-    marginLeft: 12 * SCALE,
-  },
-  dineCashToggleTitle: {
-    color: '#FFFFFF',
-    fontSize: 15.5 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  dineCashToggleSub: {
-    color: '#8E8E93',
-    fontSize: 13 * SCALE,
-    fontFamily: 'Urbanist-Regular',
-    marginTop: 2,
-  },
-  switchAmountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6 * SCALE,
-  },
-  dineCashAppliedAmount: {
-    color: '#DEA430',
-    fontSize: 15.5 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    minWidth: 26 * SCALE,
-    textAlign: 'right',
-  },
-  dineCashConditionBanner: {
-    backgroundColor: '#1C1608',
-    paddingHorizontal: 14 * SCALE,
-    paddingVertical: 8 * SCALE,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(222, 164, 48, 0.15)',
-  },
-  dineCashConditionText: {
-    color: '#DEA430',
-    fontSize: 12 * SCALE,
-    fontFamily: 'Urbanist-Medium',
-  },
-
-  // ─── Section Block Shared ───
-  sectionBlock: {
-    marginBottom: 20 * SCALE,
-  },
-  sectionTitleHeader: {
-    color: '#FFFFFF',
-    fontSize: 16 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    marginBottom: 12 * SCALE,
-  },
-
-  // ─── Additional Offers Card (View 2) ───
-  additionalOffersCard: {
-    backgroundColor: '#121212',
-    borderRadius: 16 * SCALE,
-    borderWidth: 1.2,
-    borderColor: 'rgba(222, 164, 48, 0.4)',
-    padding: 16 * SCALE,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  additionalOffersLeftCol: {
-    flex: 1,
-    paddingRight: 10 * SCALE,
-  },
-  applyCouponTitle: {
-    color: '#FFFFFF',
-    fontSize: 15 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    marginBottom: 6 * SCALE,
-  },
-  bankOfferSubRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  bankOfferSubText: {
-    color: '#8E8E93',
-    fontSize: 12.5 * SCALE,
-    fontFamily: 'Urbanist-Regular',
-    marginLeft: 8 * SCALE,
-    flex: 1,
-  },
-
-  // ─── Bill Details Card (View 2) ───
-  billDetailsCard: {
-    backgroundColor: '#121212',
-    borderRadius: 16 * SCALE,
-    borderWidth: 1.2,
-    borderColor: 'rgba(222, 164, 48, 0.4)',
-    padding: 16 * SCALE,
-  },
-  billDetailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  billDetailLabel: {
-    color: '#FFFFFF',
-    fontSize: 14.5 * SCALE,
-    fontFamily: 'Urbanist-Medium',
-  },
-  billDetailValue: {
-    color: '#FFFFFF',
-    fontSize: 14.5 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  dottedDivider: {
-    borderBottomWidth: 1.2,
-    borderStyle: 'dotted',
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    marginVertical: 12 * SCALE,
-  },
-  addTipLabel: {
-    color: '#DEA430',
-    fontSize: 14.5 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  tipSubText: {
-    color: '#8E8E93',
-    fontSize: 12 * SCALE,
-    fontFamily: 'Urbanist-Regular',
-    marginTop: 2,
-  },
-  toPayTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 4 * SCALE,
-  },
-  toPayTotalLabel: {
-    color: '#FFFFFF',
-    fontSize: 16 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  roundedOffSub: {
-    color: '#8E8E93',
-    fontSize: 12 * SCALE,
-    fontFamily: 'Urbanist-Regular',
-    fontWeight: '400',
-  },
-  toPayTotalValue: {
-    color: '#DEA430',
-    fontSize: 18.5 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-  },
-
-  // ─── Split Payment Bottom Bar (View 2) ───
-  splitPaymentBottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#121212',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
-    borderTopLeftRadius: 20 * SCALE,
-    borderTopRightRadius: 20 * SCALE,
-    paddingHorizontal: 16 * SCALE,
-    paddingTop: 14 * SCALE,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    zIndex: 30,
-  },
-  payUsingCol: {
-    flex: 1,
-  },
-  payUsingHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4 * SCALE,
-  },
-  payUsingLabel: {
-    color: '#8E8E93',
-    fontSize: 11 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  cardHolderText: {
-    color: '#FFFFFF',
-    fontSize: 14.5 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  checkoutPayBtn: {
-    backgroundColor: '#DEA430',
-    height: 52 * SCALE,
-    borderRadius: 14 * SCALE,
-    paddingHorizontal: 28 * SCALE,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#DEA430',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  checkoutPayBtnText: {
-    color: '#000000',
-    fontSize: 17 * SCALE,
     fontFamily: 'Urbanist-Bold',
     fontWeight: '700',
   },
