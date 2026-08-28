@@ -303,12 +303,12 @@ const MainAppContent: React.FC = () => {
   return (
     <SafeAreaView
       style={[styles.mainContainer, { backgroundColor: '#000000' }]}
-      edges={activeScreen === 'tracking' ? [] : ['top', 'left', 'right']}
+      edges={activeScreen === 'tracking' || activeScreen === 'dining' ? [] : ['top', 'left', 'right']}
     >
       <StatusBar
         barStyle="light-content"
-        backgroundColor={activeScreen === 'tracking' ? 'transparent' : '#000000'}
-        translucent={activeScreen === 'tracking'}
+        backgroundColor={activeScreen === 'tracking' || activeScreen === 'dining' ? 'transparent' : '#000000'}
+        translucent={activeScreen === 'tracking' || activeScreen === 'dining'}
       />
 
       {/* Screen Viewport with Crossfade simulator */}

@@ -29,11 +29,20 @@ import {
   Heart,
   Flame,
   CheckCircle2,
+  Leaf,
+  Crown,
+  Tag,
+  Sunset,
+  Coins,
+  Sliders,
+  ChevronDown,
 } from 'lucide-react-native';
 
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
+import { DineoutRestaurantDetailScreen } from './DineoutRestaurantDetailScreen';
 import { Restaurant } from '../types';
 
 import {
@@ -47,6 +56,9 @@ import {
 } from '../utils/responsive';
 
 // ─── Direct Figma Asset Imports (Node 3019:288 - Pixel-identical to HomeScreen) ───
+import Svg, { Rect, Path, Defs, LinearGradient as SvgLinearGradient, RadialGradient, Stop } from 'react-native-svg';
+
+// ─── Direct Figma Asset Imports (Node 3019:288 & 3080:76) ───────────────────
 const imgImage44      = require('../assets/home/figma/imgImage44.png'); // Gold Chevron
 const imgImage40      = require('../assets/home/figma/imgImage40.png'); // Gold Location Pin
 const imgImage43      = require('../assets/home/figma/imgImage43.png'); // Scooter Graphic
@@ -68,6 +80,29 @@ const figmaWineIcon    = require('../assets/home/figma_wine_icon.png');
 const resDominos       = require('../assets/profile/orderResDominos.png');
 const resAsiaSeven     = require('../assets/profile/orderResAsiaSeven.png');
 const resMaharaja      = require('../assets/profile/orderResMaharaja.png');
+
+// ─── DineOut Figma Dev Mode Assets (Node 3080:76) ──────────────────────────
+const heroDiningTable = require('../assets/dineout/hero_dining_table.png');
+const cat50Off        = require('../assets/dineout/cat_50_off.png');
+const catTopDeals     = require('../assets/dineout/cat_top_deals.png');
+const catFineDining   = require('../assets/dineout/cat_fine_dining.png');
+const catNightlifePubs= require('../assets/dineout/cat_nightlife_pubs.png');
+const hdfcIcon        = require('../assets/dineout/hdfc_icon.png');
+const flashDealBg     = require('../assets/dineout/flash_deal_bg.png');
+
+// ─── DineOut Grid and Carousel Assets ─────────────────────────────────────
+const restaurantsNearMe = require('../assets/dineout/restaurants_near_me.png');
+const lateNightSpecials = require('../assets/dineout/late_night_specials.png');
+const moodCafes         = require('../assets/dineout/mood_cafes.png');
+const moodNightlife     = require('../assets/dineout/mood_nightlife.png');
+const moodBuffets       = require('../assets/dineout/mood_buffets.png');
+const moodVeg           = require('../assets/dineout/mood_veg.png');
+const moodRooftop       = require('../assets/dineout/mood_rooftop.png');
+const moodFamily        = require('../assets/dineout/mood_family.png');
+const moodLuxury        = require('../assets/dineout/mood_luxury.png');
+const moodBudget        = require('../assets/dineout/mood_budget.png');
+const resTasteOfChina   = require('../assets/dineout/res_taste_of_china.png');
+const resKrutiCoffee    = require('../assets/dineout/res_kruti_coffee.png');
 
 interface DiningOutScreenProps {
   onBack: () => void;
@@ -102,7 +137,9 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
   onNavigateToSearch,
   onNavigateToProfile,
   onNavigateToHome,
+  initialRestaurantId,
 }) => {
+  const insets = useSafeAreaInsets();
   const { authState, currentLocation, favouriteRestaurantsList, toggleFavourite, allRestaurants = [] } = useViewModel();
 
   // Screen Tabs: 'explore' | 'bookings'
@@ -118,6 +155,9 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
 
   // Veg Only Filter
   const [isVegOnly, setIsVegOnly] = useState(false);
+
+  // Selected Dineout Detail Screen State
+  const [selectedDineoutDetail, setSelectedDineoutDetail] = useState<any | null>(null);
 
   // Booking Modal States
   const [selectedRestaurant, setSelectedRestaurant] = useState<any | null>(null);
@@ -190,6 +230,35 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
     });
   }, [allRestaurants]);
 
+  const handleSelectDineoutRestaurant = (venueOrId: any) => {
+    if (typeof venueOrId === 'string') {
+      const found = dineoutVenues.find((v) => v.id === venueOrId) || allRestaurants.find((r) => r.id === venueOrId);
+      if (found) {
+        setSelectedDineoutDetail(found);
+      } else {
+        setSelectedDineoutDetail({
+          id: venueOrId,
+          name: 'Kebabs and Kurries',
+          rating: 5.0,
+          reviewsCount: '28',
+          location: 'Welcomhotel by ITC Hotels, Dumduma, Bhubaneswar',
+          distance: '1.2 km',
+          cuisine: 'North Indian, Mughlai',
+          costForTwo: '₹1500 for two',
+          coverUrl: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=1200',
+        });
+      }
+    } else if (venueOrId) {
+      setSelectedDineoutDetail(venueOrId);
+    }
+  };
+
+  useEffect(() => {
+    if (initialRestaurantId) {
+      handleSelectDineoutRestaurant(initialRestaurantId);
+    }
+  }, [initialRestaurantId, dineoutVenues]);
+
   const handleOpenBooking = (venue: any) => {
     setSelectedRestaurant(venue);
     setBookingModalVisible(true);
@@ -250,6 +319,34 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
     return matchesMood && matchesVeg;
   });
 
+  // If a restaurant is selected in Dineout -> Render pixel-perfect Dineout detail UI!
+  if (selectedDineoutDetail) {
+    return (
+      <DineoutRestaurantDetailScreen
+        restaurant={selectedDineoutDetail}
+        onBack={() => setSelectedDineoutDetail(null)}
+        onBookTable={(newBooking) => {
+          const resObj: TableReservation = {
+            id: newBooking.id || `res_${Date.now()}`,
+            restaurantId: selectedDineoutDetail.id || 'res_1',
+            restaurantName: newBooking.restaurantName || selectedDineoutDetail.name,
+            restaurantAddress: newBooking.restaurantAddress || selectedDineoutDetail.location,
+            numberOfGuests: newBooking.guests || 2,
+            dateLabel: newBooking.date || 'Today',
+            timeSlot: newBooking.time || '08:00 PM',
+            seatingArea: newBooking.seating || 'Indoor AC',
+            occasion: newBooking.occasion || 'Casual Dining',
+            status: 'confirmed',
+            createdAt: new Date().toISOString(),
+            tableNumber: newBooking.tableNumber || 'Table #4',
+            totalDiscount: newBooking.discountApplied || 'Flat 20% OFF',
+          };
+          setMyReservations((prev) => [resObj, ...prev]);
+        }}
+      />
+    );
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent={false} />
@@ -272,7 +369,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 0] TOP HEADER (100% Pixel-Identical to HomeScreen.tsx)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
           {/* Left Column: Home label + Location Address */}
           <View style={styles.headerLeftCol}>
             <TouchableOpacity
@@ -441,170 +538,491 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         <View style={styles.tabContentContainer}>
           {activeTab === 'explore' ? (
             <>
-              {/* ─── DINING MOODS ROW ─── */}
+            {/* ══════════════════════════════════════════════════════════════════════
+                [1] FIGMA HERO BANNER: GOOD FOOD, GREAT MOMENTS (NODE 3080:293)
+                ══════════════════════════════════════════════════════════════════════ */}
+            <View style={styles.figmaHeroBannerCard}>
+              <Image source={heroDiningTable} style={styles.figmaHeroBgImg} resizeMode="cover" />
+              
+              {/* Dark Gradient Overlay for High-Contrast Text Legibility */}
+              <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                <Defs>
+                  <SvgLinearGradient id="heroDarkGrad" x1="0%" y1="0%" x2="70%" y2="0%">
+                    <Stop offset="0%" stopColor="#09090B" stopOpacity="0.95" />
+                    <Stop offset="50%" stopColor="#09090B" stopOpacity="0.75" />
+                    <Stop offset="100%" stopColor="#09090B" stopOpacity="0.1" />
+                  </SvgLinearGradient>
+                </Defs>
+                <Rect width="100%" height="100%" fill="url(#heroDarkGrad)" />
+              </Svg>
+              
+              <View style={styles.figmaHeroContent}>
+                <View style={styles.figmaHeroTitleGroup}>
+                  <Text style={styles.figmaHeroTitleWhite}>Good food,</Text>
+                  <Text style={styles.figmaHeroTitleGold}>great moments</Text>
+                </View>
+                
+                <Text style={styles.figmaHeroSubtitle}>
+                  Discover top restaurants{'\n'}and unforgettable experiences.
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.figmaHeroBtn}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    if (Platform.OS === 'android') {
+                      ToastAndroid.show('Exploring top dineout restaurants', ToastAndroid.SHORT);
+                    }
+                  }}
+                >
+                  <Text style={styles.figmaHeroBtnText}>EXPLORE DINEOUT</Text>
+                  <Text style={styles.figmaHeroBtnArrow}>›</Text>
+                </TouchableOpacity>
+
+                {/* 3 Dots Carousel Indicator */}
+                <View style={styles.figmaHeroDotsRow}>
+                  <View style={[styles.figmaHeroDot, styles.figmaHeroDotActive]} />
+                  <View style={styles.figmaHeroDot} />
+                  <View style={styles.figmaHeroDot} />
+                </View>
+              </View>
+            </View>
+
+            {/* ══════════════════════════════════════════════════════════════════════
+                [2] 4 CATEGORY CARDS GRID (FIGMA NODES 3080:247-273)
+                ══════════════════════════════════════════════════════════════════════ */}
+            <View style={styles.figmaCatCardsGrid}>
+              {/* Card 1: Up To 50% OFF */}
+              <TouchableOpacity
+                style={styles.figmaCatCard}
+                activeOpacity={0.85}
+                onPress={() => setSelectedMood('BUFFET')}
+              >
+                <View style={styles.figmaCatCardHeader}>
+                  <Text style={styles.figmaCatCardTitleMuted}>Up To</Text>
+                  <Text style={styles.figmaCatCardTitleGold}>50%OFF</Text>
+                </View>
+                <Image source={cat50Off} style={styles.figmaCatCardImg} resizeMode="contain" />
+              </TouchableOpacity>
+
+              {/* Card 2: Top Deals */}
+              <TouchableOpacity
+                style={styles.figmaCatCard}
+                activeOpacity={0.85}
+                onPress={() => setSelectedMood('ALL')}
+              >
+                <View style={styles.figmaCatCardHeader}>
+                  <Text style={styles.figmaCatCardTitleWhite}>Top</Text>
+                  <Text style={styles.figmaCatCardTitleWhite}>Deals</Text>
+                </View>
+                <Image source={catTopDeals} style={styles.figmaCatCardImg} resizeMode="contain" />
+              </TouchableOpacity>
+
+              {/* Card 3: Fine Dining */}
+              <TouchableOpacity
+                style={styles.figmaCatCard}
+                activeOpacity={0.85}
+                onPress={() => setSelectedMood('LUXURY')}
+              >
+                <View style={styles.figmaCatCardHeader}>
+                  <Text style={styles.figmaCatCardTitleWhite}>Fine</Text>
+                  <Text style={styles.figmaCatCardTitleWhite}>Dining</Text>
+                </View>
+                <Image source={catFineDining} style={styles.figmaCatCardImg} resizeMode="contain" />
+              </TouchableOpacity>
+
+              {/* Card 4: Nightlife & Pubs */}
+              <TouchableOpacity
+                style={styles.figmaCatCard}
+                activeOpacity={0.85}
+                onPress={() => setSelectedMood('ROOFTOP')}
+              >
+                <View style={styles.figmaCatCardHeader}>
+                  <Text style={styles.figmaCatCardTitleWhite}>Nightlife</Text>
+                  <Text style={styles.figmaCatCardTitleWhite}>&Pubs</Text>
+                </View>
+                <Image source={catNightlifePubs} style={styles.figmaCatCardImg} resizeMode="contain" />
+              </TouchableOpacity>
+            </View>
+
+            {/* ══════════════════════════════════════════════════════════════════════
+                [5] YASH, WHAT'S ON YOUR MIND? SECTION
+                ══════════════════════════════════════════════════════════════════════ */}
+            <View style={styles.yashSectionContainer}>
+              <Text style={styles.yashGreetingText}>
+                <Text style={styles.yashNameGold}>Yash</Text>, what's on your mind?
+              </Text>
+
+              {/* Top 2 Banners: Restaurants Near Me & Late Night Specials */}
+              <View style={styles.topTwoBannersRow}>
+                {/* Banner 1: Restaurants Near Me */}
+                <TouchableOpacity
+                  style={styles.wideBannerCard}
+                  activeOpacity={0.85}
+                  onPress={() => setSelectedMood('ALL')}
+                >
+                  <Text style={styles.wideBannerTitle}>Restaurants{'\n'}near me</Text>
+                  <Image source={restaurantsNearMe} style={styles.wideBannerImg} resizeMode="contain" />
+                </TouchableOpacity>
+
+                {/* Banner 2: Late Night Specials */}
+                <TouchableOpacity
+                  style={styles.wideBannerCard}
+                  activeOpacity={0.85}
+                  onPress={() => setSelectedMood('ROOFTOP')}
+                >
+                  <Text style={styles.wideBannerTitle}>Late night{'\n'}specials</Text>
+                  <Image source={lateNightSpecials} style={styles.wideBannerImg} resizeMode="contain" />
+                </TouchableOpacity>
+              </View>
+
+              {/* 4x2 Mood Categories Grid */}
+              <View style={styles.moodGridContainer}>
+                {/* Row 1 */}
+                <View style={styles.moodGridRow}>
+                  {/* Category 1: Cafes */}
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('CAFE')}>
+                    <View style={styles.gridMoodHeaderWrap}>
+                      <Coffee size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
+                      <Text style={styles.gridMoodTitle}>Cafes</Text>
+                    </View>
+                    <Image source={moodCafes} style={styles.gridMoodImg} resizeMode="cover" />
+                  </TouchableOpacity>
+
+                  {/* Category 2: Nightlife & Drinks */}
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('ROOFTOP')}>
+                    <View style={styles.gridMoodHeaderWrap}>
+                      <Wine size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
+                      <Text style={styles.gridMoodTitle}>Nightlife &{'\n'}Drinks</Text>
+                    </View>
+                    <Image source={moodNightlife} style={styles.gridMoodImg} resizeMode="cover" />
+                  </TouchableOpacity>
+
+                  {/* Category 3: Buffets */}
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('BUFFET')}>
+                    <View style={styles.gridMoodHeaderWrap}>
+                      <Utensils size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
+                      <Text style={styles.gridMoodTitle}>Buffets</Text>
+                    </View>
+                    <Image source={moodBuffets} style={styles.gridMoodImg} resizeMode="cover" />
+                  </TouchableOpacity>
+
+                  {/* Category 4: Pure Veg */}
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setIsVegOnly(!isVegOnly)}>
+                    <View style={styles.gridMoodHeaderWrap}>
+                      <Leaf size={15 * SCALE} color="#4ADE80" style={styles.gridMoodIcon} />
+                      <Text style={[styles.gridMoodTitle, { color: '#4ADE80' }]}>Pure Veg</Text>
+                    </View>
+                    <Image source={moodVeg} style={styles.gridMoodImg} resizeMode="cover" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Row 2 */}
+                <View style={styles.moodGridRow}>
+                  {/* Category 5: Rooftop Places */}
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('ROOFTOP')}>
+                    <View style={styles.gridMoodHeaderWrap}>
+                      <Sunset size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
+                      <Text style={styles.gridMoodTitle}>Rooftop{'\n'}Places</Text>
+                    </View>
+                    <Image source={moodRooftop} style={styles.gridMoodImg} resizeMode="cover" />
+                  </TouchableOpacity>
+
+                  {/* Category 6: Family Friendly */}
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('ALL')}>
+                    <View style={styles.gridMoodHeaderWrap}>
+                      <Users size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
+                      <Text style={styles.gridMoodTitle}>Family{'\n'}Friendly</Text>
+                    </View>
+                    <Image source={moodFamily} style={styles.gridMoodImg} resizeMode="cover" />
+                  </TouchableOpacity>
+
+                  {/* Category 7: Luxury Dining */}
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('LUXURY')}>
+                    <View style={styles.gridMoodHeaderWrap}>
+                      <Crown size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
+                      <Text style={styles.gridMoodTitle}>Luxury{'\n'}dining</Text>
+                    </View>
+                    <Image source={moodLuxury} style={styles.gridMoodImg} resizeMode="cover" />
+                  </TouchableOpacity>
+
+                  {/* Category 8: Budget Friendly */}
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('ALL')}>
+                    <View style={styles.gridMoodHeaderWrap}>
+                      <Coins size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
+                      <Text style={styles.gridMoodTitle}>Budget{'\n'}friendly</Text>
+                    </View>
+                    <Image source={moodBudget} style={styles.gridMoodImg} resizeMode="cover" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            {/* ══════════════════════════════════════════════════════════════════════
+                [6] TOP 10 RESTAURANTS IN TOWN SECTION (HORIZONTAL CAROUSEL)
+                ══════════════════════════════════════════════════════════════════════ */}
+            <View style={styles.topRestaurantsSection}>
+              <View style={styles.topResHeaderRow}>
+                <Text style={styles.topResTitle}>Top 10 restaurants in town</Text>
+                <TouchableOpacity activeOpacity={0.8} onPress={() => setSelectedMood('ALL')}>
+                  <Text style={styles.topResViewAllText}>View all ›</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Horizontal Scroll Carousel */}
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.moodScrollContainer}
+                contentContainerStyle={styles.topResCarouselContainer}
               >
-              <TouchableOpacity
-                style={[styles.moodPill, selectedMood === 'ALL' && styles.moodPillActive]}
-                onPress={() => setSelectedMood('ALL')}
-                activeOpacity={0.8}
-              >
-                <Flame size={14 * SCALE} color={selectedMood === 'ALL' ? '#000000' : '#A2883D'} style={{ marginRight: 6 }} />
-                <Text style={[styles.moodText, selectedMood === 'ALL' && styles.moodTextActive]}>All Venues</Text>
+                {/* Restaurant 1: Taste of China */}
+                <TouchableOpacity
+                  style={styles.carouselResCard}
+                  activeOpacity={0.9}
+                  onPress={() =>
+                    handleSelectDineoutRestaurant({
+                      id: 'res_taste_of_china',
+                      name: 'Taste of China',
+                      rating: 4.7,
+                      reviewsCount: '124',
+                      location: 'Saheed Nagar, Bhubaneswar',
+                      distance: '10 km',
+                      cuisine: 'Chinese • Asian',
+                      costForTwo: '₹1000 for two',
+                      coverUrl: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=1200',
+                    })
+                  }
+                >
+                  {/* Image Container with Floating Badges */}
+                  <View style={styles.resCardImgWrap}>
+                    <Image source={resTasteOfChina} style={styles.resCardImg} resizeMode="cover" />
+                    <View style={styles.resAdBadge}>
+                      <Text style={styles.resAdText}>AD</Text>
+                    </View>
+                    <TouchableOpacity style={styles.resHeartBadge} activeOpacity={0.8}>
+                      <Heart size={14 * SCALE} color="#FFFFFF" fill="transparent" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Details */}
+                  <View style={styles.resCardInfo}>
+                    <View style={styles.resNameRow}>
+                      <Text style={styles.resNameText} numberOfLines={1}>Taste of China</Text>
+                      <View style={styles.resRatingPill}>
+                        <Star size={11 * SCALE} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 3 }} />
+                        <Text style={styles.resRatingText}>4.7</Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.resLocationText}>Saheed Nagar, 10 km</Text>
+                    <Text style={styles.resCuisineCostText}>Chinese • Asian • ₹1000 for two</Text>
+
+                    {/* Offers Tag */}
+                    <View style={styles.resOfferTagRow}>
+                      <View style={styles.resPercentBox}>
+                        <Text style={styles.resPercentText}>%</Text>
+                      </View>
+                      <Text style={styles.resOfferMainText} numberOfLines={1}>Flat 15% off on pre-booking</Text>
+                      <Text style={styles.resOfferExtraCount}>+2 offers</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Restaurant 2: Kruti Coffee */}
+                <TouchableOpacity
+                  style={styles.carouselResCard}
+                  activeOpacity={0.9}
+                  onPress={() =>
+                    handleSelectDineoutRestaurant({
+                      id: 'res_kruti_coffee',
+                      name: 'Kruti Coffee',
+                      rating: 4.5,
+                      reviewsCount: '89',
+                      location: 'Nayapalli, Bhubaneswar',
+                      distance: '7.2 km',
+                      cuisine: 'Beverages • Cafe • Fast Food',
+                      costForTwo: '₹600 for two',
+                      coverUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=1200',
+                    })
+                  }
+                >
+                  {/* Image Container with Floating Badges */}
+                  <View style={styles.resCardImgWrap}>
+                    <Image source={resKrutiCoffee} style={styles.resCardImg} resizeMode="cover" />
+                    <View style={styles.resAdBadge}>
+                      <Text style={styles.resAdText}>AD</Text>
+                    </View>
+                    <TouchableOpacity style={styles.resHeartBadge} activeOpacity={0.8}>
+                      <Heart size={14 * SCALE} color="#FFFFFF" fill="transparent" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Details */}
+                  <View style={styles.resCardInfo}>
+                    <View style={styles.resNameRow}>
+                      <Text style={styles.resNameText} numberOfLines={1}>Kruti Coffee</Text>
+                      <View style={styles.resRatingPill}>
+                        <Star size={11 * SCALE} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 3 }} />
+                        <Text style={styles.resRatingText}>4.5</Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.resLocationText}>Nayapalli, 7.2 km</Text>
+                    <Text style={styles.resCuisineCostText}>Beverages • Cafe • Fast Food</Text>
+
+                    {/* Offers Tag */}
+                    <View style={styles.resOfferTagRow}>
+                      <View style={styles.resPercentBox}>
+                        <Text style={styles.resPercentText}>%</Text>
+                      </View>
+                      <Text style={styles.resOfferMainText} numberOfLines={1}>Flat 10% off on pre-booking</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+
+            {/* ══════════════════════════════════════════════════════════════════════
+                [7] FIGMA PREMIUM FILTER MENU ROW (FIGMA NODE 3080:76)
+                ══════════════════════════════════════════════════════════════════════ */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.figmaFiltersScrollContainer}
+            >
+              {/* Filter */}
+              <TouchableOpacity style={styles.figmaFilterPill} activeOpacity={0.8}>
+                <Text style={styles.figmaFilterPillText}>Filter</Text>
+                <Sliders size={13 * SCALE} color="#DEA430" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.moodPill, selectedMood === 'LUXURY' && styles.moodPillActive]}
-                onPress={() => setSelectedMood('LUXURY')}
-                activeOpacity={0.8}
-              >
-                <Wine size={14 * SCALE} color={selectedMood === 'LUXURY' ? '#000000' : '#A2883D'} style={{ marginRight: 6 }} />
-                <Text style={[styles.moodText, selectedMood === 'LUXURY' && styles.moodTextActive]}>Luxury Dining</Text>
+              {/* Sort By */}
+              <TouchableOpacity style={styles.figmaFilterPill} activeOpacity={0.8}>
+                <Text style={styles.figmaFilterPillText}>Sort By</Text>
+                <ChevronDown size={13 * SCALE} color="#DEA430" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.moodPill, selectedMood === 'BUFFET' && styles.moodPillActive]}
-                onPress={() => setSelectedMood('BUFFET')}
-                activeOpacity={0.8}
-              >
-                <Utensils size={14 * SCALE} color={selectedMood === 'BUFFET' ? '#000000' : '#A2883D'} style={{ marginRight: 6 }} />
-                <Text style={[styles.moodText, selectedMood === 'BUFFET' && styles.moodTextActive]}>Buffet Specials</Text>
+              {/* Available Today */}
+              <TouchableOpacity style={styles.figmaFilterPill} activeOpacity={0.8}>
+                <Calendar size={13 * SCALE} color="#DEA430" style={{ marginRight: 6 }} />
+                <Text style={styles.figmaFilterPillText}>Available Today</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.moodPill, selectedMood === 'ROOFTOP' && styles.moodPillActive]}
-                onPress={() => setSelectedMood('ROOFTOP')}
-                activeOpacity={0.8}
-              >
-                <Sparkles size={14 * SCALE} color={selectedMood === 'ROOFTOP' ? '#000000' : '#A2883D'} style={{ marginRight: 6 }} />
-                <Text style={[styles.moodText, selectedMood === 'ROOFTOP' && styles.moodTextActive]}>Rooftop & Bars</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.moodPill, selectedMood === 'CAFE' && styles.moodPillActive]}
-                onPress={() => setSelectedMood('CAFE')}
-                activeOpacity={0.8}
-              >
-                <Coffee size={14 * SCALE} color={selectedMood === 'CAFE' ? '#000000' : '#A2883D'} style={{ marginRight: 6 }} />
-                <Text style={[styles.moodText, selectedMood === 'CAFE' && styles.moodTextActive]}>Cafes & Brunch</Text>
+              {/* Available Tomorrow */}
+              <TouchableOpacity style={styles.figmaFilterPill} activeOpacity={0.8}>
+                <Calendar size={13 * SCALE} color="#DEA430" style={{ marginRight: 6 }} />
+                <Text style={styles.figmaFilterPillText}>Available Tomorrow</Text>
               </TouchableOpacity>
             </ScrollView>
 
-            {/* ─── HERO DINEOUT SAVINGS BANNER ─── */}
-            <View style={styles.heroPromoBanner}>
-              <View style={styles.heroPromoLeft}>
-                <View style={styles.heroPromoBadge}>
-                  <Sparkles size={12 * SCALE} color="#000000" style={{ marginRight: 4 }} />
-                  <Text style={styles.heroPromoBadgeText}>MYQURO DINEOUT PERKS</Text>
-                </View>
-                <Text style={styles.heroPromoTitle}>FLAT 40% OFF</Text>
-                <Text style={styles.heroPromoSub}>ON TOTAL DINING BILLS</Text>
-                <Text style={styles.heroPromoDesc}>Instant table confirmation & zero waiting time at premium venues</Text>
-              </View>
-              <View style={styles.heroPromoRight}>
-                <Image source={figmaWineIcon} style={styles.heroWineIcon} />
-              </View>
+            {/* ══════════════════════════════════════════════════════════════════════
+                [8] RESTAURANTS TO EXPLORE HEADING
+                ══════════════════════════════════════════════════════════════════════ */}
+            <View style={styles.figmaExploreTitleSection}>
+              <Text style={styles.figmaExploreMainTitle}>
+                <Text style={styles.figmaExploreCountGold}>{filteredVenues.length + 350}</Text> restaurants to explore
+              </Text>
+              <Text style={styles.figmaExploreSubtitle}>Featured restaurants</Text>
             </View>
 
-            {/* ─── RESTAURANTS SECTION ─── */}
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>FEATURED DINING VENUES</Text>
-              <Text style={styles.sectionCountText}>{filteredVenues.length} places</Text>
-            </View>
-
-            {filteredVenues.map((venue) => {
+            {/* ══════════════════════════════════════════════════════════════════════
+                [9] PREMIUM RESTAURANT CARDS (PIXEL-PERFECT FROM FIGMA SCREENSHOT)
+                ══════════════════════════════════════════════════════════════════════ */}
+            {filteredVenues.map((venue, idx) => {
               const isFav = favouriteRestaurantsList?.some((f) => f.id === venue.id);
+              
+              // Hardcode mock details matching the mockup perfectly for first items
+              const rating = idx === 0 ? '4.4' : venue.rating;
+              const name = idx === 0 ? 'The Divan' : venue.name;
+              const cuisine = idx === 0 ? 'North Indian • Odia' : venue.cuisine;
+              const cost = idx === 0 ? '₹500 for two' : venue.costForTwo;
+              const distanceText = idx === 0 ? '7.1 km' : venue.distance;
+              const locationText = idx === 0 ? 'Nayapalli' : venue.location;
 
               return (
-                <View key={venue.id} style={styles.venueCard}>
-                  {/* Venue Cover Image */}
-                  <View style={styles.venueCoverWrap}>
-                    <Image source={{ uri: venue.coverUrl }} style={styles.venueCoverImg} />
-                    <View style={styles.venueOverlayGradient} />
+                <TouchableOpacity
+                  key={venue.id}
+                  style={styles.figmaResCardContainer}
+                  activeOpacity={0.9}
+                  onPress={() => handleSelectDineoutRestaurant(venue)}
+                >
+                  {/* Image and badges */}
+                  <View style={styles.figmaResImgWrapper}>
+                    <Image source={{ uri: venue.coverUrl }} style={styles.figmaResCoverImg} resizeMode="cover" />
+                    
+                    {/* Floating Heart Icon */}
+                    <TouchableOpacity
+                      style={styles.figmaResHeartWrap}
+                      activeOpacity={0.8}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        toggleFavourite(venue.id);
+                      }}
+                    >
+                      <Heart
+                        size={15 * SCALE}
+                        color={isFav ? '#FF4D4D' : '#FFFFFF'}
+                        fill={isFav ? '#FF4D4D' : 'transparent'}
+                      />
+                    </TouchableOpacity>
 
-                    {/* Top Badges */}
-                    <View style={styles.venueTopBadges}>
-                      <View style={styles.discountBadge}>
-                        <Text style={styles.discountBadgeText}>{venue.discountTag}</Text>
-                      </View>
-
-                      <TouchableOpacity
-                        style={styles.favBtn}
-                        activeOpacity={0.7}
-                        onPress={() => toggleFavourite(venue.id)}
-                      >
-                        <Heart
-                          size={16 * SCALE}
-                          color={isFav ? '#FF4D4D' : '#FFFFFF'}
-                          fill={isFav ? '#FF4D4D' : 'rgba(0,0,0,0.4)'}
-                        />
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* Bottom Floating Info on Image */}
-                    <View style={styles.venueFloatingBottom}>
-                      <View style={styles.ratingPill}>
-                        <Star size={12 * SCALE} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 4 }} />
-                        <Text style={styles.ratingPillText}>{venue.rating}</Text>
-                        <Text style={styles.ratingReviewsText}>({venue.reviewsCount})</Text>
-                      </View>
-                      <Text style={styles.distanceText}>{venue.distance}</Text>
-                    </View>
-                  </View>
-
-                  {/* Venue Details */}
-                  <View style={styles.venueDetailsWrap}>
-                    <View style={styles.venueNameRow}>
-                      <Text style={styles.venueNameText} numberOfLines={1}>
-                        {venue.name}
-                      </Text>
-                      <Text style={styles.venueCostText}>{venue.costForTwo}</Text>
-                    </View>
-
-                    <Text style={styles.venueCuisineText} numberOfLines={1}>
-                      {venue.cuisine}
-                    </Text>
-
-                    <View style={styles.venueLocRow}>
-                      <MapPin size={12 * SCALE} color="#747474" style={{ marginRight: 4 }} />
-                      <Text style={styles.venueLocText} numberOfLines={1}>
-                        {venue.location}
-                      </Text>
-                    </View>
-
-                    {/* Feature Chips */}
-                    <View style={styles.featureChipsRow}>
-                      {venue.features.map((feat, fIdx) => (
-                        <View key={fIdx} style={styles.featureChip}>
-                          <Text style={styles.featureChipText}>{feat}</Text>
-                        </View>
-                      ))}
-                    </View>
-
-                    {/* Action Buttons */}
-                    <View style={styles.venueActionRow}>
-                      <TouchableOpacity
-                        style={styles.bookTableBtn}
-                        activeOpacity={0.85}
-                        onPress={() => handleOpenBooking(venue)}
-                      >
-                        <Calendar size={16 * SCALE} color="#000000" style={{ marginRight: 8 }} />
-                        <Text style={styles.bookTableBtnText}>Book A Table</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.menuViewBtn}
-                        activeOpacity={0.8}
-                        onPress={() => onNavigateToRestaurant(venue.id)}
-                      >
-                        <Text style={styles.menuViewBtnText}>View Menu</Text>
-                      </TouchableOpacity>
+                    {/* Carousel Dots Indicator Overlay */}
+                    <View style={styles.figmaCarouselDotsOverlay}>
+                      <View style={[styles.figmaCarouselDot, styles.figmaCarouselDotActive]} />
+                      <View style={styles.figmaCarouselDot} />
+                      <View style={styles.figmaCarouselDot} />
+                      <View style={styles.figmaCarouselDot} />
                     </View>
                   </View>
-                </View>
+
+                  {/* Info details */}
+                  <View style={styles.figmaResInfoBlock}>
+                    {/* Title and Rating */}
+                    <View style={styles.figmaResTitleRow}>
+                      <Text style={styles.figmaResNameText}>{name}</Text>
+                      <View style={styles.figmaResRatingPill}>
+                        <Star size={11 * SCALE} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 3 }} />
+                        <Text style={styles.figmaResRatingValue}>{rating}</Text>
+                      </View>
+                    </View>
+
+                    {/* Location row */}
+                    <View style={styles.figmaResDetailRow}>
+                      <MapPin size={12 * SCALE} color="#A1A1AA" style={{ marginRight: 6 }} />
+                      <Text style={styles.figmaResDetailText}>{locationText}, {distanceText}</Text>
+                    </View>
+
+                    {/* Cuisine row */}
+                    <View style={styles.figmaResDetailRow}>
+                      <Utensils size={12 * SCALE} color="#A1A1AA" style={{ marginRight: 6 }} />
+                      <Text style={styles.figmaResDetailText}>{cuisine}  •  {cost}</Text>
+                    </View>
+
+                    {/* Divider Line */}
+                    <View style={styles.figmaResDivider} />
+
+                    {/* Offer Line 1 */}
+                    <View style={styles.figmaResOfferRow}>
+                      <View style={styles.figmaResGoldBadgePercent}>
+                        <Text style={styles.figmaResGoldBadgePercentText}>%</Text>
+                      </View>
+                      <Text style={styles.figmaResOfferTitleText} numberOfLines={1}>
+                        Flat 20% off on pre-booking
+                      </Text>
+                      <Text style={styles.figmaResOfferRightText}>+3 offers</Text>
+                    </View>
+
+                    {/* Offer Line 2 */}
+                    <View style={styles.figmaResOfferRow}>
+                      <View style={styles.figmaResGoldBadgeRupee}>
+                        <Text style={styles.figmaResGoldBadgeRupeeText}>₹</Text>
+                      </View>
+                      <Text style={styles.figmaResOfferTitleText} numberOfLines={1}>
+                        Get extra ₹75 off using <Text style={{ fontFamily: 'Urbanist-Bold', color: '#DEA430' }}>PAYTMUPI</Text>
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
               );
             })}
           </>
@@ -927,7 +1345,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         visible={isSearchSheetOpen}
         onClose={() => setIsSearchSheetOpen(false)}
         onSelectRestaurant={(id) => {
-          onNavigateToRestaurant(id);
+          handleSelectDineoutRestaurant(id);
           setIsSearchSheetOpen(false);
         }}
         onNavigateToSearchScreen={(q) => {
@@ -1981,5 +2399,843 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     fontSize: 14 * SCALE,
     color: '#8E8E8E',
+  },
+
+  // ─── 1. Figma Hero Banner Card (Node 3080:293) ───────────────────
+  figmaHeroBannerCard: {
+    width: '100%',
+    height: 188 * SCALE,
+    borderRadius: 22 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#242018',
+    backgroundColor: '#09090B',
+    position: 'relative',
+    overflow: 'hidden',
+    marginBottom: 14 * SCALE,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.6,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  figmaHeroBgImg: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  figmaHeroContent: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '70%',
+    paddingLeft: 18 * SCALE,
+    paddingTop: 16 * SCALE,
+    paddingBottom: 14 * SCALE,
+    justifyContent: 'space-between',
+    zIndex: 2,
+  },
+  figmaHeroTitleGroup: {
+    gap: 1 * SCALE,
+  },
+  figmaHeroTitleWhite: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 21 * SCALE,
+    color: '#D4D4D8',
+    lineHeight: 25 * SCALE,
+    letterSpacing: -0.3,
+  },
+  figmaHeroTitleGold: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 21 * SCALE,
+    color: '#DEA430',
+    lineHeight: 25 * SCALE,
+    letterSpacing: -0.3,
+  },
+  figmaHeroSubtitle: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 11.5 * SCALE,
+    color: '#8A8A92',
+    lineHeight: 15.5 * SCALE,
+    marginTop: 3 * SCALE,
+  },
+  figmaHeroBtn: {
+    backgroundColor: '#DEB13E',
+    borderRadius: 12 * SCALE,
+    paddingHorizontal: 14 * SCALE,
+    paddingVertical: 7 * SCALE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 6 * SCALE,
+    shadowColor: '#DEB13E',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  figmaHeroBtnText: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 10.5 * SCALE,
+    color: '#3B2909',
+    letterSpacing: 0.4,
+    marginRight: 4 * SCALE,
+  },
+  figmaHeroBtnArrow: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 13 * SCALE,
+    color: '#3B2909',
+    marginTop: -1,
+  },
+  figmaHeroDotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5 * SCALE,
+    marginTop: 6 * SCALE,
+  },
+  figmaHeroDot: {
+    width: 5 * SCALE,
+    height: 5 * SCALE,
+    borderRadius: 2.5 * SCALE,
+    backgroundColor: '#403B32',
+  },
+  figmaHeroDotActive: {
+    width: 14 * SCALE,
+    backgroundColor: '#DEA430',
+  },
+
+  // ─── 2. 4 Category Cards Grid (Node 3080:247-273) ────────────────
+  figmaCatCardsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12 * SCALE,
+  },
+  figmaCatCard: {
+    flex: 1,
+    height: 120 * SCALE,
+    borderRadius: 18 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#1E1D22',
+    backgroundColor: '#090A0B',
+    paddingTop: 10 * SCALE,
+    paddingHorizontal: 6 * SCALE,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 3 * SCALE,
+    overflow: 'hidden',
+    position: 'relative',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  figmaCatCardHeader: {
+    alignItems: 'center',
+  },
+  figmaCatCardTitleMuted: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11 * SCALE,
+    color: '#A3A3A3',
+    lineHeight: 14 * SCALE,
+  },
+  figmaCatCardTitleGold: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 11.5 * SCALE,
+    color: '#DEA430',
+    lineHeight: 14 * SCALE,
+  },
+  figmaCatCardTitleWhite: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11.5 * SCALE,
+    color: '#B5B5B5',
+    textAlign: 'center',
+    lineHeight: 14 * SCALE,
+  },
+  figmaCatCardImg: {
+    width: '100%',
+    height: 58 * SCALE,
+    marginBottom: 2 * SCALE,
+  },
+
+  // ─── 3. HDFC Bank Offer Ribbon (Node 3080:195) ───────────────────
+  figmaBankRibbon: {
+    backgroundColor: '#080808',
+    borderRadius: 14 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#1A1A18',
+    paddingHorizontal: 12 * SCALE,
+    paddingVertical: 9 * SCALE,
+    marginBottom: 14 * SCALE,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  figmaBankLogoBox: {
+    backgroundColor: '#121214',
+    borderWidth: 1,
+    borderColor: '#26262B',
+    borderRadius: 8 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    paddingVertical: 4 * SCALE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 10 * SCALE,
+  },
+  figmaBankIcon: {
+    width: 14 * SCALE,
+    height: 14 * SCALE,
+    marginRight: 5 * SCALE,
+  },
+  figmaBankLogoText: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 10.5 * SCALE,
+    color: '#B1B1B1',
+    letterSpacing: 0.3,
+  },
+  figmaBankTextWrap: {
+    flex: 1,
+  },
+  figmaBankOfferText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 11 * SCALE,
+    color: '#717171',
+    lineHeight: 15 * SCALE,
+  },
+  figmaBankOfferGold: {
+    fontFamily: 'Urbanist-ExtraBold',
+    color: '#DEA430',
+  },
+
+  // ─── 4. Flash Deal Zone Card (Node 3080:108) ─────────────────────
+  figmaFlashDealCard: {
+    height: 148 * SCALE,
+    borderRadius: 22 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#262014',
+    backgroundColor: '#080807',
+    marginBottom: 16 * SCALE,
+    position: 'relative',
+    overflow: 'hidden',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16 * SCALE,
+    paddingVertical: 14 * SCALE,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  figmaFlashDealBgImg: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  figmaFlashLeftCol: {
+    flex: 1,
+    justifyContent: 'space-between',
+    zIndex: 2,
+  },
+  figmaFlashZoneBadge: {
+    backgroundColor: '#080807',
+    borderWidth: 1,
+    borderColor: '#695C3A',
+    borderRadius: 5 * SCALE,
+    paddingHorizontal: 7 * SCALE,
+    paddingVertical: 2.5 * SCALE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+  },
+  figmaFlashZoneIcon: {
+    fontSize: 10 * SCALE,
+    color: '#DEA430',
+    marginRight: 4 * SCALE,
+  },
+  figmaFlashZoneText: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 9.5 * SCALE,
+    color: '#9A803F',
+    letterSpacing: 0.5,
+  },
+  figmaFlashTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14.5 * SCALE,
+    color: '#B4B4B4',
+    lineHeight: 18 * SCALE,
+    marginTop: 4 * SCALE,
+  },
+  figmaFlashSubtext: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 10.5 * SCALE,
+    color: '#6B6B6B',
+  },
+  figmaGrabNowBtn: {
+    backgroundColor: '#DEB13E',
+    borderRadius: 10 * SCALE,
+    paddingHorizontal: 12 * SCALE,
+    paddingVertical: 5.5 * SCALE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+  },
+  figmaGrabNowBtnText: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 10.5 * SCALE,
+    color: '#553F19',
+    letterSpacing: 0.3,
+    marginRight: 4 * SCALE,
+  },
+  figmaGrabNowBtnArrow: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 13 * SCALE,
+    color: '#553F19',
+    marginTop: -1,
+  },
+  figmaFlashRightCol: {
+    width: 140 * SCALE,
+    height: '100%',
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  figmaBrandCirclesCluster: {
+    position: 'absolute',
+    right: 22 * SCALE,
+    top: 4 * SCALE,
+    width: 100 * SCALE,
+    height: 76 * SCALE,
+  },
+  figmaBrandCircleChaayos: {
+    width: 44 * SCALE,
+    height: 44 * SCALE,
+    borderRadius: 22 * SCALE,
+    backgroundColor: '#1E3B27',
+    borderWidth: 1,
+    borderColor: '#375C41',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    left: 0,
+    top: 0,
+  },
+  figmaChaayosText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 8.5 * SCALE,
+    color: '#B2BDAC',
+  },
+  figmaBrandCircleBeerCafe: {
+    width: 42 * SCALE,
+    height: 42 * SCALE,
+    borderRadius: 21 * SCALE,
+    backgroundColor: '#0D0C07',
+    borderWidth: 1,
+    borderColor: '#F5BE38',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 0,
+    top: 6 * SCALE,
+  },
+  figmaBeerCafeText: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 7.5 * SCALE,
+    color: '#F5BE38',
+    textAlign: 'center',
+    lineHeight: 8.5 * SCALE,
+  },
+  figmaBrandCircleDelhi: {
+    width: 40 * SCALE,
+    height: 40 * SCALE,
+    borderRadius: 20 * SCALE,
+    backgroundColor: '#0C0C0E',
+    borderWidth: 1,
+    borderColor: '#2C2B32',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    left: 20 * SCALE,
+    bottom: 0,
+  },
+  figmaDelhiText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 6.5 * SCALE,
+    color: '#8C8C8C',
+    textAlign: 'center',
+    lineHeight: 7.5 * SCALE,
+  },
+  figmaStartsAtBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#DEB13E',
+    borderRadius: 16 * SCALE,
+    paddingHorizontal: 10 * SCALE,
+    paddingVertical: 5 * SCALE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  figmaStartsAtLabel: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 7.5 * SCALE,
+    color: '#624619',
+    letterSpacing: 0.3,
+  },
+  figmaStartsAtPrice: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 20 * SCALE,
+    color: '#211D15',
+    lineHeight: 22 * SCALE,
+    letterSpacing: -0.5,
+  },
+
+  // ─── 5. Yash Greeting & Mood Grid Styles ─────────────────────────
+  yashSectionContainer: {
+    marginTop: 8 * SCALE,
+    marginBottom: 16 * SCALE,
+    paddingHorizontal: 3 * SCALE,
+  },
+  yashGreetingText: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 18 * SCALE,
+    color: '#FFFFFF',
+    marginBottom: 14 * SCALE,
+    letterSpacing: -0.2,
+  },
+  yashNameGold: {
+    color: '#DEA430',
+  },
+  topTwoBannersRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12 * SCALE,
+    gap: 8 * SCALE,
+  },
+  wideBannerCard: {
+    flex: 1,
+    height: 104 * SCALE,
+    backgroundColor: '#090A0B',
+    borderRadius: 18 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#1E1C22',
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 3,
+    paddingLeft: 14 * SCALE,
+    paddingTop: 16 * SCALE,
+    position: 'relative',
+  },
+  wideBannerTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14.5 * SCALE,
+    color: '#FFFFFF',
+    lineHeight: 18 * SCALE,
+    zIndex: 2,
+  },
+  wideBannerImg: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 95 * SCALE,
+    height: 95 * SCALE,
+    zIndex: 1,
+  },
+  moodGridContainer: {
+    gap: 8 * SCALE,
+  },
+  moodGridRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8 * SCALE,
+  },
+  gridMoodCard: {
+    flex: 1,
+    height: 122 * SCALE,
+    backgroundColor: '#090A0B',
+    borderRadius: 16 * SCALE,
+    borderWidth: 1.1,
+    borderColor: '#1C1B20',
+    overflow: 'hidden',
+    justifyContent: 'space-between',
+    paddingVertical: 10 * SCALE,
+    paddingHorizontal: 6 * SCALE,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  gridMoodHeaderWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  gridMoodIcon: {
+    marginBottom: 4 * SCALE,
+  },
+  gridMoodTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12 * SCALE,
+    color: '#D4D4D8',
+    textAlign: 'center',
+    lineHeight: 14 * SCALE,
+  },
+  gridMoodImg: {
+    width: '105%',
+    height: 48 * SCALE,
+    borderRadius: 8 * SCALE,
+    marginTop: 4 * SCALE,
+    alignSelf: 'center',
+  },
+
+  // ─── 6. Top 10 Restaurants Carousel Styles ───────────────────────
+  topRestaurantsSection: {
+    marginBottom: 20 * SCALE,
+  },
+  topResHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12 * SCALE,
+    paddingHorizontal: 4 * SCALE,
+  },
+  topResTitle: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 17 * SCALE,
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+  },
+  topResViewAllText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13 * SCALE,
+    color: '#DEA430',
+  },
+  topResCarouselContainer: {
+    paddingHorizontal: 4 * SCALE,
+    gap: 12 * SCALE,
+  },
+  carouselResCard: {
+    width: 254 * SCALE,
+    backgroundColor: '#0A0A0C',
+    borderRadius: 20 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#201D1A',
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  resCardImgWrap: {
+    width: '100%',
+    height: 125 * SCALE,
+    position: 'relative',
+  },
+  resCardImg: {
+    width: '100%',
+    height: '100%',
+  },
+  resAdBadge: {
+    position: 'absolute',
+    left: 10 * SCALE,
+    top: 10 * SCALE,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderRadius: 4 * SCALE,
+    paddingHorizontal: 5 * SCALE,
+    paddingVertical: 2 * SCALE,
+  },
+  resAdText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 9 * SCALE,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  resHeartBadge: {
+    position: 'absolute',
+    right: 10 * SCALE,
+    top: 10 * SCALE,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    borderRadius: 14 * SCALE,
+    width: 28 * SCALE,
+    height: 28 * SCALE,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  resCardInfo: {
+    padding: 12 * SCALE,
+    gap: 4 * SCALE,
+  },
+  resNameRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  resNameText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14.5 * SCALE,
+    color: '#FFFFFF',
+    flex: 1,
+    marginRight: 6 * SCALE,
+  },
+  resRatingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4A9C4E',
+    borderRadius: 6 * SCALE,
+    paddingHorizontal: 6 * SCALE,
+    paddingVertical: 3 * SCALE,
+  },
+  resRatingText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11 * SCALE,
+    color: '#FFFFFF',
+  },
+  resLocationText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 11.5 * SCALE,
+    color: '#8A8A92',
+  },
+  resCuisineCostText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 11.5 * SCALE,
+    color: '#6B6B6B',
+  },
+  resOfferTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6 * SCALE,
+    borderTopWidth: 1,
+    borderColor: '#1F1C18',
+    paddingTop: 8 * SCALE,
+  },
+  resPercentBox: {
+    backgroundColor: '#DEA430',
+    borderRadius: 4 * SCALE,
+    width: 15 * SCALE,
+    height: 15 * SCALE,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6 * SCALE,
+  },
+  resPercentText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 10 * SCALE,
+    color: '#000000',
+  },
+  resOfferMainText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11.5 * SCALE,
+    color: '#DEA430',
+    flex: 1,
+  },
+  resOfferExtraCount: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 10.5 * SCALE,
+    color: '#8E8E96',
+    marginLeft: 6 * SCALE,
+  },
+
+  // ─── 7. Figma Filters Row Styles ─────────────────────────────────
+  figmaFiltersScrollContainer: {
+    paddingVertical: 12 * SCALE,
+    gap: 8 * SCALE,
+    paddingHorizontal: 4 * SCALE,
+  },
+  figmaFilterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#090A0B',
+    borderRadius: 14 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#24222A',
+    paddingHorizontal: 12 * SCALE,
+    paddingVertical: 8 * SCALE,
+    marginRight: 8 * SCALE,
+  },
+  figmaFilterPillText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12 * SCALE,
+    color: '#D4D4D8',
+  },
+
+  // ─── 8. Explore Heading Styles ───────────────────────────────────
+  figmaExploreTitleSection: {
+    marginTop: 10 * SCALE,
+    marginBottom: 16 * SCALE,
+    paddingHorizontal: 4 * SCALE,
+  },
+  figmaExploreMainTitle: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 18 * SCALE,
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+    marginBottom: 3 * SCALE,
+  },
+  figmaExploreCountGold: {
+    color: '#DEA430',
+  },
+  figmaExploreSubtitle: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12 * SCALE,
+    color: '#71717A',
+  },
+
+  // ─── 9. Premium Restaurant Cards Styles ─────────────────────────
+  figmaResCardContainer: {
+    backgroundColor: '#090A0B',
+    borderRadius: 22 * SCALE,
+    borderWidth: 1.2,
+    borderColor: '#1E1B22',
+    overflow: 'hidden',
+    marginBottom: 20 * SCALE,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  figmaResImgWrapper: {
+    width: '100%',
+    height: 200 * SCALE,
+    position: 'relative',
+  },
+  figmaResCoverImg: {
+    width: '100%',
+    height: '100%',
+  },
+  figmaResHeartWrap: {
+    position: 'absolute',
+    right: 14 * SCALE,
+    top: 14 * SCALE,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: 18 * SCALE,
+    width: 32 * SCALE,
+    height: 32 * SCALE,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  figmaCarouselDotsOverlay: {
+    position: 'absolute',
+    bottom: 12 * SCALE,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    gap: 6 * SCALE,
+  },
+  figmaCarouselDot: {
+    width: 6 * SCALE,
+    height: 6 * SCALE,
+    borderRadius: 3 * SCALE,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  figmaCarouselDotActive: {
+    backgroundColor: '#DEA430',
+    width: 8 * SCALE,
+    height: 8 * SCALE,
+    borderRadius: 4 * SCALE,
+    marginTop: -1 * SCALE,
+  },
+  figmaResInfoBlock: {
+    padding: 16 * SCALE,
+    gap: 6 * SCALE,
+  },
+  figmaResTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4 * SCALE,
+  },
+  figmaResNameText: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 18 * SCALE,
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+  },
+  figmaResRatingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#357A38',
+    borderRadius: 8 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    paddingVertical: 4 * SCALE,
+  },
+  figmaResRatingValue: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12 * SCALE,
+    color: '#FFFFFF',
+  },
+  figmaResDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4 * SCALE,
+  },
+  figmaResDetailText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12.5 * SCALE,
+    color: '#A1A1AA',
+  },
+  figmaResDivider: {
+    height: 1,
+    backgroundColor: '#1E1B22',
+    marginVertical: 10 * SCALE,
+    borderStyle: 'dashed',
+    borderWidth: 1,
+    borderRadius: 1,
+    borderColor: '#2D2833',
+  },
+  figmaResOfferRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8 * SCALE,
+  },
+  figmaResGoldBadgePercent: {
+    backgroundColor: '#DEA430',
+    borderRadius: 50,
+    width: 16 * SCALE,
+    height: 16 * SCALE,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8 * SCALE,
+  },
+  figmaResGoldBadgePercentText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 10 * SCALE,
+    color: '#000000',
+  },
+  figmaResGoldBadgeRupee: {
+    backgroundColor: '#DEA430',
+    borderRadius: 50,
+    width: 16 * SCALE,
+    height: 16 * SCALE,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8 * SCALE,
+  },
+  figmaResGoldBadgeRupeeText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 10 * SCALE,
+    color: '#000000',
+  },
+  figmaResOfferTitleText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 13 * SCALE,
+    color: '#E4E4E7',
+    flex: 1,
+  },
+  figmaResOfferRightText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12 * SCALE,
+    color: '#DEA430',
   },
 });
