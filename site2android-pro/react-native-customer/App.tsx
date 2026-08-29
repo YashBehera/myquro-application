@@ -49,6 +49,9 @@ import { CheckoutScreen, SimCartItem } from './src/screens/CheckoutScreen';
 import { DiningOutScreen } from './src/screens/DiningOutScreen';
 import { TrackingScreen } from './src/screens/TrackingScreen';
 import { ReorderScreen } from './src/screens/ReorderScreen';
+import { DelightfulDealsScreen } from './src/screens/DelightfulDealsScreen';
+import { FreeTreatScreen } from './src/screens/FreeTreatScreen';
+import { Min200OffScreen } from './src/screens/Min200OffScreen';
 
 import {
   ShoppingBag,
@@ -56,7 +59,7 @@ import {
   X,
 } from 'lucide-react-native';
 
-type ScreenId = 'home' | 'explore' | 'favourites' | 'profile' | 'login' | 'search' | 'restaurant-detail' | 'cart' | 'checkout' | 'dining' | 'tracking' | 'reorder';
+type ScreenId = 'home' | 'explore' | 'favourites' | 'profile' | 'login' | 'search' | 'restaurant-detail' | 'cart' | 'checkout' | 'dining' | 'tracking' | 'reorder' | 'delightful-deals' | 'free-treat' | 'min-200';
 
 // Direct Figma Bottom Nav Assets
 const navFoodImg     = require('./src/assets/home/figma/imgImage7.png');
@@ -175,6 +178,18 @@ const MainAppContent: React.FC = () => {
               setSelectedRestaurantId(null);
               setActiveScreen('dining');
             }}
+            onNavigateToDelightfulDeals={() => {
+              setPrevScreen('home');
+              setActiveScreen('delightful-deals');
+            }}
+            onNavigateToFreeTreat={() => {
+              setPrevScreen('home');
+              setActiveScreen('free-treat');
+            }}
+            onNavigateToMin200={() => {
+              setPrevScreen('home');
+              setActiveScreen('min-200');
+            }}
           />
         );
       case 'explore':
@@ -281,6 +296,39 @@ const MainAppContent: React.FC = () => {
             onNavigateToPickup={() => setActiveScreen('home')}
           />
         );
+      case 'delightful-deals':
+        return (
+          <DelightfulDealsScreen
+            onBack={() => setActiveScreen(prevScreen || 'home')}
+            onNavigateToRestaurant={navigateToRestaurant}
+            onNavigateToSearch={() => {
+              setPrevScreen('delightful-deals');
+              setActiveScreen('search');
+            }}
+          />
+        );
+      case 'free-treat':
+        return (
+          <FreeTreatScreen
+            onBack={() => setActiveScreen(prevScreen || 'home')}
+            onNavigateToRestaurant={navigateToRestaurant}
+            onNavigateToSearch={() => {
+              setPrevScreen('free-treat');
+              setActiveScreen('search');
+            }}
+          />
+        );
+      case 'min-200':
+        return (
+          <Min200OffScreen
+            onBack={() => setActiveScreen(prevScreen || 'home')}
+            onNavigateToRestaurant={navigateToRestaurant}
+            onNavigateToSearch={() => {
+              setPrevScreen('min-200');
+              setActiveScreen('search');
+            }}
+          />
+        );
       default:
         return (
           <HomeScreen
@@ -295,6 +343,18 @@ const MainAppContent: React.FC = () => {
               setSelectedRestaurantId(null);
               setActiveScreen('dining');
             }}
+            onNavigateToDelightfulDeals={() => {
+              setPrevScreen('home');
+              setActiveScreen('delightful-deals');
+            }}
+            onNavigateToFreeTreat={() => {
+              setPrevScreen('home');
+              setActiveScreen('free-treat');
+            }}
+            onNavigateToMin200={() => {
+              setPrevScreen('home');
+              setActiveScreen('min-200');
+            }}
           />
         );
     }
@@ -303,19 +363,19 @@ const MainAppContent: React.FC = () => {
   return (
     <SafeAreaView
       style={[styles.mainContainer, { backgroundColor: '#000000' }]}
-      edges={activeScreen === 'tracking' || activeScreen === 'dining' ? [] : ['top', 'left', 'right']}
+      edges={activeScreen === 'tracking' || activeScreen === 'dining' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' ? [] : ['top', 'left', 'right']}
     >
       <StatusBar
         barStyle="light-content"
-        backgroundColor={activeScreen === 'tracking' || activeScreen === 'dining' ? 'transparent' : '#000000'}
-        translucent={activeScreen === 'tracking' || activeScreen === 'dining'}
+        backgroundColor={activeScreen === 'tracking' || activeScreen === 'dining' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' ? 'transparent' : '#000000'}
+        translucent={activeScreen === 'tracking' || activeScreen === 'dining' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200'}
       />
 
       {/* Screen Viewport with Crossfade simulator */}
       <View style={styles.viewport}>{renderScreen()}</View>
 
       {/* ── FIGMA BOTTOM NAV BAR ── (node 3019:296–316) */}
-      {activeScreen !== 'restaurant-detail' && activeScreen !== 'checkout' && activeScreen !== 'cart' && activeScreen !== 'search' && activeScreen !== 'dining' && activeScreen !== 'tracking' && activeScreen !== 'profile' && (
+      {activeScreen !== 'restaurant-detail' && activeScreen !== 'checkout' && activeScreen !== 'cart' && activeScreen !== 'search' && activeScreen !== 'dining' && activeScreen !== 'tracking' && activeScreen !== 'profile' && activeScreen !== 'delightful-deals' && activeScreen !== 'free-treat' && activeScreen !== 'min-200' && (
         <View style={[styles.bottomNavBar, { bottom: Math.max(insets.bottom, 14) }]}>
           {/* Food */}
           <TouchableOpacity

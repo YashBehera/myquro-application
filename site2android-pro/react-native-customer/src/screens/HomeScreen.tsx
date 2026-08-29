@@ -103,6 +103,9 @@ export const HomeScreen = ({
   onNavigateToRestaurant,
   onNavigateToCart,
   onNavigateToDining,
+  onNavigateToDelightfulDeals,
+  onNavigateToFreeTreat,
+  onNavigateToMin200,
   navigation,
 }: any) => {
   const {
@@ -237,13 +240,29 @@ export const HomeScreen = ({
   }, [sourceRestaurants, activeSegment, favouriteRestaurantsList, isFav]);
 
   const handleHeroBannerPress = () => {
-    setActiveDealOffer('70OFF');
-    if (Platform.OS === 'android') {
-      ToastAndroid.show('Showing 70% OFF UPTO ₹140 Deals!', ToastAndroid.SHORT);
+    if (onNavigateToDelightfulDeals) {
+      onNavigateToDelightfulDeals();
+    } else {
+      setActiveDealOffer('70OFF');
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Showing 70% OFF UPTO ₹140 Deals!', ToastAndroid.SHORT);
+      }
     }
   };
 
   const handleDealPress = (dealType: string, title: string) => {
+    if (dealType === 'DELIGHT' && onNavigateToDelightfulDeals) {
+      onNavigateToDelightfulDeals();
+      return;
+    }
+    if (dealType === 'FREETREAT' && onNavigateToFreeTreat) {
+      onNavigateToFreeTreat();
+      return;
+    }
+    if (dealType === 'MIN200' && onNavigateToMin200) {
+      onNavigateToMin200();
+      return;
+    }
     setActiveDealOffer(dealType);
     if (Platform.OS === 'android') {
       ToastAndroid.show(`Applied offer: ${title}`, ToastAndroid.SHORT);
