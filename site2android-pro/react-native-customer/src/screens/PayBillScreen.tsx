@@ -532,7 +532,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
               <Text style={styles.payUsingLabel}>PAY USING</Text>
               <ChevronUp size={14 * SCALE} color="#8E8E93" style={{ marginLeft: 3 }} />
             </View>
-            <Text style={styles.cardHolderText}>{userFirstName}  ••  0484</Text>
+            <Text style={styles.cardHolderText}>{userFirstName ? `${userFirstName} (UPI / Card)` : 'UPI / Card / NetBanking'}</Text>
           </View>
 
           {/* Right: Solid Gold Pay Button */}

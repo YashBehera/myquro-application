@@ -101,12 +101,14 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
   const { authState, currentLocation, savedAddresses, allRestaurants } = useViewModel();
   const sessionToken = authState.type === 'Authenticated' ? authState.sessionToken : '';
 
-  // Active Phase: 'verifying' | 'placing' | 'placed'
+  // Active Phase: 'verifying' | 'placing' | 'placed' | 'failed'
   const [currentPhase, setCurrentPhase] = useState<'verifying' | 'placing' | 'placed'>('verifying');
   const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
   const [paymentStatus, setPaymentStatus] = useState<'processing' | 'success' | 'failed'>('processing');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdOrderId, setCreatedOrderId] = useState<string>(initialOrderId || '');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const idempotencyKeyRef = useRef<string>(`mq_idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
 
   const currentRestaurant = allRestaurants?.find(r => 
     r.id === restaurantId || 
@@ -134,106 +136,20 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
   const checkPopAnim = useRef(new Animated.Value(0.4)).current;
   const sparkleRotateAnim = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    if (!visible) return;
+  // Reference handles for all timers to safely clear on error
+  const activeTimersRef = useRef<NodeJS.Timeout[]>([]);
 
-    // Fade in modal container
-    Animated.timing(rootFadeAnim, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-
-    // 1. Continuous 360 loop rotation (never stops or resets across phases)
-    const spinLoop = Animated.loop(
-      Animated.timing(spinAnim, {
-        toValue: 1,
-        duration: 2200,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-    spinLoop.start();
-
-    // 2. Sparkles rotation for Phase 3
-    const sparkleLoop = Animated.loop(
-      Animated.timing(sparkleRotateAnim, {
-        toValue: 1,
-        duration: 8000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-    sparkleLoop.start();
-
-    // 3. Gentle scale pulse
-    const pulseLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.05,
-          duration: 1100,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1.0,
-          duration: 1100,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    pulseLoop.start();
-
-    // 4. Map pin float bounce
-    const bounceLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pinBounceAnim, {
-          toValue: -4,
-          duration: 850,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pinBounceAnim, {
-          toValue: 0,
-          duration: 850,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    bounceLoop.start();
-
-    // 5. Pin dot glow pulse
-    const glowLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pinGlowAnim, {
-          toValue: 1.0,
-          duration: 750,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pinGlowAnim, {
-          toValue: 0.3,
-          duration: 750,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    glowLoop.start();
-
-    return () => {
-      spinLoop.stop();
-      sparkleLoop.stop();
-      pulseLoop.stop();
-      bounceLoop.stop();
-      glowLoop.stop();
-    };
-  }, [visible]);
+  const clearAllFlowTimers = () => {
+    activeTimersRef.current.forEach(t => clearTimeout(t));
+    activeTimersRef.current = [];
+  };
 
   // Execute Order Placement and Silky-Smooth 3-Phase Transition
   const executeOrderFlow = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    clearAllFlowTimers();
+
     setPaymentStatus('processing');
     setErrorMessage(null);
     setCurrentPhase('verifying');
@@ -245,12 +161,13 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
     phase3Fade.setValue(0);
     checkPopAnim.setValue(0.4);
 
-    let finalOrderId = initialOrderId || `order_${Date.now()}`;
+    let confirmedOrderId = '';
 
     // Phase 1 - Step 2 after 850ms
     const step1Timer = setTimeout(() => {
       setActiveStep(2);
     }, 850);
+    activeTimersRef.current.push(step1Timer);
 
     // Asynchronously dispatch order payload
     try {
@@ -262,6 +179,7 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
         'D2nCXr-XW_De3z7yBYeVc';
 
       const payload = {
+        idempotencyKey: idempotencyKeyRef.current,
         restaurantId: resolvedRestId,
         notes: cookingInstruction || '',
         items: cartItems.map((i: any) => {
@@ -299,10 +217,8 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
         status: 'placed',
       };
 
-      console.log('🛒 [OrderPaymentLoader] Dispatching make-order payload:', JSON.stringify(payload));
-
       const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 6000);
+      const tid = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
       const res = await fetch(`${BACKEND_URL}/api/orders/make-order`, {
         method: 'POST',
@@ -315,123 +231,134 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
       });
       clearTimeout(tid);
 
-      if (res.ok) {
-        const data = await res.json();
-        console.log('✅ [OrderPaymentLoader] Order placed on backend:', data);
-        if (data.orderId || data.order?.id || data.id) {
-          finalOrderId = data.orderId || data.order?.id || data.id;
-        }
-      } else {
+      if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        console.warn('❌ [OrderPaymentLoader] Backend returned status:', res.status, errJson);
+        throw new Error(errJson.message || `Server returned error (${res.status}). Order could not be created.`);
       }
-    } catch (apiErr) {
-      console.warn('[OrderPaymentLoader] Backend make-order notice:', apiErr);
+
+      const data = await res.json();
+      confirmedOrderId = data.orderId || data.order?.id || data.id || '';
+
+      if (!confirmedOrderId) {
+        throw new Error('Server did not return a valid order confirmation ID.');
+      }
+
+      setCreatedOrderId(confirmedOrderId);
+
+      // Cache confirmed order snapshot
+      try {
+        const existingStr = await AsyncStorage.getItem('@placed_orders_history');
+        const existingList = existingStr ? JSON.parse(existingStr) : [];
+        const newOrderRecord = {
+          id: confirmedOrderId,
+          restaurantId,
+          restaurantName,
+          restaurantAddress: currentRestaurant?.address || resolvedAddress,
+          deliveryAddress: resolvedAddress,
+          status: 'placed',
+          items: cartItems.map(ci => ({
+            id: ci.foodItem?.id || (ci as any).id || 'item',
+            name: ci.foodItem?.name || (ci as any).name || 'Food Item',
+            quantity: ci.quantity,
+            price: typeof ci.foodItem?.price === 'number' ? ci.foodItem.price : ((ci as any).price || 0),
+          })),
+          grandTotal: amount,
+          totalAmount: amount,
+          paymentMethod,
+          createdAt: new Date().toISOString(),
+        };
+        const updatedList = [newOrderRecord, ...existingList.filter((o: any) => o.id !== confirmedOrderId)];
+        await AsyncStorage.setItem('@placed_orders_history', JSON.stringify(updatedList));
+      } catch (saveErr) {
+        console.warn('Failed to cache placed order history:', saveErr);
+      }
+
+      // Phase 1 - Step 3 after 1900ms
+      const step2Timer = setTimeout(() => {
+        setActiveStep(3);
+      }, 1900);
+      activeTimersRef.current.push(step2Timer);
+
+      // ─── TRANSITION: Phase 1 ➔ Phase 2 (at 2800ms) ─────────────
+      const phase2Timer = setTimeout(() => {
+        setCurrentPhase('placing');
+        Animated.parallel([
+          Animated.timing(phase1Fade, {
+            toValue: 0,
+            duration: 350,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(phase2Fade, {
+            toValue: 1,
+            duration: 350,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }, 2800);
+      activeTimersRef.current.push(phase2Timer);
+
+      // ─── TRANSITION: Phase 2 ➔ Phase 3 (at 5300ms) ─────────────
+      const phase3Timer = setTimeout(() => {
+        setCurrentPhase('placed');
+        Animated.parallel([
+          Animated.timing(phase2Fade, {
+            toValue: 0,
+            duration: 350,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(phase3Fade, {
+            toValue: 1,
+            duration: 350,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.spring(checkPopAnim, {
+            toValue: 1,
+            friction: 5,
+            tension: 75,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }, 5300);
+      activeTimersRef.current.push(phase3Timer);
+
+      // ─── FINAL TRANSITION ➔ Tracking Screen (at 8700ms) ────────
+      const completionTimer = setTimeout(() => {
+        setPaymentStatus('success');
+        setIsSubmitting(false);
+        onComplete(confirmedOrderId);
+      }, 8700);
+      activeTimersRef.current.push(completionTimer);
+
+    } catch (apiErr: any) {
+      clearAllFlowTimers();
+      setIsSubmitting(false);
+      setPaymentStatus('failed');
+      const msg = apiErr?.name === 'AbortError'
+        ? 'Order request timed out. Please check your internet and retry.'
+        : (apiErr?.message || 'Unable to connect to the restaurant. Please try again.');
+      setErrorMessage(msg);
     }
-
-    setCreatedOrderId(finalOrderId);
-
-    // Cache placed order snapshot
-    try {
-      const existingStr = await AsyncStorage.getItem('@placed_orders_history');
-      const existingList = existingStr ? JSON.parse(existingStr) : [];
-      const newOrderRecord = {
-        id: finalOrderId,
-        restaurantId,
-        restaurantName,
-        restaurantAddress: currentRestaurant?.address || resolvedAddress,
-        deliveryAddress: resolvedAddress,
-        status: 'placed',
-        items: cartItems.map(ci => ({
-          id: ci.foodItem.id,
-          name: ci.foodItem.name,
-          quantity: ci.quantity,
-          price: ci.foodItem.price,
-        })),
-        grandTotal: amount,
-        totalAmount: amount,
-        paymentMethod,
-        createdAt: new Date().toISOString(),
-      };
-      const updatedList = [newOrderRecord, ...existingList.filter((o: any) => o.id !== finalOrderId)];
-      await AsyncStorage.setItem('@placed_orders_history', JSON.stringify(updatedList));
-    } catch (saveErr) {
-      console.warn('Failed to cache placed order history:', saveErr);
-    }
-
-    // Phase 1 - Step 3 after 1900ms
-    const step2Timer = setTimeout(() => {
-      setActiveStep(3);
-    }, 1900);
-
-    // ─── TRANSITION: Phase 1 ➔ Phase 2 (at 2800ms) ─────────────
-    const phase2Timer = setTimeout(() => {
-      setCurrentPhase('placing');
-      Animated.parallel([
-        Animated.timing(phase1Fade, {
-          toValue: 0,
-          duration: 350,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(phase2Fade, {
-          toValue: 1,
-          duration: 350,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }, 2800);
-
-    // ─── TRANSITION: Phase 2 ➔ Phase 3 (at 5300ms) ─────────────
-    const phase3Timer = setTimeout(() => {
-      setCurrentPhase('placed');
-      Animated.parallel([
-        Animated.timing(phase2Fade, {
-          toValue: 0,
-          duration: 350,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(phase3Fade, {
-          toValue: 1,
-          duration: 350,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.spring(checkPopAnim, {
-          toValue: 1,
-          friction: 5,
-          tension: 75,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }, 5300);
-
-    // ─── FINAL TRANSITION ➔ Tracking Screen (at 8700ms) ────────
-    const completionTimer = setTimeout(() => {
-      setPaymentStatus('success');
-      onComplete(finalOrderId);
-    }, 8700);
-
-    return () => {
-      clearTimeout(step1Timer);
-      clearTimeout(step2Timer);
-      clearTimeout(phase2Timer);
-      clearTimeout(phase3Timer);
-      clearTimeout(completionTimer);
-    };
   };
 
   useEffect(() => {
     if (visible) {
+      idempotencyKeyRef.current = `mq_idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       executeOrderFlow();
     } else {
+      clearAllFlowTimers();
+      setIsSubmitting(false);
       setCurrentPhase('verifying');
       setActiveStep(1);
       setPaymentStatus('processing');
       setErrorMessage(null);
     }
+    return () => {
+      clearAllFlowTimers();
+    };
   }, [visible]);
 
   const spinRotation = spinAnim.interpolate({
@@ -837,19 +764,39 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
         {/* Network Error Recovery Overlay */}
         {paymentStatus === 'failed' && (
           <View style={styles.errorCardOverlay}>
-            <AlertTriangle size={24} color="#FF4D4F" />
-            <Text style={styles.errorTitleText}>Order Confirmation Delayed</Text>
+            <View style={styles.errorIconWrap}>
+              <AlertTriangle size={28 * SCALE} color="#FF4D4F" />
+            </View>
+            <Text style={styles.errorTitleText}>Order Placement Failed</Text>
             <Text style={styles.errorSubText}>
-              {errorMessage || 'Connecting with kitchen gateway...'}
+              {errorMessage || 'Unable to confirm your order with the restaurant.'}
             </Text>
-            <TouchableOpacity
-              style={styles.retryBtn}
-              activeOpacity={0.85}
-              onPress={executeOrderFlow}
-            >
-              <RotateCcw size={16} color="#000000" />
-              <Text style={styles.retryBtnText}>Retry Order</Text>
-            </TouchableOpacity>
+            <Text style={styles.errorCartSafeNotice}>
+              ✓ Your cart items and address have been safely preserved.
+            </Text>
+            <View style={styles.errorButtonsRow}>
+              {onCancel && (
+                <TouchableOpacity
+                  style={styles.cancelBackBtn}
+                  activeOpacity={0.85}
+                  onPress={onCancel}
+                  accessibilityRole="button"
+                  accessibilityLabel="Return to checkout cart"
+                >
+                  <Text style={styles.cancelBackBtnText}>Back to Cart</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.retryBtn}
+                activeOpacity={0.85}
+                onPress={executeOrderFlow}
+                accessibilityRole="button"
+                accessibilityLabel="Retry placing order"
+              >
+                <RotateCcw size={16 * SCALE} color="#000000" />
+                <Text style={styles.retryBtnText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
       </Animated.View>
@@ -1183,42 +1130,84 @@ const styles = StyleSheet.create({
   // ── 4. Error Card Overlay ──────────────────────────────────────
   errorCardOverlay: {
     position: 'absolute',
-    bottom: 90 * SCALE,
-    left: 20 * SCALE,
-    right: 20 * SCALE,
-    backgroundColor: '#1A0E0E',
-    borderWidth: 1,
-    borderColor: '#4A1D1D',
-    borderRadius: 16 * SCALE,
-    padding: 16 * SCALE,
+    bottom: 40 * SCALE,
+    left: 16 * SCALE,
+    right: 16 * SCALE,
+    backgroundColor: '#160C0C',
+    borderWidth: 1.5,
+    borderColor: '#6B1D1D',
+    borderRadius: 20 * SCALE,
+    padding: 18 * SCALE,
     alignItems: 'center',
     gap: 8 * SCALE,
     zIndex: 100,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.7,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  errorIconWrap: {
+    marginBottom: 2,
   },
   errorTitleText: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 15 * SCALE,
+    fontSize: 16 * SCALE,
     color: '#FF6B6B',
+    textAlign: 'center',
   },
   errorSubText: {
     fontFamily: 'Urbanist-Regular',
-    fontSize: 12.5 * SCALE,
-    color: '#A0A0A0',
+    fontSize: 13 * SCALE,
+    color: '#C0C0C0',
     textAlign: 'center',
+    lineHeight: 18 * SCALE,
   },
-  retryBtn: {
+  errorCartSafeNotice: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12 * SCALE,
+    color: '#4ADE80',
+    textAlign: 'center',
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  errorButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12 * SCALE,
+    marginTop: 6,
+    width: '100%',
+  },
+  cancelBackBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#201A1A',
+    borderWidth: 1,
+    borderColor: '#4A3535',
+    borderRadius: 12 * SCALE,
+    paddingVertical: 11 * SCALE,
+  },
+  cancelBackBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13.5 * SCALE,
+    color: '#E0E0E0',
+  },
+  retryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#DEA430',
-    borderRadius: 10 * SCALE,
-    paddingHorizontal: 16 * SCALE,
-    paddingVertical: 8 * SCALE,
+    borderRadius: 12 * SCALE,
+    paddingVertical: 11 * SCALE,
     gap: 6 * SCALE,
-    marginTop: 4,
   },
   retryBtnText: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 13 * SCALE,
+    fontSize: 13.5 * SCALE,
     color: '#000000',
   },
 });
+

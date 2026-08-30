@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
 import {
   StyleSheet,
   View,
@@ -19,6 +19,7 @@ import {
   Image,
   ActivityIndicator,
   Platform,
+  BackHandler,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -78,14 +79,60 @@ const MainAppContent: React.FC = () => {
   const [isAppReady, setIsAppReady] = useState(false);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
-  const [activeScreen, setActiveScreen] = useState<ScreenId>('home');
-  const [selectedRestaurantId, setSelectedRestaurantId] = useState<string | null>(null);
-  const [prevScreen, setPrevScreen] = useState<ScreenId>('home');
-  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
-  const [autoOpenCheckout, setAutoOpenCheckout] = useState(false);
-  const [checkoutCart, setCheckoutCart] = useState<SimCartItem[]>([]);
-  const [checkoutRestaurantId, setCheckoutRestaurantId] = useState<string | null>(null);
-  const [activeMoodKey, setActiveMoodKey] = useState<DiningMoodKey>('ROOFTOP');
+
+  interface NavigationFrame {
+    screen: ScreenId;
+    selectedRestaurantId?: string | null;
+    activeOrderId?: string | null;
+    autoOpenCheckout?: boolean;
+    checkoutCart?: SimCartItem[];
+    checkoutRestaurantId?: string | null;
+    activeMoodKey?: DiningMoodKey;
+    searchQuery?: string;
+  }
+
+  const [navStack, setNavStack] = useState<NavigationFrame[]>([
+    { screen: 'home' }
+  ]);
+
+  const currentNav = navStack[navStack.length - 1] || { screen: 'home' };
+  const activeScreen = currentNav.screen;
+  const selectedRestaurantId = currentNav.selectedRestaurantId || null;
+  const activeOrderId = currentNav.activeOrderId || null;
+  const autoOpenCheckout = !!currentNav.autoOpenCheckout;
+  const checkoutCart = currentNav.checkoutCart || [];
+  const checkoutRestaurantId = currentNav.checkoutRestaurantId || null;
+  const activeMoodKey = currentNav.activeMoodKey || 'ROOFTOP';
+  const searchQuery = currentNav.searchQuery || '';
+
+  const pushScreen = (screen: ScreenId, extra?: Partial<NavigationFrame>) => {
+    setNavStack(prev => [...prev, { screen, ...extra }]);
+  };
+
+  const goBack = () => {
+    setNavStack(prev => {
+      if (prev.length > 1) {
+        return prev.slice(0, prev.length - 1);
+      }
+      return prev;
+    });
+  };
+
+  const switchTab = (screen: ScreenId, extra?: Partial<NavigationFrame>) => {
+    setNavStack([{ screen, ...extra }]);
+  };
+
+  useEffect(() => {
+    const onHardwareBack = () => {
+      if (navStack.length > 1) {
+        goBack();
+        return true;
+      }
+      return false;
+    };
+    const backSub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
+    return () => backSub.remove();
+  }, [navStack.length]);
 
   useEffect(() => {
     const checkAppInit = async () => {
@@ -106,38 +153,43 @@ const MainAppContent: React.FC = () => {
   }, []);
 
   const navigateToRestaurant = (id: string, orderId?: string | null, openCheckout?: boolean) => {
-    if (activeScreen !== 'restaurant-detail') {
-      setPrevScreen(activeScreen);
-    }
-    setSelectedRestaurantId(id);
-    if (orderId) {
-      setActiveOrderId(orderId);
-    } else {
-      setActiveOrderId(null);
-    }
-    setAutoOpenCheckout(!!openCheckout);
-    setActiveScreen('restaurant-detail');
+    pushScreen('restaurant-detail', {
+      selectedRestaurantId: id,
+      activeOrderId: orderId || null,
+      autoOpenCheckout: !!openCheckout,
+    });
   };
 
   const navigateToCheckout = (cartData?: SimCartItem[], rId?: string) => {
-    if (activeScreen !== 'checkout') {
-      setPrevScreen(activeScreen);
-    }
-    if (cartData) setCheckoutCart(cartData);
-    if (rId) setCheckoutRestaurantId(rId);
-    setActiveScreen('checkout');
+    pushScreen('checkout', {
+      checkoutCart: cartData || [],
+      checkoutRestaurantId: rId || null,
+    });
   };
 
   const navigateToTracking = (orderId: string) => {
-    setActiveOrderId(orderId);
-    setActiveScreen('tracking');
+    pushScreen('tracking', {
+      activeOrderId: orderId,
+    });
   };
 
-  if (!isAppReady) {
+  const navigateToSearch = (query?: string) => {
+    pushScreen('search', {
+      searchQuery: query || '',
+    });
+  };
+
+  // 1. Show SplashScreen FIRST (eliminates any screen flashing)
+  if (showSplash) {
+    return <SplashScreen onAnimationEnd={() => setShowSplash(false)} />;
+  }
+
+  // 2. Wait until initial app state and auth storage are resolved
+  if (!isAppReady || authState.type === 'Loading') {
     return <View style={{ flex: 1, backgroundColor: '#000000' }} />;
   }
 
-  // 1. First time app open after installation -> Show onboarding
+  // 3. First time app open after installation -> Show onboarding
   if (!hasSeenOnboarding) {
     return (
       <OnboardingScreen
@@ -153,49 +205,38 @@ const MainAppContent: React.FC = () => {
     );
   }
 
-  // 2. If user is not authenticated -> Show login
+  // 4. If user is not authenticated -> Show login
   if (authState.type !== 'Authenticated') {
-    return <LoginScreen onBack={() => setActiveScreen('home')} />;
-  }
-
-  // 3. If already logged in, the ONLY screen shown before HomeScreen is the Figma Location Splash:
-  if (showSplash) {
-    return <SplashScreen onAnimationEnd={() => setShowSplash(false)} />;
+    return <LoginScreen onBack={goBack} />;
   }
 
   const renderScreen = () => {
     switch (activeScreen) {
       case 'login':
-        return <LoginScreen onBack={() => setActiveScreen('home')} />;
+        return <LoginScreen onBack={goBack} />;
       case 'home':
         return (
           <HomeScreen
-            onNavigateToExplore={() => setActiveScreen('explore')}
-            onNavigateToFavourites={() => setActiveScreen('favourites')}
-            onNavigateToProfile={() => setActiveScreen('profile')}
-            onNavigateToSearch={() => setActiveScreen('search')}
+            onNavigateToExplore={() => pushScreen('explore')}
+            onNavigateToFavourites={() => pushScreen('favourites')}
+            onNavigateToProfile={() => pushScreen('profile')}
+            onNavigateToSearch={navigateToSearch}
             onNavigateToRestaurant={navigateToRestaurant}
-            onNavigateToCart={() => setActiveScreen('cart')}
+            onNavigateToCart={() => pushScreen('cart')}
             onNavigateToDining={() => {
-              setPrevScreen('home');
-              setSelectedRestaurantId(null);
-              setActiveScreen('dining');
+              pushScreen('dining', { selectedRestaurantId: null });
             }}
             onNavigateToDelightfulDeals={() => {
-              setPrevScreen('home');
-              setActiveScreen('delightful-deals');
+              pushScreen('delightful-deals');
             }}
             onNavigateToFreeTreat={() => {
-              setPrevScreen('home');
-              setActiveScreen('free-treat');
+              pushScreen('free-treat');
             }}
             onNavigateToMin200={() => {
-              setPrevScreen('home');
-              setActiveScreen('min-200');
+              pushScreen('min-200');
             }}
             onNavigateToInstamart={() => {
-              setPrevScreen('home');
-              setActiveScreen('instamart');
+              pushScreen('instamart');
             }}
           />
         );
@@ -203,41 +244,39 @@ const MainAppContent: React.FC = () => {
         return (
           <ExploreScreen
             onNavigateToDining={(restaurantId) => {
-              setPrevScreen('explore');
-              setSelectedRestaurantId(restaurantId);
-              setActiveScreen('dining');
+              pushScreen('dining', { selectedRestaurantId: restaurantId });
             }}
           />
         );
       case 'favourites':
         return (
           <FavouritesScreen
-            onNavigateToExplore={() => setActiveScreen('explore')}
+            onNavigateToExplore={() => pushScreen('explore')}
             onNavigateToRestaurant={navigateToRestaurant}
           />
         );
       case 'profile':
         return (
           <ProfileScreen
-            onBackToHome={() => setActiveScreen('home')}
+            onBackToHome={goBack}
             onNavigateToTracking={(orderId) => {
-              setActiveOrderId(orderId);
-              setActiveScreen('tracking');
+              navigateToTracking(orderId);
             }}
           />
         );
       case 'search':
-        return <SearchScreen onBack={() => setActiveScreen('home')} onNavigateToRestaurant={navigateToRestaurant} />;
+        return (
+          <SearchScreen
+            initialQuery={searchQuery}
+            onBack={goBack}
+            onNavigateToRestaurant={navigateToRestaurant}
+          />
+        );
       case 'restaurant-detail':
         return (
           <RestaurantDetailScreen
             restaurantId={selectedRestaurantId}
-            onBack={() => {
-              setActiveOrderId(null);
-              setAutoOpenCheckout(false);
-              const target = (prevScreen && prevScreen !== 'restaurant-detail') ? prevScreen : 'home';
-              setActiveScreen(target);
-            }}
+            onBack={goBack}
             initialActiveOrderId={activeOrderId}
             initialAutoOpenCheckout={autoOpenCheckout}
             onNavigateToTracking={navigateToTracking}
@@ -250,17 +289,30 @@ const MainAppContent: React.FC = () => {
         return (
           <CheckoutScreen
             cart={checkoutCart.length > 0 ? checkoutCart : (cartItems as any)}
-            setCart={setCheckoutCart}
+            setCart={(newCart) => {
+              setNavStack(prev => {
+                const copy = [...prev];
+                if (copy.length > 0) {
+                  const lastFrame = copy[copy.length - 1];
+                  const currentCart = lastFrame.checkoutCart || [];
+                  const resolvedCart = typeof newCart === 'function' ? (newCart as any)(currentCart) : newCart;
+                  copy[copy.length - 1] = {
+                    ...lastFrame,
+                    checkoutCart: resolvedCart,
+                  };
+                }
+                return copy;
+              });
+            }}
             restaurantId={activeRestId || undefined}
             restaurantName={currentRest?.name || (cartItems && cartItems.length > 0 ? cartItems[0].restaurantName : 'Restaurant')}
             restaurantDistance={currentRest?.distance ? `${currentRest.distance} km` : '2.0 km'}
-            onBack={() => setActiveScreen(prevScreen || 'restaurant-detail')}
+            onBack={goBack}
             onConfirmPay={(finalTotal, orderId) => {
               if (orderId) {
-                setActiveOrderId(orderId);
-                setActiveScreen('tracking');
+                pushScreen('tracking', { activeOrderId: orderId });
               } else {
-                setActiveScreen('home');
+                switchTab('home');
               }
             }}
           />
@@ -268,7 +320,7 @@ const MainAppContent: React.FC = () => {
       case 'cart':
         return (
           <CartScreen
-            onBack={() => setActiveScreen(prevScreen)}
+            onBack={goBack}
             onNavigateToRestaurant={navigateToRestaurant}
             onNavigateToTracking={navigateToTracking}
           />
@@ -277,7 +329,7 @@ const MainAppContent: React.FC = () => {
         return (
           <TrackingScreen
             orderId={activeOrderId}
-            onBack={() => setActiveScreen('home')}
+            onBack={goBack}
           />
         );
       case 'reorder':
@@ -285,112 +337,90 @@ const MainAppContent: React.FC = () => {
           <ReorderScreen
             onNavigateToRestaurant={navigateToRestaurant}
             onNavigateToCheckout={navigateToCheckout}
-            onNavigateToHome={() => setActiveScreen('home')}
-            onNavigateToProfile={() => setActiveScreen('profile')}
-            onNavigateToSearch={() => setActiveScreen('search')}
+            onNavigateToHome={() => switchTab('home')}
+            onNavigateToProfile={() => pushScreen('profile')}
+            onNavigateToSearch={navigateToSearch}
           />
         );
       case 'dining':
         return (
           <DiningOutScreen
-            onBack={() => setActiveScreen(prevScreen)}
+            onBack={goBack}
             onNavigateToRestaurant={navigateToRestaurant}
             initialRestaurantId={selectedRestaurantId}
-            onNavigateToHome={() => setActiveScreen('home')}
-            onNavigateToSearch={() => setActiveScreen('search')}
-            onNavigateToProfile={() => setActiveScreen('profile')}
-            onNavigateToDelivery={() => setActiveScreen('home')}
-            onNavigateToPickup={() => setActiveScreen('home')}
+            onNavigateToHome={() => switchTab('home')}
+            onNavigateToSearch={navigateToSearch}
+            onNavigateToProfile={() => pushScreen('profile')}
+            onNavigateToDelivery={() => switchTab('home')}
+            onNavigateToPickup={() => switchTab('home')}
             onNavigateToInstamart={() => {
-              setPrevScreen('dining');
-              setActiveScreen('instamart');
+              pushScreen('instamart');
             }}
           />
         );
       case 'delightful-deals':
         return (
           <DelightfulDealsScreen
-            onBack={() => setActiveScreen(prevScreen || 'home')}
+            onBack={goBack}
             onNavigateToRestaurant={navigateToRestaurant}
-            onNavigateToSearch={() => {
-              setPrevScreen('delightful-deals');
-              setActiveScreen('search');
-            }}
+            onNavigateToSearch={navigateToSearch}
           />
         );
       case 'free-treat':
         return (
           <FreeTreatScreen
-            onBack={() => setActiveScreen(prevScreen || 'home')}
+            onBack={goBack}
             onNavigateToRestaurant={navigateToRestaurant}
-            onNavigateToSearch={() => {
-              setPrevScreen('free-treat');
-              setActiveScreen('search');
-            }}
+            onNavigateToSearch={navigateToSearch}
           />
         );
       case 'min-200':
         return (
           <Min200OffScreen
-            onBack={() => setActiveScreen(prevScreen || 'home')}
+            onBack={goBack}
             onNavigateToRestaurant={navigateToRestaurant}
-            onNavigateToSearch={() => {
-              setPrevScreen('min-200');
-              setActiveScreen('search');
-            }}
+            onNavigateToSearch={navigateToSearch}
           />
         );
       case 'instamart':
         return (
           <InstamartScreen
-            onBack={() => setActiveScreen(prevScreen || 'home')}
-            onNavigateToSearch={() => {
-              setPrevScreen('instamart');
-              setActiveScreen('search');
-            }}
+            onBack={goBack}
+            onNavigateToSearch={navigateToSearch}
           />
         );
       case 'dining-category':
         return (
           <DiningCategoryScreen
             moodKey={activeMoodKey}
-            onBack={() => setActiveScreen(prevScreen || 'dining')}
+            onBack={goBack}
             onNavigateToRestaurant={navigateToRestaurant}
-            onNavigateToSearch={() => {
-              setPrevScreen('dining-category');
-              setActiveScreen('search');
-            }}
+            onNavigateToSearch={navigateToSearch}
           />
         );
       default:
         return (
           <HomeScreen
-            onNavigateToExplore={() => setActiveScreen('explore')}
-            onNavigateToFavourites={() => setActiveScreen('favourites')}
-            onNavigateToProfile={() => setActiveScreen('profile')}
-            onNavigateToSearch={() => setActiveScreen('search')}
+            onNavigateToExplore={() => pushScreen('explore')}
+            onNavigateToFavourites={() => pushScreen('favourites')}
+            onNavigateToProfile={() => pushScreen('profile')}
+            onNavigateToSearch={navigateToSearch}
             onNavigateToRestaurant={navigateToRestaurant}
-            onNavigateToCart={() => setActiveScreen('cart')}
+            onNavigateToCart={() => pushScreen('cart')}
             onNavigateToDining={() => {
-              setPrevScreen('home');
-              setSelectedRestaurantId(null);
-              setActiveScreen('dining');
+              pushScreen('dining', { selectedRestaurantId: null });
             }}
             onNavigateToDelightfulDeals={() => {
-              setPrevScreen('home');
-              setActiveScreen('delightful-deals');
+              pushScreen('delightful-deals');
             }}
             onNavigateToFreeTreat={() => {
-              setPrevScreen('home');
-              setActiveScreen('free-treat');
+              pushScreen('free-treat');
             }}
             onNavigateToMin200={() => {
-              setPrevScreen('home');
-              setActiveScreen('min-200');
+              pushScreen('min-200');
             }}
             onNavigateToInstamart={() => {
-              setPrevScreen('home');
-              setActiveScreen('instamart');
+              pushScreen('instamart');
             }}
           />
         );
@@ -400,12 +430,11 @@ const MainAppContent: React.FC = () => {
   return (
     <SafeAreaView
       style={[styles.mainContainer, { backgroundColor: '#000000' }]}
-      edges={activeScreen === 'home' || activeScreen === 'dining' || activeScreen === 'tracking' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' || activeScreen === 'instamart' || activeScreen === 'dining-category' ? [] : ['top', 'left', 'right']}
+      edges={['top', 'left', 'right']}
     >
       <StatusBar
         barStyle="light-content"
-        backgroundColor={activeScreen === 'home' || activeScreen === 'dining' || activeScreen === 'tracking' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' || activeScreen === 'instamart' || activeScreen === 'dining-category' ? 'transparent' : '#000000'}
-        translucent={activeScreen === 'home' || activeScreen === 'dining' || activeScreen === 'tracking' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' || activeScreen === 'instamart' || activeScreen === 'dining-category'}
+        backgroundColor="#000000"
       />
 
       {/* Screen Viewport with Crossfade simulator */}
@@ -418,7 +447,10 @@ const MainAppContent: React.FC = () => {
           <TouchableOpacity
             style={styles.navItem}
             activeOpacity={0.8}
-            onPress={() => setActiveScreen('home')}
+            onPress={() => switchTab('home')}
+            accessibilityRole="tab"
+            accessibilityLabel="Food delivery home tab"
+            accessibilityState={{ selected: activeScreen === 'home' }}
           >
             <Image source={navFoodImg} style={styles.navIconFood} />
             <Text style={[styles.navLabel, activeScreen === 'home' && styles.navLabelActive]}>Food</Text>
@@ -428,7 +460,10 @@ const MainAppContent: React.FC = () => {
           <TouchableOpacity
             style={styles.navItem}
             activeOpacity={0.8}
-            onPress={() => setActiveScreen('explore')}
+            onPress={() => switchTab('explore')}
+            accessibilityRole="tab"
+            accessibilityLabel="Bolt quick delivery tab"
+            accessibilityState={{ selected: activeScreen === 'explore' }}
           >
             <Image source={navBoltImg} style={styles.navIconBolt} />
             <Text style={[styles.navLabel, activeScreen === 'explore' && styles.navLabelActive]}>Bolt</Text>
@@ -438,7 +473,10 @@ const MainAppContent: React.FC = () => {
           <TouchableOpacity
             style={styles.navItem}
             activeOpacity={0.8}
-            onPress={() => setActiveScreen('reorder')}
+            onPress={() => switchTab('reorder')}
+            accessibilityRole="tab"
+            accessibilityLabel="Reorder past meals tab"
+            accessibilityState={{ selected: activeScreen === 'reorder' }}
           >
             <Image
               source={navReorderImg}
@@ -599,7 +637,7 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider style={{ flex: 1, backgroundColor: '#000000' }}>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics} style={{ flex: 1, backgroundColor: '#000000' }}>
       <ViewModelProvider>
         <MainAppContent />
       </ViewModelProvider>

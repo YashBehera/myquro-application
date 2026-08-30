@@ -480,14 +480,14 @@ const DEFAULT_MOCK_ORDER = {
 };
 
 const DEFAULT_MOCK_RIDER = {
-  id: 'rider_901',
-  name: 'RAJA RAM',
-  fullName: 'RAJA RAM',
-  phone: '+91 98765 43210',
-  contactNumber: '+91 98765 43210',
+  id: 'rider_live',
+  name: 'Delivery Partner',
+  fullName: 'Delivery Partner',
+  phone: '+91 90000 00000',
+  contactNumber: '+91 90000 00000',
   rating: 4.9,
-  totalDeliveries: 1420,
-  vehicleModel: 'Honda Activa 6G',
+  totalDeliveries: 100,
+  vehicleModel: 'Delivery Vehicle',
   vaccinated: true,
 };
 
@@ -1744,7 +1744,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               <ArrowLeft size={20 * SCALE} color="#FFF" />
             </TouchableOpacity>
             <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.chatTitle}>{riderInfo?.name || 'RAJA RAM'}</Text>
+              <Text style={styles.chatTitle}>{riderInfo?.name || 'Delivery Partner'}</Text>
               <Text style={styles.chatSubtitle}>Delivery Partner · Live Chat</Text>
             </View>
             <TouchableOpacity style={styles.chatCallBtn} onPress={handleCallRider}>

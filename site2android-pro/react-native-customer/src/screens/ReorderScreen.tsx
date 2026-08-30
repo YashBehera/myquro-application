@@ -20,6 +20,7 @@ import {
   Plus,
   Minus,
   Heart,
+  RotateCcw,
 } from 'lucide-react-native';
 
 import { useViewModel } from '../state/MainViewModel';
@@ -46,6 +47,7 @@ const figmaClockYellow  = require('../assets/reorder/figma_clock_yellow.png');
 const figmaVegIcon      = require('../assets/reorder/figma_veg_icon.png');
 const figmaNonVegIcon   = require('../assets/reorder/figma_nonveg_icon.png');
 const figmaPlusBtn      = require('../assets/reorder/figma_plus_btn.png');
+const quroBadgeImg      = require('../assets/images/quro_badge.png');
 
 interface ReorderScreenProps {
   onNavigateToRestaurant: (id: string, orderId?: string | null, openCheckout?: boolean) => void;
@@ -83,14 +85,24 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
   onNavigateToCheckout,
   onNavigateToHome,
 }) => {
-  const { syncCartItems, authState, allRestaurants = [], foodItems = [] } = useViewModel();
+  const {
+    addToCart,
+    removeFromCart,
+    updateCartQuantity,
+    cartItems,
+    authState,
+    allRestaurants = [],
+    foodItems = [],
+    userOrders = [],
+    refreshUserOrders,
+  } = useViewModel();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'FAVOURITES' | 'PRICE_149_300' | 'PRICE_ABOVE_300'>('ALL');
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
   const [itemQuantities, setItemQuantities] = useState<Record<string, number>>({});
-  const [orders, setOrders] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [orders, setOrders] = useState<any[]>(userOrders);
+  const [isLoading, setIsLoading] = useState(userOrders.length === 0);
 
   const showToast = (msg: string) => {
     if (Platform.OS === 'android') {
@@ -100,124 +112,112 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
     }
   };
 
+  // Sync itemQuantities with cartItems
   useEffect(() => {
-    const fetchUserOrders = async () => {
-      setIsLoading(true);
-      try {
-        let remoteOrders: any[] = [];
-        const userId = authState.type === 'Authenticated' ? ((authState as any).userId || (authState as any).user?.id) : null;
-        const sessionToken = authState.type === 'Authenticated' ? authState.sessionToken : '';
+    const qtyMap: Record<string, number> = {};
+    cartItems.forEach(ci => {
+      qtyMap[ci.id] = ci.quantity;
+    });
+    setItemQuantities(qtyMap);
+  }, [cartItems]);
 
-        if (userId && sessionToken) {
-          try {
-            const res = await fetch(`${BACKEND_URL}/api/orders/${userId}/user-orders`, {
-              headers: { Authorization: `Bearer ${sessionToken}` },
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data.orders && Array.isArray(data.orders)) {
-                remoteOrders = data.orders;
-              }
-            }
-          } catch (e) {
-            console.warn('[ReorderScreen] Error fetching user orders:', e);
+  // Synchronize orders instantly whenever userOrders updates in memory
+  useEffect(() => {
+    if (userOrders && userOrders.length > 0) {
+      setOrders(userOrders);
+      setIsLoading(false);
+    }
+  }, [userOrders]);
+
+  // Background refresh on mount without blocking initial UI
+  useEffect(() => {
+    let isMounted = true;
+    const loadData = async () => {
+      try {
+        if (refreshUserOrders) {
+          await refreshUserOrders();
+        }
+      } catch (err) {
+        console.warn('[ReorderScreen] Error refreshing past orders:', err);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+    loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const reorderRestaurants: RestaurantReorderCard[] = useMemo(() => {
+    if (!orders || orders.length === 0) {
+      return [];
+    }
+
+    const normalizePrice = (raw: any): number => {
+      let num = typeof raw === 'number' ? raw : (parseFloat(String(raw || 0).replace(/[^0-9.]/g, '')) || 0);
+      if (isNaN(num) || num <= 0) return 0;
+      if (num >= 1000 && num % 100 === 0) {
+        num = num / 100;
+      } else if (num >= 2000) {
+        num = num / 100;
+      }
+      return Math.round(num);
+    };
+
+    return orders.map((o: any, idx: number) => {
+      const restId = o.restaurantId || '';
+      const matchingRest = allRestaurants.find(r => r.id === restId);
+      
+      let rawItems: any[] = [];
+      if (Array.isArray(o.items)) {
+        rawItems = o.items;
+      } else if (typeof o.items === 'string') {
+        try {
+          const parsed = JSON.parse(o.items);
+          if (Array.isArray(parsed)) rawItems = parsed;
+        } catch (e) {}
+      }
+
+      const dishesList = rawItems.map((item: any, itIdx: number) => {
+        const dishId = item.id || item.menuItemId || item._id || `item_${itIdx}`;
+        let dishPrice = normalizePrice(item.price ?? item.unitPrice ?? item.basePrice ?? item.itemPrice);
+        if (dishPrice <= 0) {
+          const matchFood = foodItems.find(f => f.id === dishId || f.name === (item.name || item.menuItemName));
+          if (matchFood && typeof matchFood.price === 'number') {
+            dishPrice = normalizePrice(matchFood.price);
           }
         }
 
-        let localOrders: any[] = [];
-        try {
-          const localData = await AsyncStorage.getItem('@placed_orders_history');
-          if (localData) {
-            localOrders = JSON.parse(localData);
-          }
-        } catch (e) {}
-
-        const mergedMap = new Map<string, any>();
-        localOrders.forEach(o => {
-          if (o && (o.id || o.orderId)) mergedMap.set(o.id || o.orderId, o);
-        });
-        remoteOrders.forEach(o => {
-          if (o && (o.id || o.orderId)) mergedMap.set(o.id || o.orderId, o);
-        });
-
-        const combined = Array.from(mergedMap.values()).sort((a, b) => {
-          const timeA = new Date(a.createdAt || a.date || 0).getTime();
-          const timeB = new Date(b.createdAt || b.date || 0).getTime();
-          return timeB - timeA;
-        });
-
-        setOrders(combined);
-      } catch (err) {
-        console.warn('[ReorderScreen] Error loading past orders:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchUserOrders();
-  }, [authState]);
-
-  const reorderRestaurants: RestaurantReorderCard[] = useMemo(() => {
-    if (orders.length === 0) {
-      // Dynamic fallback based on real menu items from foodItems when there is no order history yet
-      return allRestaurants.slice(0, 3).map((r: any) => {
-        const restDishes = foodItems.filter(f => f.restaurantId === r.id).slice(0, 3).map(f => ({
-          id: f.id,
-          name: f.name,
-          price: f.price,
-          isVeg: f.isVeg !== false,
-          available: true,
-        }));
-        
-        const fallbackDishes = restDishes.length > 0 ? restDishes : [
-          {
-            id: 'item_seed_1',
-            name: 'Chicken Dum Biryani',
-            price: 199,
-            isVeg: false,
-            available: true,
-          }
-        ];
-
-        return {
-          id: `seed_${r.id}`,
-          restaurantId: r.id,
-          name: r.name,
-          deliveryTime: r.deliveryTime ? `${r.deliveryTime} mins` : '20–25 mins',
-          discountPromo: 'Flat 20% OFF',
-          hasOneBenefits: true,
-          image: r.image ? { uri: r.image } : figmaMaharajaImg,
-          isFavorite: !!favorites[`seed_${r.id}`],
-          available: !r.isClosed,
-          dishes: fallbackDishes,
-        };
-      });
-    }
-
-    return orders.map((o: any, idx: number) => {
-      const restId = o.restaurantId || 'D2nCXr-XW_De3z7yBYeVc';
-      const matchingRest = allRestaurants.find(r => r.id === restId);
-      
-      const dishesList = (o.items || []).map((item: any) => {
-        const dishId = item.id || item.menuItemId || 'item_1';
-        const dishPrice = typeof item.price === 'number' ? (item.price > 1000 ? Math.round(item.price / 100) : item.price) : (typeof item.unitPrice === 'number' ? Math.round(item.unitPrice / 100) : 150);
         return {
           id: dishId,
-          name: item.name || item.menuItemName || 'Special Item',
+          name: item.name || item.menuItemName || item.itemName || 'Food Item',
           price: dishPrice,
-          isVeg: item.isVeg !== undefined ? item.isVeg : true,
-          available: true,
+          isVeg: item.isVeg !== undefined ? item.isVeg : (item.is_veg !== undefined ? item.is_veg : true),
+          available: matchingRest ? !matchingRest.isClosed : true,
         };
       });
 
+      const restName = o.restaurantName || matchingRest?.name || 'Restaurant';
+      const restImg = matchingRest?.image 
+        ? { uri: matchingRest.image } 
+        : (o.restaurantImage ? { uri: o.restaurantImage } : { uri: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800&q=80' });
+
+      const deliveryTimeStr = matchingRest?.deliveryTime 
+        ? `${matchingRest.deliveryTime} mins` 
+        : ((matchingRest as any)?.eta || '25–30 mins');
+
+      const discountTag = (matchingRest as any)?.discountTag || matchingRest?.discount || (matchingRest as any)?.offerText || o.discountTag || '';
+
       return {
-        id: o.id || `ord_${idx}`,
+        id: o.id || o.orderId || `ord_${idx}`,
         restaurantId: restId,
-        name: o.restaurantName || matchingRest?.name || 'Hotel Mayfair',
-        deliveryTime: '20–30 mins',
-        discountPromo: '70% off upto ₹140 +',
-        hasOneBenefits: true,
-        image: matchingRest?.image ? { uri: matchingRest.image } : figmaMaharajaImg,
-        isFavorite: !!favorites[o.id || `ord_${idx}`],
+        name: restName,
+        deliveryTime: deliveryTimeStr,
+        discountPromo: discountTag,
+        hasOneBenefits: (matchingRest as any)?.hasOneBenefits ?? true,
+        image: restImg,
+        isFavorite: !!favorites[o.id || o.orderId || `ord_${idx}`],
         available: matchingRest ? !matchingRest.isClosed : true,
         dishes: dishesList,
       };
@@ -233,32 +233,25 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
   };
 
   const handleAddItem = (dish: DishItem, rest: RestaurantReorderCard) => {
-    const newQty = (itemQuantities[dish.id] || 0) + 1;
-    setItemQuantities((prev) => ({ ...prev, [dish.id]: newQty }));
-
-    const simItem = {
+    addToCart({
       id: dish.id,
       name: dish.name,
       price: dish.price,
-      quantity: newQty,
+      quantity: 1,
       restaurantId: rest.restaurantId,
-    };
-
-    syncCartItems([simItem as any]);
+      restaurantName: rest.name,
+      isVeg: dish.isVeg,
+    });
     showToast(`Added "${dish.name}" to cart`);
   };
 
   const handleRemoveItem = (dish: DishItem) => {
     const currentQty = itemQuantities[dish.id] || 0;
     if (currentQty <= 1) {
-      setItemQuantities((prev) => {
-        const copy = { ...prev };
-        delete copy[dish.id];
-        return copy;
-      });
+      removeFromCart(dish.id);
       showToast(`Removed "${dish.name}" from cart`);
     } else {
-      setItemQuantities((prev) => ({ ...prev, [dish.id]: currentQty - 1 }));
+      updateCartQuantity(dish.id, currentQty - 1);
     }
   };
 
@@ -404,155 +397,197 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
 
         {/* ─── [3] CARDS FEED ─── (node 3043:110) */}
         <View style={styles.cardsFeedContainer}>
-          {filteredList.map((rest) => {
-            const isFav = !!favorites[rest.id];
-
-            return (
-              <View key={rest.id} style={styles.restCard}>
-                {/* Top Restaurant Header Area */}
+          {isLoading && orders.length === 0 ? (
+            <View style={{ gap: 14 * SCALE, marginTop: 10 * SCALE }}>
+              {[1, 2].map((k) => (
+                <View key={`skel_${k}`} style={[styles.restCard, { opacity: 0.6, borderColor: '#1A1A1A' }]}>
+                  <View style={[styles.restCardHeader, { opacity: 0.7 }]}>
+                    <View style={[styles.restBannerImg, { backgroundColor: '#181818' }]} />
+                    <View style={styles.restInfoWrap}>
+                      <View style={{ width: 140 * SCALE, height: 14 * SCALE, backgroundColor: '#222', borderRadius: 4, marginBottom: 8 }} />
+                      <View style={{ width: 90 * SCALE, height: 10 * SCALE, backgroundColor: '#1A1A1A', borderRadius: 4 }} />
+                    </View>
+                  </View>
+                  <View style={styles.cardDivider} />
+                  <View style={{ padding: 12 * SCALE, gap: 10 * SCALE }}>
+                    <View style={{ width: '80%', height: 12 * SCALE, backgroundColor: '#1C1C1C', borderRadius: 4 }} />
+                    <View style={{ width: '60%', height: 12 * SCALE, backgroundColor: '#181818', borderRadius: 4 }} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : filteredList.length === 0 ? (
+            <View style={styles.emptyStateContainer}>
+              <View style={styles.emptyIconCircle}>
+                <RotateCcw size={28 * SCALE} color="#D4AF37" strokeWidth={2} />
+              </View>
+              <Text style={styles.emptyStateTitle}>
+                {searchQuery ? 'No matching dishes found' : 'No Past Orders Yet'}
+              </Text>
+              <Text style={styles.emptyStateSub}>
+                {searchQuery
+                  ? `We couldn't find any dishes or restaurants matching "${searchQuery}".`
+                  : 'Once you place orders with MyQuro, your favourite restaurants and past dishes will appear here for 1-tap reordering.'}
+              </Text>
+              {onNavigateToHome && !searchQuery && (
                 <TouchableOpacity
-                  style={styles.restCardHeader}
+                  style={styles.emptyStateBtn}
                   activeOpacity={0.85}
-                  onPress={() => onNavigateToRestaurant(rest.restaurantId)}
+                  onPress={onNavigateToHome}
                 >
-                  <Image source={rest.image} style={styles.restBannerImg} />
-
-                  <View style={styles.restInfoWrap}>
-                    <View style={styles.restNameRow}>
-                      <Text style={styles.restName} numberOfLines={1}>
-                        {rest.name}
-                      </Text>
-                      <Text style={styles.restDeliveryTime}> • {rest.deliveryTime}</Text>
-                    </View>
-
-                    {/* Promo & ONE Benefits Row */}
-                    <View style={styles.promoRow}>
-                      <Image source={figmaTagDiscount} style={styles.tagDiscountImg} />
-                      <Text style={styles.discountText}>{rest.discountPromo}</Text>
-
-                      {rest.hasOneBenefits && (
-                        <View style={styles.oneBenefitsWrap}>
-                          <View style={styles.onePill}>
-                            <Text style={styles.onePillText}>ONE</Text>
-                          </View>
-                          <Text style={styles.benefitsText}>benefits</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-
-                  {/* Heart Icon Button */}
-                  <TouchableOpacity
-                    style={styles.heartBtn}
-                    activeOpacity={0.7}
-                    onPress={() => toggleFavorite(rest.id)}
-                  >
-                    <Heart
-                      size={20 * SCALE}
-                      color={isFav ? '#D4AF37' : '#777777'}
-                      fill={isFav ? '#D4AF37' : 'transparent'}
-                      strokeWidth={1.8}
-                    />
-                  </TouchableOpacity>
+                  <Text style={styles.emptyStateBtnText}>Browse Restaurants</Text>
                 </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            filteredList.map((rest) => {
+              const isFav = !!favorites[rest.id];
 
-                {/* Divider Line */}
-                <View style={styles.cardDivider} />
+              return (
+                <View key={rest.id} style={styles.restCard}>
+                  {/* Top Restaurant Header Area */}
+                  <TouchableOpacity
+                    style={styles.restCardHeader}
+                    activeOpacity={0.85}
+                    onPress={() => onNavigateToRestaurant(rest.restaurantId)}
+                  >
+                    <Image source={rest.image} style={styles.restBannerImg} />
 
-                {/* Unavailable notice if venue inactive */}
-                {!rest.available && (
-                  <View style={styles.unavailableNoticeRow}>
-                    <Image source={figmaClockYellow} style={styles.clockYellowImg} />
-                    <Text style={styles.unavailableText}>
-                      {rest.unavailableReason || 'Not available at the moment'}
-                    </Text>
-                  </View>
-                )}
+                    <View style={styles.restInfoWrap}>
+                      <View style={styles.restNameRow}>
+                        <Text style={styles.restName} numberOfLines={1}>
+                          {rest.name}
+                        </Text>
+                        <Text style={styles.restDeliveryTime}> • {rest.deliveryTime}</Text>
+                      </View>
 
-                {/* Dish Rows */}
-                <View style={styles.dishesWrap}>
-                  {rest.dishes.map((dish, idx) => {
-                    const isLast = idx === rest.dishes.length - 1;
-                    const qty = itemQuantities[dish.id] || 0;
+                      {/* Promo & ONE Benefits Row */}
+                      <View style={styles.promoRow}>
+                        <Image source={figmaTagDiscount} style={styles.tagDiscountImg} />
+                        <Text style={styles.discountText}>{rest.discountPromo || 'Special Offers Available'}</Text>
 
-                    return (
-                      <View key={dish.id}>
-                        <View style={styles.dishRow}>
-                          {/* Veg / Non-Veg Icon */}
-                          <Image
-                            source={dish.isVeg ? figmaVegIcon : figmaNonVegIcon}
-                            style={styles.vegNonVegImg}
-                          />
+                        {rest.hasOneBenefits && (
+                          <View style={styles.oneBenefitsWrap}>
+                            <Image source={quroBadgeImg} style={styles.quroReorderBadgeImg} resizeMode="contain" />
+                            <Text style={styles.benefitsText}>benefits</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
 
-                          {/* Dish Name & Price */}
-                          <View style={styles.dishInfoCol}>
-                            <Text
-                              style={[
-                                styles.dishName,
-                                !dish.available && styles.dishNameDisabled,
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {dish.name}
-                            </Text>
+                    {/* Heart Icon Button */}
+                    <TouchableOpacity
+                      style={styles.heartBtn}
+                      activeOpacity={0.7}
+                      onPress={() => toggleFavorite(rest.id)}
+                    >
+                      <Heart
+                        size={20 * SCALE}
+                        color={isFav ? '#D4AF37' : '#777777'}
+                        fill={isFav ? '#D4AF37' : 'transparent'}
+                        strokeWidth={1.8}
+                      />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
 
-                            <View style={styles.priceRow}>
+                  {/* Divider Line */}
+                  <View style={styles.cardDivider} />
+
+                  {/* Unavailable notice if venue inactive */}
+                  {!rest.available && (
+                    <View style={styles.unavailableNoticeRow}>
+                      <Image source={figmaClockYellow} style={styles.clockYellowImg} />
+                      <Text style={styles.unavailableText}>
+                        {rest.unavailableReason || 'Not available at the moment'}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Dish Rows */}
+                  <View style={styles.dishesWrap}>
+                    {rest.dishes.map((dish, idx) => {
+                      const isLast = idx === rest.dishes.length - 1;
+                      const qty = itemQuantities[dish.id] || 0;
+
+                      return (
+                        <View key={dish.id}>
+                          <View style={styles.dishRow}>
+                            {/* Veg / Non-Veg Icon */}
+                            <Image
+                              source={dish.isVeg ? figmaVegIcon : figmaNonVegIcon}
+                              style={styles.vegNonVegImg}
+                            />
+
+                            {/* Dish Name & Price */}
+                            <View style={styles.dishInfoCol}>
                               <Text
                                 style={[
-                                  styles.dishPrice,
-                                  !dish.available && styles.dishPriceDisabled,
+                                  styles.dishName,
+                                  !dish.available && styles.dishNameDisabled,
                                 ]}
+                                numberOfLines={1}
                               >
-                                ₹{dish.price}
+                                {dish.name}
                               </Text>
 
-                              {dish.originalPrice && (
-                                <Text style={styles.dishOriginalPrice}>
-                                  {dish.originalPrice}
+                              <View style={styles.priceRow}>
+                                <Text
+                                  style={[
+                                    styles.dishPrice,
+                                    !dish.available && styles.dishPriceDisabled,
+                                  ]}
+                                >
+                                  ₹{dish.price}
                                 </Text>
-                              )}
-                            </View>
-                          </View>
 
-                          {/* Right Action Button (+ / Quantity Selector) */}
-                          {dish.available && (
-                            <View style={styles.dishActionCol}>
-                              {qty > 0 ? (
-                                <View style={styles.qtyControlBox}>
+                                {dish.originalPrice && (
+                                  <Text style={styles.dishOriginalPrice}>
+                                    {dish.originalPrice}
+                                  </Text>
+                                )}
+                              </View>
+                            </View>
+
+                            {/* Right Action Button (+ / Quantity Selector) */}
+                            {dish.available && (
+                              <View style={styles.dishActionCol}>
+                                {qty > 0 ? (
+                                  <View style={styles.qtyControlBox}>
+                                    <TouchableOpacity
+                                      style={styles.qtyBtn}
+                                      onPress={() => handleRemoveItem(dish)}
+                                    >
+                                      <Minus size={13 * SCALE} color="#D4AF37" strokeWidth={2.5} />
+                                    </TouchableOpacity>
+                                    <Text style={styles.qtyText}>{qty}</Text>
+                                    <TouchableOpacity
+                                      style={styles.qtyBtn}
+                                      onPress={() => handleAddItem(dish, rest)}
+                                    >
+                                      <Plus size={13 * SCALE} color="#D4AF37" strokeWidth={2.5} />
+                                    </TouchableOpacity>
+                                  </View>
+                                ) : (
                                   <TouchableOpacity
-                                    style={styles.qtyBtn}
-                                    onPress={() => handleRemoveItem(dish)}
-                                  >
-                                    <Minus size={13 * SCALE} color="#D4AF37" strokeWidth={2.5} />
-                                  </TouchableOpacity>
-                                  <Text style={styles.qtyText}>{qty}</Text>
-                                  <TouchableOpacity
-                                    style={styles.qtyBtn}
+                                    activeOpacity={0.85}
                                     onPress={() => handleAddItem(dish, rest)}
                                   >
-                                    <Plus size={13 * SCALE} color="#D4AF37" strokeWidth={2.5} />
+                                    <Image source={figmaPlusBtn} style={styles.plusBtnImg} />
                                   </TouchableOpacity>
-                                </View>
-                              ) : (
-                                <TouchableOpacity
-                                  activeOpacity={0.85}
-                                  onPress={() => handleAddItem(dish, rest)}
-                                >
-                                  <Image source={figmaPlusBtn} style={styles.plusBtnImg} />
-                                </TouchableOpacity>
-                              )}
-                            </View>
-                          )}
-                        </View>
+                                )}
+                              </View>
+                            )}
+                          </View>
 
-                        {!isLast && <View style={styles.dishDivider} />}
-                      </View>
-                    );
-                  })}
+                          {!isLast && <View style={styles.dishDivider} />}
+                        </View>
+                      );
+                    })}
+                  </View>
                 </View>
-              </View>
-            );
-          })}
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </View>
@@ -772,19 +807,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 3,
   },
-  onePill: {
-    backgroundColor: '#9F1818',
-    borderWidth: 1,
-    borderColor: '#501010',
-    borderRadius: 6,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    marginRight: 4,
-  },
-  onePillText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 9.5 * SCALE,
-    color: '#E1A9A9',
+  quroReorderBadgeImg: {
+    width: 36 * SCALE,
+    height: 12 * SCALE,
+    marginRight: 4 * SCALE,
   },
   benefitsText: {
     fontFamily: 'Urbanist-Regular',
@@ -900,5 +926,56 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#181818',
     marginTop: 8,
+  },
+
+  // ─── EMPTY STATE ───
+  emptyStateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60 * SCALE,
+    paddingHorizontal: 28 * SCALE,
+    backgroundColor: '#090909',
+    borderRadius: 20 * SCALE,
+    borderWidth: 1,
+    borderColor: '#1C1C1C',
+    marginTop: 20 * SCALE,
+  },
+  emptyIconCircle: {
+    width: 68 * SCALE,
+    height: 68 * SCALE,
+    borderRadius: 34 * SCALE,
+    backgroundColor: '#1C180B',
+    borderWidth: 1,
+    borderColor: '#3D3114',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16 * SCALE,
+  },
+  emptyStateTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 18 * SCALE,
+    color: '#E8E8E8',
+    textAlign: 'center',
+    marginBottom: 8 * SCALE,
+  },
+  emptyStateSub: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 13.5 * SCALE,
+    color: '#7F7F7F',
+    textAlign: 'center',
+    lineHeight: 20 * SCALE,
+    marginBottom: 24 * SCALE,
+  },
+  emptyStateBtn: {
+    backgroundColor: '#D4AF37',
+    paddingVertical: 12 * SCALE,
+    paddingHorizontal: 24 * SCALE,
+    borderRadius: 25 * SCALE,
+  },
+  emptyStateBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14 * SCALE,
+    color: '#000000',
+    letterSpacing: 0.2,
   },
 });

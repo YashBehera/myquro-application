@@ -64,6 +64,7 @@ const profMyQuroMoney        = require('../assets/profile/profMyQuroMoney.png');
 const profVouchers           = require('../assets/profile/profVouchers.png');
 const profAccountStatement   = require('../assets/profile/profAccountStatement.png');
 const profStudentRewards     = require('../assets/profile/profStudentRewards.png');
+const quroBadgeImg           = require('../assets/images/quro_badge.png');
 
 const orderResAsiaSeven      = require('../assets/profile/orderResAsiaSeven.png');
 
@@ -81,11 +82,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
     updateSavedAddress,
     deleteSavedAddress,
     logout,
+    deleteAccount,
     updateProfile,
     favouriteRestaurantsList,
     toggleFavourite,
     addToCart,
+    addMultipleToCart,
+    foodItems,
     allRestaurants,
+    userOrders = [],
+    refreshUserOrders,
   } = useViewModel();
 
   // Navigation states
@@ -114,32 +120,81 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
   );
   const [isLoading, setIsLoading] = useState(false);
 
-  // Orders list state
-  const [ordersList, setOrdersList] = useState<any[]>([]);
+  // Orders list state initialized with in-memory orders
+  const [ordersList, setOrdersList] = useState<any[]>(userOrders);
+
+  useEffect(() => {
+    if (userOrders && userOrders.length > 0) {
+      setOrdersList(userOrders);
+    }
+  }, [userOrders]);
 
   // Interactive Ratings state per order
   const [ratings, setRatings] = useState<Record<string, { food: number; delivery: number }>>({});
 
-  // Helper to format currency and convert paise (e.g. 115500 -> ₹1155)
+  const normalizePrice = (raw: any): number => {
+    if (raw === undefined || raw === null || raw === '') return 0;
+    let num = typeof raw === 'number' ? raw : (parseFloat(String(raw).replace(/[^0-9.]/g, '')) || 0);
+    if (isNaN(num) || num <= 0) return 0;
+    // Handle paise: e.g. 15000 -> 150, 30000 -> 300, 29900 -> 299, 45000 -> 450
+    if (num >= 1000 && num % 100 === 0) {
+      num = num / 100;
+    } else if (num >= 2000) {
+      num = num / 100;
+    }
+    return Math.round(num);
+  };
+
+  // Helper to extract clean numerical price for an item
+  const getItemPrice = (it: any): number => {
+    if (!it) return 0;
+    const qty = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+
+    // Priority 1: unit price fields
+    const rawUnit = it.price ?? it.unitPrice ?? it.basePrice ?? it.itemPrice ?? it.foodItem?.price;
+    let unitPrice = normalizePrice(rawUnit);
+
+    // If unit price is 0 and it.totalPrice is provided
+    if (unitPrice <= 0 && it.totalPrice !== undefined && it.totalPrice !== null) {
+      const normalizedTotal = normalizePrice(it.totalPrice);
+      unitPrice = qty > 1 ? Math.round(normalizedTotal / qty) : normalizedTotal;
+    }
+
+    // Check if matched in foodItems or allRestaurants
+    if (unitPrice <= 0 && foodItems && foodItems.length > 0) {
+      const matchFood = foodItems.find((f: any) => f.id === it.id || f.id === it.menuItemId || f.name === (it.name || it.menuItemName));
+      if (matchFood && typeof matchFood.price === 'number' && matchFood.price > 0) {
+        unitPrice = normalizePrice(matchFood.price);
+      }
+    }
+
+    return Math.max(0, unitPrice);
+  };
+
+  // Helper to calculate or extract the full order total
+  const getOrderTotalAmount = (order: any): number => {
+    if (!order) return 0;
+    const raw = order.billTotal ?? order.grandTotal ?? order.totalAmount ?? order.amount ?? order.subtotal;
+    let total = normalizePrice(raw);
+
+    if (total > 0) return total;
+
+    // Fallback: sum up items
+    if (order.items && Array.isArray(order.items) && order.items.length > 0) {
+      const sum = order.items.reduce((acc: number, it: any) => {
+        const p = getItemPrice(it);
+        const q = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+        return acc + (p * q);
+      }, 0);
+      if (sum > 0) return Math.round(sum);
+    }
+    return 0;
+  };
+
+  // Helper to format currency
   const formatOrderAmount = (rawAmount: any): string => {
-    if (rawAmount === undefined || rawAmount === null || rawAmount === '') return '₹0';
-    let num: number;
-    if (typeof rawAmount === 'string') {
-      const cleaned = rawAmount.replace(/[^0-9.]/g, '');
-      num = parseFloat(cleaned);
-    } else {
-      num = Number(rawAmount);
-    }
-    if (isNaN(num) || num <= 0) return '₹0';
-
-    // If amount is stored in paise (e.g. 115500 for ₹1155 or 29900 for ₹299)
-    if (num >= 5000 && num % 100 === 0) {
-      num = num / 100;
-    } else if (num >= 10000) {
-      num = num / 100;
-    }
-
-    return `₹${Math.round(num)}`;
+    const num = normalizePrice(rawAmount);
+    return `₹${num}`;
   };
 
   const fetchUserOrders = async () => {
@@ -263,45 +318,46 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
   };
 
   const handleReorder = (order: any) => {
-    if (order.items && order.items.length > 0) {
-      const itemsToAdd = order.items.flatMap((it: any) => {
-        // Resolve price from all possible field names
-        const resolvedPrice =
-          typeof it.price === 'number' && it.price > 0 ? it.price :
-          typeof it.unitPrice === 'number' && it.unitPrice > 0 ? it.unitPrice :
-          typeof it.basePrice === 'number' && it.basePrice > 0 ? it.basePrice :
-          parseFloat(it.price || it.unitPrice || it.basePrice || '0') || 0;
+    if (!order) return;
+    let itemsArr: any[] = [];
+    if (Array.isArray(order.items)) {
+      itemsArr = order.items;
+    } else if (typeof order.items === 'string') {
+      try {
+        const parsed = JSON.parse(order.items);
+        if (Array.isArray(parsed)) itemsArr = parsed;
+      } catch (e) {}
+    }
 
-        // Resolve quantity (must be at least 1)
+    if (itemsArr.length > 0) {
+      const restId = order.restaurantId || order.restaurant_id || 'restaurant_1';
+      const restName = order.restaurantName || order.restaurant_name || 'Restaurant';
+
+      const itemsToAdd = itemsArr.map((it: any) => {
+        const resolvedPrice = getItemPrice(it);
         const resolvedQty = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+        const matchedFood = foodItems && foodItems.length > 0 ? foodItems.find((f: any) => f.id === it.id || f.id === it.menuItemId || f.name === (it.name || it.menuItemName)) : undefined;
 
-        // Create one cart entry per item (with correct quantity)
-        return [{
-          id: it.id || it.menuItemId || `reorder_${Date.now()}_${Math.random()}`,
-          name: it.name || it.menuItemName || it.itemName || 'Food Item',
-          price: resolvedPrice,
+        return {
+          id: it.id || it.menuItemId || (matchedFood ? matchedFood.id : `reorder_${Date.now()}_${Math.random()}`),
+          name: it.name || it.menuItemName || it.itemName || (matchedFood ? matchedFood.name : 'Food Item'),
+          price: resolvedPrice > 0 ? resolvedPrice : (matchedFood && typeof matchedFood.price === 'number' ? matchedFood.price : 150),
           quantity: resolvedQty,
-          restaurantId: order.restaurantId || order.restaurant_id || 'restaurant_1',
-          restaurantName: order.restaurantName || order.restaurant_name || 'Restaurant',
-          image: it.image || it.imageUrl || it.coverUrl || undefined,
-          isVeg: it.isVeg ?? it.is_veg ?? false,
-          description: it.description || '',
+          restaurantId: restId,
+          restaurantName: restName,
+          image: it.image || it.imageUrl || it.coverUrl || matchedFood?.image || undefined,
+          isVeg: it.isVeg ?? it.is_veg ?? matchedFood?.isVeg ?? false,
+          description: it.description || matchedFood?.description || '',
           variantId: it.variantId || it.variant_id || null,
-        }];
+        };
       });
 
       if (itemsToAdd.length > 0) {
-        // Use the first item to trigger the cart (handles restaurant conflict dialog)
-        addToCart(itemsToAdd[0]);
-        // Add remaining items after a tiny delay to avoid state race
-        if (itemsToAdd.length > 1) {
-          setTimeout(() => {
-            itemsToAdd.slice(1).forEach((cartItem: any) => addToCart(cartItem));
-          }, 200);
-        }
-        showToast(`${itemsToAdd.length} item${itemsToAdd.length > 1 ? 's' : ''} from ${order.restaurantName || 'Restaurant'} added to cart!`);
+        addMultipleToCart(itemsToAdd);
+        const totalItemsCount = itemsToAdd.reduce((sum, item) => sum + item.quantity, 0);
+        showToast(`Added ${totalItemsCount} item${totalItemsCount > 1 ? 's' : ''} from ${restName} to your cart!`);
       } else {
-        showToast(`Reordering from ${order.restaurantName || 'Restaurant'}...`);
+        showToast(`No items could be added to cart.`);
       }
     } else {
       showToast(`No items found in this order to reorder.`);
@@ -425,6 +481,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
         showToast={showToast}
         logout={() => {
           logout();
+          setCurrentView('main');
+          if (onBackToHome) onBackToHome();
+        }}
+        deleteAccount={async () => {
+          await deleteAccount();
           setCurrentView('main');
           if (onBackToHome) onBackToHome();
         }}
@@ -588,15 +649,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
           </View>
         </View>
 
-        {/* ─── [3] ONE MEMBERSHIP BANNER ─── */}
+        {/* ─── [3] QURO MEMBERSHIP BANNER ─── */}
         <TouchableOpacity
           style={styles.oneBannerCard}
           activeOpacity={0.85}
-          onPress={() => showToast('My Quro One: Unlimited FREE Delivery on all orders!')}
+          onPress={() => showToast('MyQURO: Unlimited FREE Delivery on all orders!')}
         >
           <View style={styles.oneBannerTopRow}>
             <View style={styles.oneLogoRow}>
-              <Text style={styles.oneLogoText}>one</Text>
+              <Image source={quroBadgeImg} style={styles.quroProfileBadgeImg} resizeMode="contain" />
               <View style={styles.oneActiveBadge}>
                 <View style={styles.oneActiveDot} />
                 <Text style={styles.oneActiveText}>ACTIVE</Text>
@@ -606,7 +667,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
           </View>
 
           <Text style={styles.oneSavedText}>₹90 saved in 88 days</Text>
-          <Text style={styles.oneBenefitsText}>Explore all My Quro One benefits</Text>
+          <Text style={styles.oneBenefitsText}>Explore all MyQURO benefits</Text>
         </TouchableOpacity>
 
         {/* ─── [4] APP UPDATE AVAILABLE BANNER ─── */}
@@ -824,16 +885,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                     style={styles.itemsList}
                   >
                     {order.items && order.items.length > 0 ? (
-                      order.items.map((it: any, itIdx: number) => (
-                        <View key={itIdx} style={styles.itemRow}>
-                          <View style={styles.qtyBadge}>
-                            <Text style={styles.qtyText}>{it.quantity || 1}x</Text>
+                      order.items.map((it: any, itIdx: number) => {
+                        const itPrice = getItemPrice(it);
+                        const itQty = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+                        return (
+                          <View key={itIdx} style={styles.itemRow}>
+                            <View style={styles.qtyBadge}>
+                              <Text style={styles.qtyText}>{itQty}x</Text>
+                            </View>
+                            <Text style={styles.itemName} numberOfLines={1}>
+                              {it.name || it.menuItemName || it.itemName || 'Food Item'}
+                            </Text>
+                            {itPrice > 0 && (
+                              <Text style={styles.itemPriceText}>
+                                {formatOrderAmount(itPrice * itQty)}
+                              </Text>
+                            )}
                           </View>
-                          <Text style={styles.itemName} numberOfLines={1}>
-                            {it.name || it.menuItemName}
-                          </Text>
-                        </View>
-                      ))
+                        );
+                      })
                     ) : (
                       <View style={styles.itemRow}>
                         <View style={styles.qtyBadge}>
@@ -933,7 +1003,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                     <View style={styles.billTotalRow}>
                       <Text style={styles.billTotalLabel}>Bill Total: </Text>
                       <Text style={styles.billTotalAmount}>
-                        {formatOrderAmount(order.billTotal || order.grandTotal || order.totalAmount || order.subtotal)}
+                        {formatOrderAmount(getOrderTotalAmount(order))}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -1141,11 +1211,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  oneLogoText: {
-    fontFamily: 'Urbanist-Black',
-    fontSize: 26,
-    color: '#D4A238',
-    letterSpacing: -0.5,
+  quroProfileBadgeImg: {
+    width: 68,
+    height: 22,
   },
   oneActiveBadge: {
     flexDirection: 'row',
@@ -1411,6 +1479,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Medium',
     fontSize: 13.5,
     color: '#8E8E8E',
+  },
+  itemPriceText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 13.5,
+    color: '#D4AF37',
+    marginLeft: 8,
   },
 
   // ─── RATINGS ROW ───

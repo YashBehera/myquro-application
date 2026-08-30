@@ -9,7 +9,9 @@ import {
   StatusBar,
   Modal,
   Alert,
+  Image,
 } from 'react-native';
+const quroBadgeImg = require('../assets/images/quro_badge.png');
 import {
   ArrowLeft,
   CheckCircle2,
@@ -689,10 +691,10 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
             </Text>
           </Text>
 
-          {/* CARD 1: one EXCLUSIVE */}
+          {/* CARD 1: QURO EXCLUSIVE */}
           <View style={styles.oneExclusiveCard}>
             <View style={styles.oneExclusiveHeaderRow}>
-              <Text style={styles.oneLogoText}>one</Text>
+              <Image source={quroBadgeImg} style={styles.quroBookTableBadgeImg} resizeMode="contain" />
               <Text style={styles.exclusiveLabelText}> EXCLUSIVE</Text>
             </View>
 
@@ -737,7 +739,7 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
 
             <View style={styles.onePlanFooterNoteWrap}>
               <Text style={styles.onePlanFooterText}>
-                1 month One plan for ₹1 will be auto-added in the next step.{' '}
+                1 month MyQURO plan for ₹1 will be auto-added in the next step.{' '}
                 <Text
                   style={styles.viewBenefitsLink}
                   onPress={() => setBenefitsModalVisible(true)}
@@ -832,7 +834,7 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
           <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
             <View style={styles.modalHeaderRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={styles.oneLogoText}>one</Text>
+                <Image source={quroBadgeImg} style={styles.quroBookTableBadgeImg} resizeMode="contain" />
                 <Text style={[styles.exclusiveLabelText, { fontSize: 14 * SCALE, marginLeft: 4 }]}>
                   MEMBERSHIP
                 </Text>
@@ -1369,11 +1371,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 14 * SCALE,
   },
-  oneLogoText: {
-    color: '#FF453A',
-    fontSize: 19 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
+  quroBookTableBadgeImg: {
+    width: 50 * SCALE,
+    height: 17 * SCALE,
+    marginRight: 4 * SCALE,
   },
   exclusiveLabelText: {
     color: '#DEA430',

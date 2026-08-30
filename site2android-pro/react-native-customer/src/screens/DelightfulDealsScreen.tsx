@@ -205,7 +205,7 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ── TOP FLOATING HEADER ── */}
-      <View style={[styles.headerRow, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.headerRow, { paddingTop: 10 }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           {/* Gold Border Circular Back Button */}
           <TouchableOpacity

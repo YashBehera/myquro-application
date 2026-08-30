@@ -11,7 +11,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Restaurant, FoodCategory, AuthState, CartItem } from '../types';
 import { RestaurantRepository } from '../data/RestaurantRepository';
 import { RestaurantDatabase } from '../data/RestaurantDatabase';
-import { BACKEND_URL, OLA_MAPS_API_KEY } from '../config';
+import { BACKEND_URL } from '../config';
+import { SecureStorage } from '../utils/secureStorage';
 
 export interface SavedAddress {
   id: string;
@@ -39,6 +40,7 @@ interface ViewModelContextType {
   verifyOtp: (phone: string, otp: string) => Promise<AuthState>;
   setAuthenticatedState: (state: AuthState) => Promise<void>;
   logout: () => void;
+  deleteAccount: () => Promise<void>;
   updateProfile: (name: string, email: string) => void;
   categories: FoodCategory[];
   cuisines: FoodCategory[];
@@ -62,6 +64,7 @@ interface ViewModelContextType {
   foodItems: any[];
   cartItems: CartItem[];
   addToCart: (item: any) => void;
+  addMultipleToCart: (items: any[]) => void;
   removeFromCart: (itemId: string) => void;
   updateCartQuantity: (itemId: string, quantity: number) => void;
   clearCart: () => void;
@@ -84,6 +87,8 @@ interface ViewModelContextType {
     latitude: number;
     longitude: number;
   }) => void;
+  userOrders: any[];
+  refreshUserOrders: () => Promise<void>;
 }
 
 const ViewModelContext = createContext<ViewModelContextType | undefined>(undefined);
@@ -91,7 +96,7 @@ const ViewModelContext = createContext<ViewModelContextType | undefined>(undefin
 export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isBiometricsEnabled, setIsBiometricsEnabled] = useState(true);
-  const [authState, setAuthState] = useState<AuthState>({ type: 'Unauthenticated' });
+  const [authState, setAuthState] = useState<AuthState>({ type: 'Loading' });
 
   const categories = RestaurantRepository.getFoodCategories();
   const cuisines = RestaurantRepository.getCuisines();
@@ -111,6 +116,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [foodItems, setFoodItems] = useState<any[]>([]);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [userOrders, setUserOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Global currentLocation state
@@ -165,6 +171,17 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       } catch (err) {
         console.error("❌ [MainViewModel] Error loading stored addresses:", err);
       }
+      try {
+        const storedOrders = await AsyncStorage.getItem('@placed_orders_history');
+        if (storedOrders) {
+          const parsed = JSON.parse(storedOrders);
+          if (Array.isArray(parsed)) {
+            setUserOrders(parsed);
+          }
+        }
+      } catch (err) {
+        console.error("❌ [MainViewModel] Error loading stored orders:", err);
+      }
     };
     loadStoredData();
   }, []);
@@ -187,21 +204,76 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   };
 
-  // Get active session token from state or persisted auth
+  // Get active session token securely from hardware storage or state
   const getActiveToken = async (): Promise<string | undefined> => {
     if (authState.type === 'Authenticated' && authState.sessionToken) {
       return authState.sessionToken;
     }
     try {
+      const secToken = await SecureStorage.getSessionToken();
+      if (secToken) return secToken;
       const stored = await AsyncStorage.getItem('@auth_state');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed?.type === 'Authenticated' && parsed?.sessionToken) {
+        if (parsed?.sessionToken) {
           return parsed.sessionToken;
         }
       }
     } catch {}
     return undefined;
+  };
+
+  // Fetch user order history
+  const refreshUserOrders = async () => {
+    try {
+      let localOrders: any[] = [];
+      const localData = await AsyncStorage.getItem('@placed_orders_history');
+      if (localData) {
+        try {
+          const parsed = JSON.parse(localData);
+          if (Array.isArray(parsed)) localOrders = parsed;
+        } catch (e) {}
+      }
+
+      let remoteOrders: any[] = [];
+      const userId = authState.type === 'Authenticated' ? ((authState as any).userId || (authState as any).user?.id) : null;
+      const sessionToken = await getActiveToken();
+
+      if (userId && sessionToken) {
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/orders/${userId}/user-orders`, {
+            headers: { Authorization: `Bearer ${sessionToken}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.orders && Array.isArray(data.orders)) {
+              remoteOrders = data.orders;
+            }
+          }
+        } catch (e) {
+          console.warn('[MainViewModel] Error fetching user orders:', e);
+        }
+      }
+
+      const mergedMap = new Map<string, any>();
+      localOrders.forEach(o => {
+        if (o && (o.id || o.orderId)) mergedMap.set(o.id || o.orderId, o);
+      });
+      remoteOrders.forEach(o => {
+        if (o && (o.id || o.orderId)) mergedMap.set(o.id || o.orderId, o);
+      });
+
+      const combined = Array.from(mergedMap.values()).sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.date || 0).getTime();
+        const timeB = new Date(b.createdAt || b.date || 0).getTime();
+        return timeB - timeA;
+      });
+
+      setUserOrders(combined);
+      await AsyncStorage.setItem('@placed_orders_history', JSON.stringify(combined));
+    } catch (err) {
+      console.warn('[MainViewModel] Error in refreshUserOrders:', err);
+    }
   };
 
   // Fetch addresses from PostgreSQL backend
@@ -423,18 +495,29 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   useEffect(() => {
     const loadStoredAuthAndData = async () => {
       try {
+        const secToken = await SecureStorage.getSessionToken();
         const stored = await AsyncStorage.getItem('@auth_state');
         if (stored) {
           const parsed = JSON.parse(stored);
           if (parsed && parsed.type === 'Authenticated') {
-            setAuthState(parsed);
-            if (parsed.sessionToken) {
-              fetchServerAddresses(parsed.sessionToken);
+            const tokenToUse = secToken || parsed.sessionToken || '';
+            const restoredAuth: AuthState = {
+              ...parsed,
+              sessionToken: tokenToUse,
+            };
+            setAuthState(restoredAuth);
+            if (tokenToUse) {
+              fetchServerAddresses(tokenToUse);
             }
+          } else {
+            setAuthState({ type: 'Unauthenticated' });
           }
+        } else {
+          setAuthState({ type: 'Unauthenticated' });
         }
       } catch (err) {
-        console.error("❌ [MainViewModel] Error loading persisted auth:", err);
+        console.warn("[MainViewModel] Error loading persisted auth:", err);
+        setAuthState({ type: 'Unauthenticated' });
       }
       try {
         const cachedRes = await AsyncStorage.getItem('@all_restaurants');
@@ -449,7 +532,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
           setFoodItems(JSON.parse(cachedFoods));
         }
       } catch (err) {
-        console.error("❌ [MainViewModel] Error loading cached data:", err);
+        console.warn("[MainViewModel] Error loading cached data:", err);
       }
       await loadData();
     };
@@ -465,13 +548,11 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         allRestaurants.some(r => r.id === item.restaurantId)
       );
       if (validCartItems.length !== cartItems.length) {
-        console.log("🧹 [MainViewModel] Cleaning up invalid cart items for deleted/inactive restaurants");
         setCartItems(validCartItems);
         saveCartItems(validCartItems);
       }
     } else {
       if (cartItems.length > 0) {
-        console.log("🧹 [MainViewModel] Cleaning up all cart items since no restaurants exist");
         setCartItems([]);
         saveCartItems([]);
       }
@@ -480,80 +561,38 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
 
   // Dynamically calculate distance and deliveryTime metrics for all restaurants relative to currentLocation
   useEffect(() => {
-    const calculateMetrics = async () => {
-      if (allRestaurants.length === 0) {
-        setAllRestaurantsWithMetrics([]);
-        return;
+    if (allRestaurants.length === 0) {
+      setAllRestaurantsWithMetrics([]);
+      return;
+    }
+
+    const userLat = currentLocation.latitude;
+    const userLng = currentLocation.longitude;
+
+    // Fast, lightweight 0ms local Haversine distance and delivery ETA
+    const calculatedList = allRestaurants.map(r => {
+      if (!r.latitude || !r.longitude) {
+        return { ...r, distance: 1.2, deliveryTime: 30 };
       }
+      
+      const dLat = (r.latitude - userLat) * Math.PI / 180;
+      const dLon = (r.longitude - userLng) * Math.PI / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(userLat * Math.PI / 180) * Math.cos(r.latitude * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const dist = 6371 * c;
+      const eta = Math.round(15 + dist * 3); // 15m kitchen prep + 3m per km transit
+      
+      return {
+        ...r,
+        distance: Number(dist.toFixed(1)),
+        deliveryTime: eta
+      };
+    });
 
-      const userLat = currentLocation.latitude;
-      const userLng = currentLocation.longitude;
-
-      // 1. Calculate fallback metrics immediately using Haversine
-      const initialList = allRestaurants.map(r => {
-        if (!r.latitude || !r.longitude) {
-          return { ...r, distance: 1.2, deliveryTime: 30 };
-        }
-        
-        // Haversine formula
-        const dLat = (r.latitude - userLat) * Math.PI / 180;
-        const dLon = (r.longitude - userLng) * Math.PI / 180;
-        const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(userLat * Math.PI / 180) * Math.cos(r.latitude * Math.PI / 180) *
-          Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const dist = 6371 * c;
-        const eta = Math.round(15 + dist * 3); // 15m prep + 3m per km
-        
-        return {
-          ...r,
-          distance: Number(dist.toFixed(1)),
-          deliveryTime: eta
-        };
-      });
-
-      setAllRestaurantsWithMetrics(initialList);
-
-      // 2. Fetch live metrics from Ola Maps directions API in the background
-      try {
-        const updatedList = await Promise.all(
-          initialList.map(async (r) => {
-            if (!r.latitude || !r.longitude) return r;
-            try {
-              const url = `https://api.olamaps.io/routing/v1/directions?origin=${r.latitude},${r.longitude}&destination=${userLat},${userLng}&api_key=${OLA_MAPS_API_KEY}`;
-              const res = await fetch(url, {
-                method: 'POST',
-                headers: {
-                  'X-Request-Id': `req-${Date.now()}`
-                }
-              });
-              if (res.ok) {
-                const data = await res.json();
-                if (data.routes && data.routes.length > 0 && data.routes[0].legs && data.routes[0].legs.length > 0) {
-                  const leg = data.routes[0].legs[0];
-                  const apiDistanceKm = Number((leg.distance / 1000).toFixed(1));
-                  const apiEta = Math.round(15 + (leg.duration / 60));
-                  return {
-                    ...r,
-                    distance: apiDistanceKm,
-                    deliveryTime: apiEta
-                  };
-                }
-              }
-            } catch (err) {
-              console.warn(`[MainViewModel] Ola directions query failed for ${r.name}:`, err);
-            }
-            return r;
-          })
-        );
-        setAllRestaurantsWithMetrics(updatedList);
-      } catch (err) {
-        console.warn("[MainViewModel] Batch Ola routing queries failed:", err);
-      }
-    };
-
-    calculateMetrics();
+    setAllRestaurantsWithMetrics(calculatedList);
   }, [allRestaurants, currentLocation.latitude, currentLocation.longitude]);
 
   // Compute live combined flows for restaurants and favorites list (mimicking Kotlin Flow structure)
@@ -650,8 +689,12 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         userId: data?.user?.id,
       };
 
+      if (token) {
+        await SecureStorage.setSessionToken(token);
+      }
       setAuthState(authenticatedState);
-      await AsyncStorage.setItem('@auth_state', JSON.stringify(authenticatedState));
+      const safeAuthState = { ...authenticatedState, sessionToken: '' };
+      await AsyncStorage.setItem('@auth_state', JSON.stringify(safeAuthState));
     } catch (error: any) {
       setAuthState({ type: 'Unauthenticated' });
       throw error;
@@ -659,31 +702,28 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   };
 
   const sendOtp = async (phone: string) => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/customer/auth/send-otp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ phone }),
-      });
+    const response = await fetch(`${BACKEND_URL}/api/customer/auth/send-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ phone }),
+    });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Failed to send OTP');
-      }
-    } catch (error) {
-      console.error("❌ [MainViewModel] sendOtp error:", error);
-      throw error;
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || 'Failed to send OTP. Please check the number and try again.');
     }
   };
 
   const setAuthenticatedState = async (state: AuthState) => {
-    setAuthState(state);
-    await AsyncStorage.setItem('@auth_state', JSON.stringify(state));
     if (state.type === 'Authenticated' && state.sessionToken) {
+      await SecureStorage.setSessionToken(state.sessionToken);
       fetchServerAddresses(state.sessionToken);
     }
+    setAuthState(state);
+    const safeAuthState = state.type === 'Authenticated' ? { ...state, sessionToken: '' } : state;
+    await AsyncStorage.setItem('@auth_state', JSON.stringify(safeAuthState));
   };
 
   const verifyOtp = async (phone: string, otp: string): Promise<AuthState> => {
@@ -699,7 +739,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'OTP Verification failed');
+        throw new Error(errorData.message || 'Invalid or expired OTP. Please try again.');
       }
 
       const data = await response.json();
@@ -717,11 +757,13 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         userId: data?.user?.id,
       };
 
-      setAuthState(authenticatedState);
-      await AsyncStorage.setItem('@auth_state', JSON.stringify(authenticatedState));
       if (token) {
+        await SecureStorage.setSessionToken(token);
         fetchServerAddresses(token);
       }
+      setAuthState(authenticatedState);
+      const safeAuthState = { ...authenticatedState, sessionToken: '' };
+      await AsyncStorage.setItem('@auth_state', JSON.stringify(safeAuthState));
       return authenticatedState;
     } catch (error: any) {
       setAuthState({ type: 'Unauthenticated' });
@@ -732,10 +774,33 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   const logout = async () => {
     setAuthState({ type: 'Unauthenticated' });
     try {
+      await SecureStorage.purgeAllCredentials();
       await AsyncStorage.removeItem('@auth_state');
     } catch (err) {
-      console.error("❌ [MainViewModel] Error clearing persisted auth:", err);
+      console.warn("[MainViewModel] Error clearing persisted auth:", err);
     }
+  };
+
+  const deleteAccount = async (): Promise<void> => {
+    const token = await getActiveToken();
+    if (token) {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/users/me`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!res.ok && res.status !== 404) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || 'Failed to delete account on server. Please try again later.');
+        }
+      } catch (e: any) {
+        console.warn('[MainViewModel] Account deletion backend request notice:', e);
+      }
+    }
+    await logout();
   };
 
   const updateProfile = (name: string, email: string) => {
@@ -776,7 +841,21 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     setProfileImageUri(uri);
   };
 
+  const normalizeRupeePrice = (raw: any): number => {
+    let num = typeof raw === 'number' ? raw : (parseFloat(String(raw || 0)) || 0);
+    if (isNaN(num) || num <= 0) return 0;
+    if (num >= 1000 && num % 100 === 0) {
+      num = num / 100;
+    } else if (num >= 2000) {
+      num = num / 100;
+    }
+    return Math.round(num);
+  };
+
   const addToCart = (item: any) => {
+    const qtyToAdd = typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1;
+    const resolvedPrice = normalizeRupeePrice(item.price);
+
     if (cartItems.length > 0 && cartItems[0].restaurantId !== item.restaurantId) {
       const currentRestro = cartItems[0].restaurantName || 'another restaurant';
       Alert.alert(
@@ -790,14 +869,15 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
               const newItem: CartItem = {
                 id: item.id,
                 name: item.name,
-                price: item.price,
-                quantity: 1,
+                price: resolvedPrice,
+                quantity: qtyToAdd,
                 image: item.image,
-                isVeg: item.isVeg,
+                isVeg: item.isVeg ?? false,
                 description: item.description || '',
                 restaurantId: item.restaurantId,
                 restaurantName: item.restaurantName || '',
                 variantId: item.variantId || null,
+                customization: item.customization || undefined,
               };
               setCartItems([newItem]);
               saveCartItems([newItem]);
@@ -810,25 +890,90 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       let updated: CartItem[];
       if (existingIndex > -1) {
         updated = [...cartItems];
-        updated[existingIndex].quantity += 1;
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          price: resolvedPrice > 0 ? resolvedPrice : updated[existingIndex].price,
+          quantity: updated[existingIndex].quantity + qtyToAdd,
+        };
       } else {
         const newItem: CartItem = {
           id: item.id,
           name: item.name,
-          price: item.price,
-          quantity: 1,
+          price: resolvedPrice,
+          quantity: qtyToAdd,
           image: item.image,
-          isVeg: item.isVeg,
+          isVeg: item.isVeg ?? false,
           description: item.description || '',
           restaurantId: item.restaurantId,
           restaurantName: item.restaurantName || '',
           variantId: item.variantId || null,
+          customization: item.customization || undefined,
         };
         updated = [...cartItems, newItem];
       }
       setCartItems(updated);
       saveCartItems(updated);
     }
+  };
+
+  const addMultipleToCart = (items: any[]) => {
+    if (!items || items.length === 0) return;
+    const restId = items[0].restaurantId;
+    const restName = items[0].restaurantName || '';
+
+    const formattedNewItems: CartItem[] = items.map(it => {
+      const resolvedPrice = normalizeRupeePrice(it.price);
+      const qty = typeof it.quantity === 'number' && it.quantity > 0 ? it.quantity : 1;
+      return {
+        id: it.id,
+        name: it.name,
+        price: resolvedPrice,
+        quantity: qty,
+        image: it.image,
+        isVeg: it.isVeg ?? false,
+        description: it.description || '',
+        restaurantId: restId,
+        restaurantName: restName,
+        variantId: it.variantId || null,
+        customization: it.customization || undefined,
+      };
+    });
+
+    if (cartItems.length > 0 && cartItems[0].restaurantId !== restId) {
+      const currentRestro = cartItems[0].restaurantName || 'another restaurant';
+      Alert.alert(
+        "Replace cart items?",
+        `Your cart contains items from ${currentRestro}. Do you want to discard them and add ${formattedNewItems.length} item(s) from ${restName || 'this restaurant'}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Replace",
+            onPress: () => {
+              setCartItems(formattedNewItems);
+              saveCartItems(formattedNewItems);
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    // Merge atomically with existing cart items
+    const updated = [...cartItems];
+    formattedNewItems.forEach(newItem => {
+      const existingIdx = updated.findIndex(i => i.id === newItem.id);
+      if (existingIdx > -1) {
+        updated[existingIdx] = {
+          ...updated[existingIdx],
+          quantity: updated[existingIdx].quantity + newItem.quantity,
+        };
+      } else {
+        updated.push(newItem);
+      }
+    });
+
+    setCartItems(updated);
+    saveCartItems(updated);
   };
 
   const removeFromCart = (itemId: string) => {
@@ -888,7 +1033,6 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         })),
         status: "placed"
       };
-      console.log("🛒 [MainViewModel] Placing order:", JSON.stringify(body));
       const response = await fetch(`${BACKEND_URL}/api/orders/make-order`, {
         method: 'POST',
         headers: {
@@ -924,6 +1068,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         verifyOtp,
         setAuthenticatedState,
         logout,
+        deleteAccount,
         categories,
         cuisines,
         searchQuery,
@@ -947,6 +1092,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         updateProfile,
         cartItems,
         addToCart,
+        addMultipleToCart,
         removeFromCart,
         updateCartQuantity,
         clearCart,
@@ -959,6 +1105,8 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         isLoading,
         currentLocation,
         setCurrentLocation: updateCurrentLocation,
+        userOrders,
+        refreshUserOrders,
       }}
     >
       {children}

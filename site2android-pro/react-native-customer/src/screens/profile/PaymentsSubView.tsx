@@ -164,15 +164,7 @@ export const PaymentsSubView: React.FC<PaymentsSubViewProps> = ({
   const [activeTab, setActiveTab] = useState<'myquro' | 'mart'>('myquro');
 
   // Saved Cards
-  const [savedCards, setSavedCards] = useState<SavedCard[]>([
-    {
-      id: 'card_1',
-      name: 'Yash',
-      number: '•••• 0484',
-      exp: '08/29',
-      brand: 'visa',
-    },
-  ]);
+  const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
 
   // Wallet Link states
   const [linkedWallets, setLinkedWallets] = useState<{ [key: string]: boolean }>({
@@ -195,7 +187,7 @@ export const PaymentsSubView: React.FC<PaymentsSubViewProps> = ({
   const [cardCvv, setCardCvv] = useState('');
 
   // UPI Form State
-  const [upiId, setUpiId] = useState('yash@okhdfcbank');
+  const [upiId, setUpiId] = useState('');
 
   // Load persisted cards from storage
   useEffect(() => {
@@ -205,17 +197,7 @@ export const PaymentsSubView: React.FC<PaymentsSubViewProps> = ({
         if (stored) {
           setSavedCards(JSON.parse(stored));
         } else {
-          const initialCards: SavedCard[] = [
-            {
-              id: 'card_default_1',
-              name: 'Yash',
-              number: '•••• 0484',
-              exp: '08/29',
-              brand: 'visa',
-            },
-          ];
-          setSavedCards(initialCards);
-          await AsyncStorage.setItem('@myquro_saved_cards', JSON.stringify(initialCards));
+          setSavedCards([]);
         }
 
         const storedWallets = await AsyncStorage.getItem('@myquro_linked_wallets');

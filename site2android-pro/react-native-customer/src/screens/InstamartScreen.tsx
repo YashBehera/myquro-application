@@ -53,7 +53,7 @@ export const InstamartScreen: React.FC<InstamartScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ── TOP FLOATING HEADER ── */}
-      <View style={[styles.headerRow, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.headerRow, { paddingTop: 10 }]}>
         <View style={styles.headerLeftWrap}>
           {/* Gold Border Circular Back Button */}
           <TouchableOpacity

@@ -320,7 +320,7 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent={true} />
 
       {/* ── TOP FLOATING BACK & SEARCH BUTTONS OVERLAY ── */}
-      <View style={[styles.floatingHeader, { top: Math.max(insets.top, 14) }]}>
+      <View style={[styles.floatingHeader, { top: 12 }]}>
         <TouchableOpacity
           style={styles.circleBtn}
           activeOpacity={0.8}
@@ -350,8 +350,8 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
           style={[
             styles.heroImageContainer,
             {
-              paddingTop: Math.max(insets.top, 14) + 38,
-              height: SCREEN_WIDTH / config.aspectRatio + Math.max(insets.top, 14) + 20,
+              paddingTop: 42,
+              height: SCREEN_WIDTH / config.aspectRatio + 24,
             },
           ]}
         >

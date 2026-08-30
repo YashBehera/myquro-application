@@ -138,7 +138,7 @@ export const ALL_COUPONS: SimCoupon[] = [
     ],
   },
   {
-    code: 'MYQUROONE',
+    code: 'MYQURO',
     badge: '₹50 OFF',
     discount: 50,
     minOrder: 249,
@@ -146,9 +146,9 @@ export const ALL_COUPONS: SimCoupon[] = [
     discountValue: 50,
     maxDiscount: 50,
     benefitHighlight: 'Get Flat ₹50 off',
-    description: 'Exclusive benefit for My Quro One Gold Members on orders above ₹249.',
+    description: 'Exclusive benefit for MyQURO Gold Members on orders above ₹249.',
     terms: [
-      'Active My Quro One membership required',
+      'Active MyQURO membership required',
       'Flat ₹50 savings on food total above ₹249',
     ],
   },

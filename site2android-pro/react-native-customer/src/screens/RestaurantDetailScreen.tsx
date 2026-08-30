@@ -83,6 +83,7 @@ const imgBackground3  = require('../assets/restaurant_detail/figma/imgBackground
 const imgImage16      = require('../assets/restaurant_detail/figma/imgImage16.png'); // Scooter Graphic
 const imgImage15      = require('../assets/restaurant_detail/figma/imgImage15.png'); // Search Glass
 const imgBackground2  = require('../assets/restaurant_detail/figma/imgBackground2.png');  // Search divider
+const quroBadgeImg     = require('../assets/images/quro_badge.png');                        // QURO Gold Badge
 const imgImage14      = require('../assets/restaurant_detail/figma/imgImage14.png'); // Yellow Mic
 const imgImage13      = require('../assets/restaurant_detail/figma/imgImage13.png'); // VEG Green Dot
 const imgImage12      = require('../assets/restaurant_detail/figma/imgImage12.png'); // NON-VEG Red Triangle
@@ -792,7 +793,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
             </View>
 
             <View style={styles.oneGoldBadge}>
-              <Text style={styles.oneGoldBadgeText}>one</Text>
+              <Image source={quroBadgeImg} style={styles.quroDetailBadgeImg} resizeMode="contain" />
             </View>
           </View>
         </View>
@@ -1870,17 +1871,16 @@ const styles = StyleSheet.create({
     color: '#C1C1C1',
   },
   oneGoldBadge: {
-    backgroundColor: '#D59D2C',
+    backgroundColor: 'rgba(14, 11, 6, 0.8)',
     borderWidth: 1,
-    borderColor: '#E5A82D',
+    borderColor: 'rgba(212, 175, 55, 0.45)',
     borderRadius: 8 * SCALE,
-    paddingHorizontal: 10 * SCALE,
-    paddingVertical: 2.5 * SCALE,
+    paddingHorizontal: 7 * SCALE,
+    paddingVertical: 3 * SCALE,
   },
-  oneGoldBadgeText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 13 * SCALE,
-    color: '#34230B',
+  quroDetailBadgeImg: {
+    width: 44 * SCALE,
+    height: 15 * SCALE,
   },
 
   // ── 3 & 4. STICKY SEARCH BAR + FILTER PILLS COMBINED WRAPPER ───

@@ -14,9 +14,9 @@ import { useViewModel } from '../state/MainViewModel';
 
 const { width, height } = Dimensions.get('window');
 
-// Exact Figma dimensions (Node 3061:118: 342 x 283)
-const LOGO_WIDTH = Math.round(Math.min(width * 0.48, 200));
-const LOGO_HEIGHT = Math.round(LOGO_WIDTH * (283 / 342));
+// High-impact Hero Logo dimensions (Significantly taller height presence)
+const LOGO_WIDTH = Math.round(Math.min(width * 0.88, 380));
+const LOGO_HEIGHT = Math.round(Math.min(height * 0.36, 290));
 
 interface SplashScreenProps {
   onAnimationEnd: () => void;
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: height * 0.09,
+    marginBottom: height * 0.04,
   },
   logoAnimatedBox: {
     width: LOGO_WIDTH,

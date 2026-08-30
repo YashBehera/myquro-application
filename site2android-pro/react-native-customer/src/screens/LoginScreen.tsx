@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -45,12 +45,24 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [otpError, setOtpError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [verifiedState, setVerifiedState] = useState<any>(null);
+  const [cooldown, setCooldown] = useState(0);
 
   const otpInputRef = useRef<TextInput>(null);
 
+  useEffect(() => {
+    let timer: any;
+    if (cooldown > 0) {
+      timer = setInterval(() => {
+        setCooldown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
   const handleSendOtp = async () => {
+    if (isLoading) return;
     if (phone.length < 10) {
-      Alert.alert("Error", "Please enter a valid 10-digit mobile number");
+      Alert.alert("Invalid Phone Number", "Please enter a valid 10-digit mobile number");
       return;
     }
     setIsLoading(true);
@@ -58,15 +70,36 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     try {
       const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
       await sendOtp(fullPhone);
+      setAuthMode("otp");
+      setCooldown(30);
     } catch (error: any) {
-      console.log("ℹ️ [LoginScreen] Send OTP fallback:", error);
+      Alert.alert(
+        "Could Not Send OTP",
+        error.message || "Unable to send verification code. Please check your network connection and try again."
+      );
     } finally {
       setIsLoading(false);
-      setAuthMode("otp");
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (cooldown > 0 || isLoading) return;
+    setIsLoading(true);
+    setOtpError(null);
+    try {
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      await sendOtp(fullPhone);
+      setCooldown(30);
+      Alert.alert("OTP Resent", `A new 6-digit code has been sent to +91 ${phone}`);
+    } catch (error: any) {
+      setOtpError(error.message || "Failed to resend OTP. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleVerifyOtp = async (otpCode: string) => {
+    if (isLoading) return;
     if (otpCode.length < 6) {
       setOtpError("Please enter a 6-digit OTP");
       return;
@@ -463,18 +496,39 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
                   {otpError && <Text style={styles.errorText}>{otpError}</Text>}
 
-                  <TouchableOpacity
-                    onPress={() => {
-                      setAuthMode("phone");
-                      setOtp("");
-                      setOtpError(null);
-                    }}
-                    style={styles.changePhoneBtn}
-                  >
-                    <Text style={styles.changePhoneText}>
-                      Change phone number
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={styles.otpActionsRow}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setAuthMode("phone");
+                        setOtp("");
+                        setOtpError(null);
+                      }}
+                      style={styles.changePhoneBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Change phone number"
+                    >
+                      <Text style={styles.changePhoneText}>
+                        Change phone number
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={handleResendOtp}
+                      disabled={cooldown > 0 || isLoading}
+                      style={styles.resendOtpBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Resend OTP code"
+                    >
+                      <Text
+                        style={[
+                          styles.resendOtpText,
+                          cooldown > 0 && styles.resendOtpTextDisabled,
+                        ]}
+                      >
+                        {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend OTP"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
                   {/* Action Verify Button */}
                   <TouchableOpacity
@@ -751,14 +805,32 @@ const styles = StyleSheet.create({
     fontFamily: "Urbanist-Bold",
     color: "#e2e2e2",
   },
+  otpActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    marginBottom: 20 * scale,
+  },
   changePhoneBtn: {
-    alignSelf: "center",
-    marginBottom: 24 * scale,
+    paddingVertical: 6 * scale,
   },
   changePhoneText: {
     fontFamily: "Urbanist-SemiBold",
-    fontSize: 14 * scale,
+    fontSize: 13.5 * scale,
     color: "#f2ca50",
+  },
+  resendOtpBtn: {
+    paddingVertical: 6 * scale,
+  },
+  resendOtpText: {
+    fontFamily: "Urbanist-Bold",
+    fontSize: 13.5 * scale,
+    color: "#deb853",
+  },
+  resendOtpTextDisabled: {
+    color: "rgba(255, 255, 255, 0.4)",
+    fontFamily: "Urbanist-Medium",
   },
   errorText: {
     color: "#ef4444",

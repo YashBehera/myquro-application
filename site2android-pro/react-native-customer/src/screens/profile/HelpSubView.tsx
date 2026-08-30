@@ -30,7 +30,7 @@ export const HelpSubView: React.FC<HelpSubViewProps> = ({ isDarkMode, onBack }) 
     { q: 'How can I track my live order?', a: 'You can check your order status directly from the Home screen or by visiting the My Orders tab in your profile dashboard.' },
     { q: 'Can I cancel my order after placing it?', a: 'Orders can only be cancelled within 60 seconds of placement. After that, kitchens begin preparation, and cancellation charges may apply.' },
     { q: 'My payment was deducted, but order failed.', a: 'Do not worry! In such cases, the bank usually reverts the amount within 3-5 business days. You can also write to us for instant verification.' },
-    { q: 'What is MyQuro ONE benefits details?', a: 'MyQuro ONE is our premium membership that offers free deliveries, high-tier dining discounts, and fast culinary preparations.' },
+    { q: 'What is MyQURO membership benefits details?', a: 'MyQURO is our premium membership that offers free deliveries, high-tier dining discounts, and fast culinary preparations.' },
   ];
 
   const toggleFaq = (index: number) => {

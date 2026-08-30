@@ -7,7 +7,9 @@ import {
   TouchableOpacity,
   Alert,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ArrowLeft, ChevronRight } from 'lucide-react-native';
 import { scale } from './profileUtils';
 
@@ -15,22 +17,72 @@ interface SettingsSubViewProps {
   onBack: () => void;
   showToast: (msg: string) => void;
   logout: () => void;
+  deleteAccount?: () => Promise<void>;
 }
 
 export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
   onBack,
   showToast,
   logout,
+  deleteAccount,
 }) => {
   const [settingsWhatsappEnabled, setSettingsWhatsappEnabled] = useState(true);
   const [settingsCacheSize, setSettingsCacheSize] = useState('2.41 MB');
+  const [isDeleting, setIsDeleting] = useState(false);
   const settingsSmsEnabled = true;
+
+  const handleClearCache = async () => {
+    try {
+      await AsyncStorage.multiRemove([
+        '@all_food_items',
+        '@placed_orders_history',
+      ]);
+      setSettingsCacheSize('0.00 KB');
+      showToast('Cache cleared successfully');
+    } catch (e) {
+      showToast('Failed to clear cache');
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to permanently delete your MyQuro account and all personal data? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            setIsDeleting(true);
+            try {
+              if (deleteAccount) {
+                await deleteAccount();
+              } else {
+                logout();
+              }
+              showToast('Account deleted successfully');
+            } catch (err: any) {
+              Alert.alert('Deletion Failed', err.message || 'Unable to delete account at this time. Please try again.');
+            } finally {
+              setIsDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <View style={styles.favContainer}>
       {/* Header */}
       <View style={styles.favHeader}>
-        <TouchableOpacity onPress={onBack} style={styles.favHeaderBackBtn}>
+        <TouchableOpacity
+          onPress={onBack}
+          style={styles.favHeaderBackBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Back to Profile"
+        >
           <ArrowLeft size={22} color="#eae1d4" />
         </TouchableOpacity>
         <Text style={styles.settingsHeaderTitle}>Settings</Text>
@@ -56,6 +108,8 @@ export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
             onPress={() => {
               showToast('Order related SMS cannot be disabled');
             }}
+            accessibilityRole="switch"
+            accessibilityLabel="SMS notifications"
             style={[styles.settingsToggleContainer, settingsSmsEnabled ? styles.settingsToggleActive : styles.settingsToggleInactive]}
           >
             <View style={[styles.settingsToggleCircle, settingsSmsEnabled ? styles.settingsToggleCircleActive : styles.settingsToggleCircleInactive]} />
@@ -68,6 +122,8 @@ export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
           <TouchableOpacity
             activeOpacity={0.8}
             onPress={() => setSettingsWhatsappEnabled(!settingsWhatsappEnabled)}
+            accessibilityRole="switch"
+            accessibilityLabel="WhatsApp notifications"
             style={[styles.settingsToggleContainer, settingsWhatsappEnabled ? styles.settingsToggleActive : styles.settingsToggleInactive]}
           >
             <View style={[styles.settingsToggleCircle, settingsWhatsappEnabled ? styles.settingsToggleCircleActive : styles.settingsToggleCircleInactive]} />
@@ -85,6 +141,8 @@ export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
             style={styles.settingsCardItem}
             activeOpacity={0.7}
             onPress={() => showToast('App icon customization coming soon')}
+            accessibilityRole="button"
+            accessibilityLabel="Change App Icon"
           >
             <Text style={styles.settingsCardLabel}>Change App Icon</Text>
             <ChevronRight size={18} color="#d4af37" />
@@ -97,10 +155,9 @@ export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
           <TouchableOpacity
             style={styles.settingsCardItem}
             activeOpacity={0.7}
-            onPress={() => {
-              setSettingsCacheSize('0.00 KB');
-              showToast('Cache cleared successfully');
-            }}
+            onPress={handleClearCache}
+            accessibilityRole="button"
+            accessibilityLabel="Clear Cache"
           >
             <Text style={styles.settingsCardLabel}>Clear Cache</Text>
             <Text style={styles.settingsCardValue}>{settingsCacheSize}</Text>
@@ -113,27 +170,18 @@ export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
           <TouchableOpacity
             style={styles.settingsCardItem}
             activeOpacity={0.7}
-            onPress={() => {
-              Alert.alert(
-                'Delete Account',
-                'Are you sure you want to delete your Quro account? This action is permanent and cannot be undone.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: () => {
-                      logout();
-                      showToast('Account deleted successfully');
-                    }
-                  }
-                ]
-              );
-            }}
+            disabled={isDeleting}
+            onPress={handleDeleteAccount}
+            accessibilityRole="button"
+            accessibilityLabel="Delete My Quro Account"
           >
-            <Text style={[styles.settingsCardLabel, { color: '#ff5a5a', fontFamily: 'Urbanist-Bold' }]}>
-              Delete My Quro Account
-            </Text>
+            {isDeleting ? (
+              <ActivityIndicator color="#ff5a5a" size="small" />
+            ) : (
+              <Text style={[styles.settingsCardLabel, { color: '#ff5a5a', fontFamily: 'Urbanist-Bold' }]}>
+                Delete My Quro Account
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       </ScrollView>

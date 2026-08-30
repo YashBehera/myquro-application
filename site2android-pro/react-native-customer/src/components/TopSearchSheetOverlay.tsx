@@ -21,8 +21,10 @@ import {
   RotateCcw,
   X,
   ChevronRight,
+  Star,
 } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
+import { Restaurant } from '../types';
 import {
   SCALE,
   scale,
@@ -43,30 +45,31 @@ interface TopSearchSheetOverlayProps {
 
 const DEFAULT_RECENT_SEARCHES = [
   'Ama Garden',
-  'Krishna Florist',
-  'FNP Flowers',
-  'Ornate- The Flower',
-  'Capital Flowers',
+  'Biryani',
+  'Pizza',
+  'Burgers',
   'Apna Dhaba',
+  'KFC',
+  'Rolls',
 ];
 
 // Helper function to render text with matching query highlighted in bold gold
-const renderBoldedText = (text: string, query: string) => {
-  if (!query.trim()) {
-    return <Text style={styles.boldTextMatch}>{text}</Text>;
+const renderHighlightedText = (text: string, currentQuery: string) => {
+  if (!currentQuery.trim()) {
+    return <Text style={styles.dishNameText}>{text}</Text>;
   }
 
-  const regex = new RegExp(`(${query.trim().replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
+  const regex = new RegExp(`(${currentQuery.trim().replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi');
   const parts = text.split(regex);
 
   return (
-    <Text style={styles.boldTextContainer}>
-      {parts.map((part, index) => {
-        const isMatch = part.toLowerCase() === query.toLowerCase().trim();
+    <Text style={styles.dishNameText} numberOfLines={1}>
+      {parts.map((part, idx) => {
+        const isMatch = part.toLowerCase() === currentQuery.toLowerCase().trim();
         return (
           <Text
-            key={index}
-            style={isMatch ? styles.matchHighlightText : styles.normalPartText}
+            key={idx}
+            style={isMatch ? styles.highlightGoldText : styles.normalWhiteText}
           >
             {part}
           </Text>
@@ -146,98 +149,124 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
     });
   };
 
-  const handleChipPress = (item: string) => {
-    setQuery(item);
-    const matchedRes = allRestaurants.find(
-      (r) => r.name.toLowerCase() === item.toLowerCase()
-    );
-    if (matchedRes && onSelectRestaurant) {
+  const handleExecuteSearch = (searchTerm: string) => {
+    const cleanTerm = searchTerm.trim();
+    if (!cleanTerm) return;
+    
+    if (!recentSearches.includes(cleanTerm)) {
+      setRecentSearches([cleanTerm, ...recentSearches.filter(s => s.toLowerCase() !== cleanTerm.toLowerCase()).slice(0, 6)]);
+    }
+
+    if (onNavigateToSearchScreen) {
       onClose();
-      onSelectRestaurant(matchedRes.id);
-    } else if (onNavigateToSearchScreen) {
-      onClose();
-      onNavigateToSearchScreen(item);
+      onNavigateToSearchScreen(cleanTerm);
+    } else if (onSelectRestaurant) {
+      const matchedRes = allRestaurants.find(
+        (r) => r.name.toLowerCase() === cleanTerm.toLowerCase()
+      );
+      if (matchedRes) {
+        onClose();
+        onSelectRestaurant(matchedRes.id);
+      }
     }
   };
 
   const handleSubmitSearch = () => {
-    if (!query.trim()) return;
-    if (!recentSearches.includes(query.trim())) {
-      setRecentSearches([query.trim(), ...recentSearches.slice(0, 5)]);
-    }
-    const matchedRes = allRestaurants.find(
-      (r) => r.name.toLowerCase() === query.trim().toLowerCase()
-    );
-    if (matchedRes && onSelectRestaurant) {
-      onClose();
-      onSelectRestaurant(matchedRes.id);
-    } else if (onNavigateToSearchScreen) {
-      onClose();
-      onNavigateToSearchScreen(query.trim());
-    }
+    handleExecuteSearch(query);
   };
 
-  // Autocomplete suggestions mapping matching dishes, categories, and restaurants
-  const autocompleteSuggestions = React.useMemo(() => {
-    if (!query.trim()) return [];
+  // 1. Primary Top Suggestion Card (Requires minimum 3 letters)
+  const firstSuggestion = React.useMemo(() => {
+    if (query.trim().length < 3) return null;
     const q = query.toLowerCase().trim();
 
-    const matches: Array<{
-      id: string;
-      name: string;
-      subtitle: string;
-      image: string;
-      type: 'restaurant' | 'dish' | 'category';
-      obj?: any;
-    }> = [];
+    // Check category match
+    const cat = categories.find((c) => c.name.toLowerCase().includes(q));
+    if (cat) {
+      return {
+        name: cat.name,
+        type: 'Dish',
+        image: cat.imageUrl || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&auto=format&fit=crop&q=60',
+        isCategory: true,
+      };
+    }
 
-    // Food items matching query
-    foodItems.forEach((food) => {
-      if (food.name.toLowerCase().includes(q)) {
-        matches.push({
-          id: `food_${food.id}`,
-          name: food.name,
-          subtitle: food.category?.toLowerCase().includes('meat') ? 'Now delivering Fresh Meat!' : 'Dish',
-          image: food.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=150&auto=format&fit=crop&q=60',
-          type: 'dish',
-          obj: food,
-        });
-      }
+    // Check dish match
+    const food = foodItems.find((f) => f.name && f.name.toLowerCase().includes(q));
+    if (food) {
+      return {
+        name: food.name,
+        type: 'Dish',
+        image: food.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&auto=format&fit=crop&q=60',
+        isDish: true,
+        foodObj: food,
+      };
+    }
+
+    // Check restaurant match
+    const res = allRestaurants.find((r) => r.name.toLowerCase().includes(q));
+    if (res) {
+      return {
+        name: res.name,
+        type: 'Restaurant',
+        image: res.image,
+        isRestaurant: true,
+        resObj: res,
+      };
+    }
+
+    return {
+      name: query.trim(),
+      type: 'Dish',
+      image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&auto=format&fit=crop&q=60',
+    };
+  }, [query, categories, foodItems, allRestaurants]);
+
+  // 2. Restaurants Relevant Section (Requires minimum 3 letters)
+  const relevantRestaurants = React.useMemo(() => {
+    if (query.trim().length < 3) return [];
+    const q = query.toLowerCase().trim();
+
+    const matches = allRestaurants.filter((res) => {
+      const cuisineStr = Array.isArray(res.cuisine)
+        ? res.cuisine.join(', ')
+        : typeof res.cuisine === 'string'
+          ? res.cuisine
+          : '';
+      const nameMatch = res.name.toLowerCase().includes(q) || cuisineStr.toLowerCase().includes(q);
+      const dishMatch = foodItems.some(
+        (food) =>
+          (String(food.restaurantId) === String(res.id) ||
+           (food.restaurantName && food.restaurantName.toLowerCase() === res.name.toLowerCase())) &&
+          food.name &&
+          food.name.toLowerCase().includes(q)
+      );
+      return nameMatch || dishMatch;
     });
 
-    // Restaurant matches
-    allRestaurants.forEach((res) => {
-      if (res.name.toLowerCase().includes(q)) {
-        matches.push({
-          id: `res_${res.id}`,
-          name: res.name,
-          subtitle: `Restaurant · ${res.cuisine || 'Multi-Cuisine'}`,
-          image: res.image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=150&auto=format&fit=crop&q=60',
-          type: 'restaurant',
-          obj: res,
-        });
-      }
-    });
+    return matches.slice(0, 6);
+  }, [query, allRestaurants, foodItems]);
 
-    // Category matches
-    categories.forEach((cat, idx) => {
-      if (cat.name.toLowerCase().includes(q)) {
-        matches.push({
-          id: `cat_${idx}_${cat.name}`,
-          name: cat.name,
-          subtitle: 'Category',
-          image: cat.imageUrl || 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=150&auto=format&fit=crop&q=60',
-          type: 'category',
-        });
-      }
-    });
+  // 3. More Results Matching Query (Dishes) (Requires minimum 3 letters)
+  const moreResults = React.useMemo(() => {
+    if (query.trim().length < 3) return [];
+    const q = query.toLowerCase().trim();
 
-    return matches.slice(0, 10);
-  }, [query, categories, allRestaurants, foodItems]);
+    const matchedDishes = foodItems.filter(
+      (food) => food.name && food.name.toLowerCase().includes(q)
+    );
+
+    // Filter out exact duplicate of first suggestion if it's identical
+    const filtered = matchedDishes.filter(
+      (food) => !(firstSuggestion?.name && firstSuggestion.name.toLowerCase() === food.name.toLowerCase())
+    );
+
+    return filtered.slice(0, 8);
+  }, [query, foodItems, firstSuggestion]);
 
   if (!visible) return null;
 
-  const isQueryActive = query.trim().length > 0;
+  const isQueryActive = query.trim().length >= 3;
 
   return (
     <View style={styles.modalOverlayContainer}>
@@ -256,72 +285,81 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
           { transform: [{ translateY: animY }] },
         ]}
       >
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#0E0D0B' }}>
-          {/* 1. TOP HEADER ROW */}
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0A08' }}>
+          
+          {/* 1. TOP HEADER ROW WITH "MY QURO" LOGO */}
           <View style={styles.topHeaderRow}>
             <TouchableOpacity
               style={styles.backBtn}
               onPress={handleClose}
               activeOpacity={0.7}
             >
-              <ArrowLeft size={20} color="#DEA430" strokeWidth={2.2} />
+              <ArrowLeft size={22} color="#FFFFFF" strokeWidth={2.4} />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>
-              Search for dishes & restaurants
-            </Text>
+            
+            <View style={styles.logoTitleContainer}>
+              <Text style={styles.myLogoText}>MY </Text>
+              <Text style={styles.quroLogoText}>QURO</Text>
+            </View>
+
+            <View style={{ width: 36 }} />
           </View>
 
-          {/* 2. SEARCH INPUT BOX */}
+          {/* 2. SEARCH INPUT BOX WITH GOLDEN OUTLINE */}
           <View style={styles.inputCardWrapper}>
             <View style={styles.inputInnerRow}>
-              {/* Gold Search Icon */}
-              <SearchIcon size={18} color="#DEA430" style={{ marginRight: 8 }} />
+              {/* Search Icon */}
+              <SearchIcon size={19} color="#9CA3AF" style={{ marginRight: 8 }} />
+              
               <TextInput
                 ref={inputRef}
                 style={styles.textInput}
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Search for 'Pizza' or 'Biryani'"
+                placeholder="Search, Order, Enjoy, Repeat!"
                 placeholderTextColor="#78716C"
                 returnKeyType="search"
                 onSubmitEditing={handleSubmitSearch}
                 autoCorrect={false}
                 selectionColor="#DEA430"
               />
+              
               {query.length > 0 ? (
                 <TouchableOpacity
                   onPress={() => setQuery('')}
                   style={styles.clearBtn}
                   activeOpacity={0.7}
                 >
-                  <View style={styles.clearBtnCircle}>
-                    <X size={12} color="#D1D5DB" strokeWidth={2.4} />
-                  </View>
+                  <X size={18} color="#9CA3AF" strokeWidth={2.2} />
                 </TouchableOpacity>
               ) : null}
 
               <View style={styles.micSection}>
                 <View style={styles.micDivider} />
-                <TouchableOpacity style={styles.micBtn} activeOpacity={0.7}>
-                  <Mic size={18} color="#DEA430" strokeWidth={2.2} />
+                <TouchableOpacity style={styles.micBtn} activeOpacity={0.7} onPress={handleSubmitSearch}>
+                  <Mic size={20} color="#DEA430" strokeWidth={2.2} />
                 </TouchableOpacity>
               </View>
             </View>
           </View>
 
-          {/* 3. CONDITIONAL CONTENT: RECENTLY SEARCHED CHIPS VS FULL AUTOCOMPLETE LIST */}
+          {/* 3. CONDITIONAL CONTENT: RECENTLY SEARCHED CHIPS VS SEARCH RESULTS */}
           {!isQueryActive ? (
             <View style={styles.recentlySearchedSection}>
-              <Text style={styles.recentlySearchedLabel}>
-                RECENTLY SEARCHED RESTAURANTS
-              </Text>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionHeaderText}>
+                  RECENTLY SEARCHED RESTAURANTS
+                </Text>
+                <View style={styles.sectionHeaderLine} />
+              </View>
+              
               <View style={styles.chipsWrapContainer}>
                 {recentSearches.map((item, idx) => (
                   <TouchableOpacity
                     key={idx}
                     style={styles.chipItem}
                     activeOpacity={0.75}
-                    onPress={() => handleChipPress(item)}
+                    onPress={() => handleExecuteSearch(item)}
                   >
                     <RotateCcw size={12} color="#DEA430" strokeWidth={2.2} />
                     <Text style={styles.chipText} numberOfLines={1}>
@@ -332,42 +370,134 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
               </View>
             </View>
           ) : (
-            /* 4. AUTOCOMPLETE SUGGESTIONS FULL-SCREEN TRANSITION */
+            /* 4. RESULTS MATCHING USER'S SCREENSHOT */
             <ScrollView
               style={styles.suggestionsScrollView}
-              contentContainerStyle={{ paddingBottom: 40 }}
+              contentContainerStyle={styles.suggestionsContent}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              {autocompleteSuggestions.map((s) => (
+              {/* TOP FEATURED RESULT CARD */}
+              {firstSuggestion && (
                 <TouchableOpacity
-                  key={s.id}
-                  style={styles.suggestionRowItem}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    if (s.type === 'restaurant' && s.obj && onSelectRestaurant) {
-                      onClose();
-                      onSelectRestaurant(s.obj.id);
-                    } else {
-                      handleChipPress(s.name);
-                    }
-                  }}
+                  style={styles.featuredCard}
+                  activeOpacity={0.85}
+                  onPress={() => handleExecuteSearch(firstSuggestion.name)}
                 >
-                  {/* Circular Image Avatar */}
                   <Image
-                    source={{ uri: s.image }}
-                    style={styles.suggestionImageAvatar}
+                    source={{ uri: firstSuggestion.image }}
+                    style={styles.featuredCardImage}
                   />
+                  <View style={styles.featuredCardTextCol}>
+                    <Text style={styles.featuredCardTitle} numberOfLines={1}>
+                      {firstSuggestion.name}
+                    </Text>
+                    <Text style={styles.featuredCardSubtitle}>
+                      {firstSuggestion.type}
+                    </Text>
+                  </View>
+                  <View style={styles.featuredCardSearchBtn}>
+                    <SearchIcon size={18} color="#FFFFFF" strokeWidth={2.2} />
+                  </View>
+                </TouchableOpacity>
+              )}
 
-                  {/* Text Details with Bold Query Matches */}
-                  <View style={styles.suggestionTextColumn}>
-                    {renderBoldedText(s.name, query)}
-                    <Text style={styles.suggestionSubtitle}>{s.subtitle}</Text>
+              {/* SECTION 1: RESTAURANTS RELEVANT FOR QUERY */}
+              {relevantRestaurants.length > 0 && (
+                <View style={styles.sectionContainer}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionHeaderText}>
+                      Restaurants relevant for '{query}'
+                    </Text>
+                    <View style={styles.sectionHeaderLine} />
                   </View>
 
-                  <ChevronRight size={16} color="#524C42" />
-                </TouchableOpacity>
-              ))}
+                  <View style={styles.resultsListCard}>
+                    {relevantRestaurants.map((res: Restaurant, index: number) => {
+                      const ratingVal = res.rating || '4.5';
+                      const countStr = res.reviewCount
+                        ? res.reviewCount >= 1000
+                          ? `${(res.reviewCount / 1000).toFixed(1)}K+`
+                          : `${res.reviewCount}+`
+                        : '6.6K+';
+                      const deliveryTimeStr = res.deliveryTime || '30–35 mins';
+                      const areaStr = res.address || res.city || 'Patrapada';
+
+                      return (
+                        <TouchableOpacity
+                          key={`rel_res_${res.id}_${index}`}
+                          style={[
+                            styles.restaurantRow,
+                            index === relevantRestaurants.length - 1 && { borderBottomWidth: 0 },
+                          ]}
+                          activeOpacity={0.7}
+                          onPress={() => handleExecuteSearch(res.name)}
+                        >
+                          <Image
+                            source={{ uri: res.image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400' }}
+                            style={styles.restaurantThumb}
+                          />
+
+                          <View style={styles.restaurantInfoCol}>
+                            <Text style={styles.restaurantName} numberOfLines={1}>
+                              {res.name}
+                            </Text>
+                            <View style={styles.restaurantMetaRow}>
+                              <Star size={12} color="#DEA430" fill="#DEA430" style={{ marginRight: 3 }} />
+                              <Text style={styles.restaurantRatingText}>{ratingVal}</Text>
+                              <Text style={styles.restaurantReviewsText}>({countStr})</Text>
+                              <Text style={styles.metaDot}>•</Text>
+                              <Text style={styles.metaText}>{deliveryTimeStr}</Text>
+                              <Text style={styles.metaDot}>•</Text>
+                              <Text style={styles.metaText} numberOfLines={1}>{areaStr}</Text>
+                            </View>
+                          </View>
+
+                          <ChevronRight size={18} color="#DEA430" />
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              {/* SECTION 2: MORE RESULTS MATCHING YOUR QUERY */}
+              {moreResults.length > 0 && (
+                <View style={styles.sectionContainer}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionHeaderText}>
+                      More results matching your query
+                    </Text>
+                    <View style={styles.sectionHeaderLine} />
+                  </View>
+
+                  <View style={styles.resultsListCard}>
+                    {moreResults.map((dish: any, index: number) => (
+                      <TouchableOpacity
+                        key={`more_dish_${dish.id}_${index}`}
+                        style={[
+                          styles.dishRow,
+                          index === moreResults.length - 1 && { borderBottomWidth: 0 },
+                        ]}
+                        activeOpacity={0.7}
+                        onPress={() => handleExecuteSearch(dish.name)}
+                      >
+                        <Image
+                          source={{ uri: dish.image || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400' }}
+                          style={styles.dishThumb}
+                        />
+
+                        <View style={styles.dishInfoCol}>
+                          {renderHighlightedText(dish.name, query)}
+                          <Text style={styles.dishSubtitle}>Dish</Text>
+                        </View>
+
+                        <ChevronRight size={18} color="#DEA430" />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
             </ScrollView>
           )}
         </SafeAreaView>
@@ -388,7 +518,7 @@ const styles = StyleSheet.create({
   },
   backdropScrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
   },
   floatingTopCard: {
     position: 'absolute',
@@ -397,13 +527,11 @@ const styles = StyleSheet.create({
     right: 0,
     maxWidth: isTablet ? 680 : undefined,
     alignSelf: 'center',
-    backgroundColor: '#0E0D0B',
-    borderBottomWidth: 1,
-    borderBottomColor: '#26221A',
+    backgroundColor: '#0B0A08',
     elevation: 16,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
+    shadowOpacity: 0.6,
     shadowRadius: 20,
     overflow: 'hidden',
   },
@@ -419,44 +547,53 @@ const styles = StyleSheet.create({
   topHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 10 : 16,
-    paddingBottom: 12,
+    paddingBottom: 14,
   },
   backBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: '#181613',
-    borderWidth: 1,
-    borderColor: '#2E2920',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
-  headerTitle: {
-    fontSize: 16,
+  logoTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  myLogoText: {
+    fontSize: 22,
     fontFamily: 'Urbanist-Bold',
+    fontWeight: '900',
     color: '#FFFFFF',
-    flex: 1,
+    letterSpacing: 0.5,
+  },
+  quroLogoText: {
+    fontSize: 22,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '900',
+    color: '#DEA430',
+    letterSpacing: 0.5,
   },
   inputCardWrapper: {
     paddingHorizontal: 16,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   inputInnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#181613',
-    borderWidth: 1.2,
-    borderColor: '#2E2920',
+    backgroundColor: '#12110E',
+    borderWidth: 1.5,
+    borderColor: '#DEA430',
     borderRadius: 16,
     height: 52,
     paddingHorizontal: 14,
   },
   textInput: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 15.5,
     fontFamily: 'Urbanist-Medium',
     color: '#FFFFFF',
     paddingVertical: 8,
@@ -465,22 +602,14 @@ const styles = StyleSheet.create({
     padding: 6,
     marginRight: 2,
   },
-  clearBtnCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#2A2620',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   micSection: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   micDivider: {
     width: 1,
-    height: 20,
-    backgroundColor: '#2E2920',
+    height: 22,
+    backgroundColor: '#383228',
     marginRight: 10,
     marginLeft: 6,
   },
@@ -491,16 +620,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 24,
   },
-  recentlySearchedLabel: {
-    fontSize: 11,
-    fontFamily: 'Urbanist-Bold',
-    color: '#C49530',
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
   chipsWrapContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    marginTop: 12,
   },
   chipItem: {
     flexDirection: 'row',
@@ -525,50 +648,175 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
   },
-  suggestionRowItem: {
+  suggestionsContent: {
+    paddingBottom: 40,
+    gap: 16,
+  },
+  
+  // Featured Top Match Card
+  featuredCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1A1815',
-  },
-  suggestionImageAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#1C1A17',
+    backgroundColor: '#171614',
     borderWidth: 1,
-    borderColor: '#2E2920',
+    borderColor: '#26221A',
+    borderRadius: 18,
+    padding: 12,
   },
-  suggestionTextColumn: {
+  featuredCardImage: {
+    width: 66,
+    height: 66,
+    borderRadius: 14,
+    backgroundColor: '#26221A',
+  },
+  featuredCardTextCol: {
     flex: 1,
     marginLeft: 14,
     justifyContent: 'center',
+    gap: 3,
   },
-  suggestionSubtitle: {
-    fontSize: 12.5,
+  featuredCardTitle: {
+    fontSize: 18,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#DEA430',
+  },
+  featuredCardSubtitle: {
+    fontSize: 13,
     fontFamily: 'Urbanist-Medium',
     color: '#8E8A80',
-    marginTop: 2,
   },
-  boldTextMatch: {
+  featuredCardSearchBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1C1A17',
+    borderWidth: 1,
+    borderColor: '#3D3627',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Sections
+  sectionContainer: {
+    gap: 10,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  sectionHeaderText: {
+    fontSize: 13,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#CFCAC3',
+    marginRight: 10,
+  },
+  sectionHeaderLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#66552B',
+  },
+  resultsListCard: {
+    backgroundColor: '#171614',
+    borderWidth: 1,
+    borderColor: '#26221A',
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+
+  // Restaurant Row
+  restaurantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#242018',
+  },
+  restaurantThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#26221A',
+  },
+  restaurantInfoCol: {
+    flex: 1,
+    marginLeft: 14,
+    justifyContent: 'center',
+    gap: 4,
+  },
+  restaurantName: {
+    fontSize: 15.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
     color: '#FFFFFF',
-    fontSize: 15,
-    fontFamily: 'Urbanist-Bold',
   },
-  boldTextContainer: {
+  restaurantMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  restaurantRatingText: {
+    fontSize: 12.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginRight: 3,
+  },
+  restaurantReviewsText: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Regular',
+    color: '#8E8A80',
+  },
+  metaDot: {
+    fontSize: 12,
+    color: '#555555',
+    marginHorizontal: 6,
+  },
+  metaText: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Medium',
+    color: '#9E9A90',
+  },
+
+  // Dish Row
+  dishRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#242018',
+  },
+  dishThumb: {
+    width: 50,
+    height: 50,
+    borderRadius: 12,
+    backgroundColor: '#26221A',
+  },
+  dishInfoCol: {
+    flex: 1,
+    marginLeft: 14,
+    justifyContent: 'center',
+    gap: 3,
+  },
+  dishNameText: {
     fontSize: 15,
-    color: '#9CA3AF',
     fontFamily: 'Urbanist-Medium',
   },
-  matchHighlightText: {
+  highlightGoldText: {
     fontFamily: 'Urbanist-Bold',
-    color: '#F2CA50',
     fontWeight: '800',
+    color: '#DEA430',
   },
-  normalPartText: {
+  normalWhiteText: {
     fontFamily: 'Urbanist-Medium',
-    color: '#D1D5DB',
+    color: '#FFFFFF',
+  },
+  dishSubtitle: {
+    fontSize: 12.5,
+    fontFamily: 'Urbanist-Regular',
+    color: '#8E8A80',
   },
 });
-

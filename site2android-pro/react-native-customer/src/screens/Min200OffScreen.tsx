@@ -162,7 +162,7 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ── TOP FLOATING HEADER ── */}
-      <View style={[styles.headerRow, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.headerRow, { paddingTop: 10 }]}>
         <View style={styles.headerLeftWrap}>
           {/* Gold Border Circular Back Button */}
           <TouchableOpacity

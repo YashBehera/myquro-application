@@ -3,8 +3,8 @@
  * 
  * 100% Dynamic & Pixel-Perfect Implementation matching Figma Nodes 3027:1289 & 3027:1201
  * - Header with Restaurant Name & Dropdown Address (Home | F-134, Cosmopolis...)
- * - Benefits Banner ("₹55 saved! With My Quro One benefits")
- * - Gold Club Membership Card ("Your one ends in 3 days" + Extend ₹30)
+ * - Benefits Banner ("₹55 saved! With MyQURO benefits")
+ * - Gold Club Membership Card ("Your QURO membership ends in 3 days" + Extend ₹30)
  * - Cart Items Card (Veg/Non-Veg, Variant, Stepper, Price)
  * - 3 Action Buttons (+ Add Items, ✏ Cooking requests, ☐ Cutlery Needed)
  * - SURPRISE DEALS ✦ Carousel (Countdown timer 4m:55s, 25% OFF discount cards with working '+' buttons)
@@ -18,7 +18,7 @@
  * - Sticky Footer Tactical Payment Bar (Paytm / Google Pay Quick Select + Unified Place Order CTA + Wallet Row)
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -78,6 +78,7 @@ const checkCouponChevron    = require('../assets/checkout/figma/checkCouponChevr
 const receiptGreenIcon      = require('../assets/checkout/figma/receiptGreenIcon.png');      // Green Receipt icon
 const toPayChevron          = require('../assets/checkout/figma/toPayChevron.png');          // Chevron on To Pay card
 const expressBolt           = require('../assets/checkout/figma/expressBolt.png');           // Lightning Bolt for Express
+const quroBadgeImg          = require('../assets/images/quro_badge.png');                    // QURO Gold Badge
 const radioGoldSelected     = require('../assets/checkout/figma/radioGoldSelected.png');     // Gold Selected Radio
 const radioUnselected       = require('../assets/checkout/figma/radioUnselected.png');       // Radio Unselected
 const PAYTM_LOGO            = require('../assets/checkout/paytm_logo.png');                  // Paytm Logo
@@ -268,11 +269,13 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           customization: parsedCustomization,
         };
       }
+      const rawP = typeof item?.price === 'number' ? item.price : (typeof item?.foodItem?.price === 'number' ? item.foodItem.price : 0);
+      const cleanPrice = (rawP >= 1000 && rawP % 100 === 0) ? Math.round(rawP / 100) : (rawP >= 2000 ? Math.round(rawP / 100) : Math.round(rawP));
       return {
         foodItem: {
           id: item?.id || 'item',
           name: item?.name || 'Dish',
-          price: typeof item?.price === 'number' ? item.price : 0,
+          price: cleanPrice,
           rating: item?.rating || 0,
           ratingCount: item?.ratingCount || 0,
           category: item?.category || '',
@@ -300,7 +303,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   const activeCoupon = parentAppliedCoupon || internalCoupon;
   const couponDiscount = activeCoupon ? Math.min(activeCoupon.discount, itemTotal) : 0;
   const expressFee = selectedDeliveryType === 'express' ? 19 : 0;
-  const deliveryFee = 0; // Free with MyQuro One
+  const deliveryFee = 0; // Free with MyQURO
   const taxes = Math.round(itemTotal * 0.05); // 5% GST
   const finalTotal = Math.max(0, itemTotal - couponDiscount + deliveryFee + expressFee + selectedTip + taxes);
   const originalTotal = itemTotal + 35 + (selectedDeliveryType === 'express' ? 29 : 0) + taxes;
@@ -417,8 +420,15 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
     );
   };
 
-  // Pay & Place Order -> Opens Figma 3046:48 Hold On Payment Verification screen
+  // Pay & Place Order -> Opens Figma 3046:48 Hold On Payment Verification screen with double-tap protection
+  const lastTapRef = useRef<number>(0);
   const handleProceedToPay = () => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 1200 || showPaymentLoader) {
+      return;
+    }
+    lastTapRef.current = now;
+
     if (safeCart.length === 0) {
       Alert.alert("Empty Cart", "Please add items to your cart before placing an order.");
       return;
@@ -479,18 +489,18 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
         <View style={styles.benefitsBanner}>
           <Image source={checkSparkle} style={styles.benefitsSparkleImg} />
           <Text style={styles.benefitsText}>
-            <Text style={styles.benefitsGoldText}>₹55 saved!</Text> With My Quro One benefits
+            <Text style={styles.benefitsGoldText}>₹55 saved!</Text> With MyQURO benefits
           </Text>
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════
-            [3] "YOUR ONE ENDS IN 3 DAYS" GOLD CLUB CARD
+            [3] "YOUR QURO ENDS IN 3 DAYS" GOLD CLUB CARD
             ════════════════════════════════════════════════════════════════════════ */}
         <View style={styles.clubCardContainer}>
           <View style={styles.clubHeaderRow}>
             <Text style={styles.clubTitleWhite}>Your </Text>
-            <Text style={styles.clubTitleOne}>one</Text>
-            <Text style={styles.clubTitleGold}> ends in 3 days</Text>
+            <Image source={quroBadgeImg} style={styles.clubQuroBadgeImg} resizeMode="contain" />
+            <Text style={styles.clubTitleGold}> membership ends in 3 days</Text>
           </View>
 
           <View style={styles.clubBottomRow}>
@@ -498,7 +508,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
               activeOpacity={0.8}
               onPress={() => {
                 if (Platform.OS === 'android') {
-                  ToastAndroid.show('MyQuro One: Free delivery on all orders above ₹99', ToastAndroid.SHORT);
+                  ToastAndroid.show('MyQURO: Free delivery on all orders above ₹99', ToastAndroid.SHORT);
                 }
               }}
             >
@@ -581,6 +591,8 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
                       <View style={styles.cartStepperBox}>
                         <TouchableOpacity
                           style={styles.cartStepperBtn}
+                          activeOpacity={0.6}
+                          hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
                           onPress={() => handleDecreaseQty(index)}
                         >
                           <Image source={checkMinus} style={styles.cartMinusIcon} />
@@ -590,6 +602,8 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
 
                         <TouchableOpacity
                           style={styles.cartStepperBtn}
+                          activeOpacity={0.6}
+                          hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
                           onPress={() => handleIncreaseQty(index)}
                         >
                           <Image source={checkPlus} style={styles.cartPlusIcon} />
@@ -1315,10 +1329,10 @@ const styles = StyleSheet.create({
     fontSize: 16 * SCALE,
     color: '#CBC9C5',
   },
-  clubTitleOne: {
-    fontFamily: 'Urbanist-Black',
-    fontSize: 20 * SCALE,
-    color: '#D7A532',
+  clubQuroBadgeImg: {
+    width: 48 * SCALE,
+    height: 16 * SCALE,
+    marginHorizontal: 3 * SCALE,
   },
   clubTitleGold: {
     fontFamily: 'Urbanist-Bold',
@@ -1464,21 +1478,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#292615',
     borderRadius: 12 * SCALE,
-    paddingHorizontal: 8 * SCALE,
-    paddingVertical: 4 * SCALE,
-    gap: 8 * SCALE,
+    paddingHorizontal: 6 * SCALE,
+    paddingVertical: 2 * SCALE,
+    gap: 4 * SCALE,
   },
   cartStepperBtn: {
-    padding: 2,
+    minWidth: 26 * SCALE,
+    minHeight: 26 * SCALE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 4 * SCALE,
   },
   cartMinusIcon: {
-    width: 10 * SCALE,
-    height: 3 * SCALE,
+    width: 12 * SCALE,
+    height: 4 * SCALE,
     resizeMode: 'contain',
   },
   cartPlusIcon: {
-    width: 10 * SCALE,
-    height: 10 * SCALE,
+    width: 12 * SCALE,
+    height: 12 * SCALE,
     resizeMode: 'contain',
   },
   cartStepperCountText: {

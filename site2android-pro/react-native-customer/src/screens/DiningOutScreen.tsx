@@ -147,6 +147,12 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
   const { authState, currentLocation, favouriteRestaurantsList, toggleFavourite, allRestaurants = [] } = useViewModel();
   const userFirstName = authState?.type === 'Authenticated' && (authState as any).username ? (authState as any).username.split(' ')[0] : 'Foodie';
 
+  // Safe area top padding calculation ensuring status bar & notch are never collided
+  const safeTopPadding = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 44
+  ) + (Platform.OS === 'android' ? 8 : 4);
+
   // Screen Tabs: 'explore' | 'bookings'
   const [activeTab, setActiveTab] = useState<'explore' | 'bookings'>('explore');
 
@@ -434,7 +440,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 0] TOP HEADER (100% Pixel-Identical to HomeScreen.tsx)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
+        <View style={styles.header}>
           {/* Left Column: Home label + Location Address */}
           <View style={styles.headerLeftCol}>
             <TouchableOpacity

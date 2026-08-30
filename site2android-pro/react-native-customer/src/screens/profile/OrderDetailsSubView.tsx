@@ -62,9 +62,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
       num = Number(rawAmount);
     }
     if (isNaN(num) || num <= 0) return '₹0';
-    if (num >= 5000 && num % 100 === 0) {
-      num = num / 100;
-    } else if (num >= 10000) {
+    if (num >= 20000 && num % 100 === 0) {
       num = num / 100;
     }
     return `₹${Math.round(num)}`;
@@ -80,9 +78,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
       num = Number(rawAmount);
     }
     if (isNaN(num) || num <= 0) return 0;
-    if (num >= 5000 && num % 100 === 0) {
-      num = num / 100;
-    } else if (num >= 10000) {
+    if (num >= 20000 && num % 100 === 0) {
       num = num / 100;
     }
     return num;
@@ -168,7 +164,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
 
   // Bill Calculations
   const calculatedItemsSubtotal = itemsList.reduce((acc: number, it: any) => {
-    const unitPrice = getNumericAmount(it.price || it.unitPrice || 0);
+    const unitPrice = getNumericAmount(it.price ?? it.unitPrice ?? it.basePrice ?? it.itemPrice ?? it.foodItem?.price ?? 0);
     const qty = Number(it.quantity || it.qty || 1);
     const totalPrice = it.totalPrice ? getNumericAmount(it.totalPrice) : unitPrice * qty;
     return acc + (totalPrice || unitPrice * qty);
@@ -408,7 +404,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
             {/* Delivery Fee */}
             <View style={styles.breakdownRow}>
               <Text style={styles.breakdownLabel} numberOfLines={1}>
-                Delivery Fee (FREE with Quro One){deliveryDistance ? ` | ${deliveryDistance} kms` : ''}
+                Delivery Fee (FREE with MyQURO){deliveryDistance ? ` | ${deliveryDistance} kms` : ''}
               </Text>
               <View style={styles.deliveryFeeCol}>
                 <Text style={styles.strikethroughFee}>56.0</Text>

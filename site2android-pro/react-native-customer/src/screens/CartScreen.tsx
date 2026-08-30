@@ -642,7 +642,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
                 <Text style={[styles.billDetailVal, isDarkMode && styles.textWhite]}>₹40</Text>
               </View>
               <View style={styles.billDetailRow}>
-                <Text style={styles.billDetailLabel}>Swiggy One Delivery Savings</Text>
+                <Text style={styles.billDetailLabel}>MyQURO Delivery Savings</Text>
                 <Text style={styles.billDetailFree}>-₹40</Text>
               </View>
               <View style={styles.billDetailRow}>

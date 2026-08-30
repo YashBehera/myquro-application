@@ -86,7 +86,8 @@ const expImg19 = require('../assets/home/figma_explore/imgImage19.png'); // Gree
 const expImg13 = require('../assets/home/figma_explore/imgImage13.png'); // Truck icon
 const expImg14 = require('../assets/home/figma_explore/imgImage14.png'); // Green Star icon
 const expImg8  = require('../assets/home/figma_explore/imgImage8.png');  // Truck icon
-const expImg9  = require('../assets/home/figma_explore/imgImage9.png');  // Green Star icon
+// QURO Gold Badge
+const quroBadgeImg = require('../assets/images/quro_badge.png');
 
 // Helper to safely extract restaurant image source
 const getRestaurantImageSource = (restaurant: Restaurant) => {
@@ -95,6 +96,24 @@ const getRestaurantImageSource = (restaurant: Restaurant) => {
   }
   return typeof restaurant.image === 'string' ? { uri: restaurant.image } : restaurant.image;
 };
+
+// ─── Extended Food Categories for "WHAT'S ON YOUR MIND?" ──────────────────
+export const WHATS_ON_MIND_CATEGORIES = [
+  { id: 'Specials', label: 'Specials', img: expImg27, regex: /.*/ },
+  { id: 'Biryani', label: 'Biryani', img: expImg26, regex: /biryani|dum|pulao|hyderabadi/i },
+  { id: 'Pizzas', label: 'Pizzas', img: expImg25, regex: /pizza|italian|pasta|crust|cheese/i },
+  { id: 'Burgers', label: 'Burgers', img: expImg24, regex: /burger|sandwich|patty|slider/i },
+  { id: 'Rolls', label: 'Rolls & Wraps', img: expImg23, regex: /roll|kathi|shawarma|wrap|frankie/i },
+  { id: 'North Indian', label: 'North Indian', img: { uri: 'https://images.unsplash.com/photo-1588166524941-3bf61a9c41db?w=240&q=80' }, regex: /north indian|curry|punjabi|mughlai|paneer|dal|roti|tandoori|butter chicken/i },
+  { id: 'Chinese', label: 'Chinese', img: require('../assets/images/food-noodle.png'), regex: /chinese|asian|noodle|manchurian|fried rice|dimsum|momo|schezwan|hakka/i },
+  { id: 'South Indian', label: 'South Indian', img: { uri: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?w=240&q=80' }, regex: /south indian|dosa|idli|sambhar|vada|uttapam|chennai/i },
+  { id: 'Desserts', label: 'Desserts', img: { uri: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=240&q=80' }, regex: /dessert|sweet|cake|ice cream|pastry|waffle|bakery|halwa|gulab jamun|mithai/i },
+  { id: 'Beverages', label: 'Beverages', img: { uri: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=240&q=80' }, regex: /beverage|drink|juice|shake|coffee|tea|smoothie|soda|mocktail|cold coffee/i },
+  { id: 'Chaat', label: 'Chaat & Snacks', img: { uri: 'https://images.unsplash.com/photo-1601050690597-df0568f70950?w=240&q=80' }, regex: /chaat|street food|samosa|pani puri|kachori|snack|pav bhaji|tikki|golgappe/i },
+  { id: 'Healthy', label: 'Healthy & Salads', img: require('../assets/images/food-salad.png'), regex: /healthy|salad|diet|bowl|keto|vegan|greens|protein/i },
+  { id: 'Momos', label: 'Momos', img: { uri: 'https://images.unsplash.com/photo-1625220194771-7ebdea0b70b9?w=240&q=80' }, regex: /momo|dim sum|dumpling|tibetan|steamed momo/i },
+  { id: 'Thali', label: 'Grand Thali', img: { uri: 'https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?w=240&q=80' }, regex: /thali|meal|combo|platter|lunch box/i },
+];
 
 export const HomeScreen = ({
   onNavigateToExplore,
@@ -118,6 +137,7 @@ export const HomeScreen = ({
     setCurrentLocation,
     toggleFavourite,
     favouriteRestaurantsList,
+    foodItems = [],
   } = useViewModel();
 
   const [showLocationSheet, setShowLocationSheet] = useState(false);
@@ -127,6 +147,12 @@ export const HomeScreen = ({
   const [activeSegment, setActiveSegment]         = useState<'reorder' | 'food15'>('reorder');
   const [activeExploreCat, setActiveExploreCat]   = useState('Specials');
   const [activeDealOffer, setActiveDealOffer]     = useState<string | null>(null);
+
+  // Safe area top padding calculation ensuring status bar & notch are never collided
+  const safeTopPadding = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 44
+  ) + (Platform.OS === 'android' ? 8 : 4);
 
   // Floating bounce loop animation
   const bounceAnim = useRef(new Animated.Value(0)).current;
@@ -188,13 +214,11 @@ export const HomeScreen = ({
     }
   };
 
-  // Combine live data source
-  const sourceRestaurants: Restaurant[] = useMemo(() => {
-    return (allRestaurants && allRestaurants.length > 0)
-      ? allRestaurants
-      : (restaurantsList && restaurantsList.length > 0)
-        ? restaurantsList
-        : [];
+  // Base list of restaurants
+  const sourceRestaurants = useMemo(() => {
+    if (allRestaurants && allRestaurants.length > 0) return allRestaurants;
+    if (restaurantsList && restaurantsList.length > 0) return restaurantsList;
+    return [];
   }, [allRestaurants, restaurantsList]);
 
   // Dynamic filtering based on all active user selections
@@ -208,12 +232,18 @@ export const HomeScreen = ({
         if (isNonVeg && !/veg/i.test(res.name)) return false;
       }
 
-      // 2. Category Filter (Specials, Biryani, Pizzas, Burgers, Rolls)
+      // 2. Category Filter (Specials, Biryani, Pizzas, Burgers, Rolls, etc.)
       if (activeExploreCat && activeExploreCat !== 'Specials') {
-        const matchesCategory = new RegExp(activeExploreCat, 'i').test(
-          `${res.cuisine} ${res.dishesCategory} ${res.name} ${res.category || ''}`
-        );
-        if (!matchesCategory) return false;
+        const catDef = WHATS_ON_MIND_CATEGORIES.find(c => c.id === activeExploreCat);
+        const targetRegex = catDef?.regex || new RegExp(activeExploreCat, 'i');
+        const resText = `${res.cuisine || ''} ${res.dishesCategory || ''} ${res.name || ''} ${res.category || ''}`;
+        const directMatch = targetRegex.test(resText);
+        
+        const dishMatch = foodItems && foodItems.length > 0
+          ? foodItems.some((f: any) => (f.restaurantId === res.id || f.restaurantName === res.name) && targetRegex.test(`${f.name || ''} ${f.category || ''} ${f.description || ''}`))
+          : false;
+
+        if (!directMatch && !dishMatch) return false;
       }
 
       // 3. Deal Filter
@@ -227,7 +257,7 @@ export const HomeScreen = ({
 
       return true;
     });
-  }, [sourceRestaurants, isVegOnly, activeExploreCat, activeDealOffer]);
+  }, [sourceRestaurants, isVegOnly, activeExploreCat, activeDealOffer, foodItems]);
 
   // Horizontal cards based on active segment (Reorder vs Food in 15 mins)
   const horizontalCardList = useMemo(() => {
@@ -313,7 +343,7 @@ export const HomeScreen = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 0] TOP HEADER (Location on left, Free Delivery + Profile on right)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
+        <View style={styles.header}>
           {/* Left Column: Home label + Location Address */}
           <View style={styles.headerLeftCol}>
             <TouchableOpacity
@@ -580,9 +610,9 @@ export const HomeScreen = ({
                 <View style={styles.resCardImgBox}>
                   <Image source={cardImg} style={styles.resCardImg} />
 
-                  {/* Crisp Golden 'one' Badge */}
-                  <View style={styles.oneBadge}>
-                    <Text style={styles.oneBadgeText}>one</Text>
+                  {/* Crisp QURO Badge */}
+                  <View style={styles.quroBadgeContainer}>
+                    <Image source={quroBadgeImg} style={styles.quroBadgeImg} resizeMode="contain" />
                   </View>
 
                   {/* Working Interactive Favourites Button */}
@@ -636,37 +666,50 @@ export const HomeScreen = ({
         <View style={styles.whatsOnMindStickyContainer}>
           <View style={styles.whatsOnMindHeader}>
             <Text style={styles.whatsOnMindTitle}>WHAT'S ON YOUR MIND?</Text>
+            {activeExploreCat !== 'Specials' && (
+              <TouchableOpacity
+                onPress={() => setActiveExploreCat('Specials')}
+                style={styles.clearFilterBtn}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.clearFilterText}>Show All</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          <View style={styles.expCategoriesRow}>
-            {[
-              { id: 'Specials', label: 'Specials', img: expImg27 },
-              { id: 'Biryani', label: 'Biryani', img: expImg26 },
-              { id: 'Pizzas', label: 'Pizzas', img: expImg25 },
-              { id: 'Burgers', label: 'Burgers', img: expImg24 },
-              { id: 'Rolls', label: 'Rolls', img: expImg23 },
-            ].map((cat) => {
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.expCategoriesScroll}
+          >
+            {WHATS_ON_MIND_CATEGORIES.map((cat) => {
               const active = activeExploreCat === cat.id;
               return (
                 <TouchableOpacity
                   key={cat.id}
                   style={[styles.expCatCard, active && styles.expCatCardActive]}
-                  activeOpacity={0.85}
+                  activeOpacity={0.8}
                   onPress={() => {
-                    setActiveExploreCat(cat.id);
+                    if (active && cat.id !== 'Specials') {
+                      setActiveExploreCat('Specials');
+                    } else {
+                      setActiveExploreCat(cat.id);
+                    }
                     if (Platform.OS === 'android') {
-                      ToastAndroid.show(`Filtering by ${cat.label}`, ToastAndroid.SHORT);
+                      ToastAndroid.show(active ? 'Showing all restaurants' : `Filtering by ${cat.label}`, ToastAndroid.SHORT);
                     }
                   }}
                 >
-                  <Image source={cat.img} style={styles.expCatImg} />
-                  <Text style={[styles.expCatLabel, active && styles.expCatLabelActive]}>
+                  <View style={[styles.expCatImgWrapper, active && styles.expCatImgWrapperActive]}>
+                    <Image source={cat.img} style={styles.expCatImg} />
+                  </View>
+                  <Text style={[styles.expCatLabel, active && styles.expCatLabelActive]} numberOfLines={1}>
                     {cat.label}
                   </Text>
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════
@@ -783,7 +826,7 @@ export const HomeScreen = ({
                       </View>
                       <View style={styles.vResPillDivider} />
                       <View style={styles.vResOneBenefitsRight}>
-                        <Text style={styles.vResOneText}>one</Text>
+                        <Image source={quroBadgeImg} style={styles.vResQuroBadgeImg} resizeMode="contain" />
                         <Text style={styles.vResBenefitsText}>BENEFITS</Text>
                       </View>
                     </View>
@@ -1287,23 +1330,21 @@ const styles = StyleSheet.create({
     height: '100%',
     resizeMode: 'cover',
   },
-  oneBadge: {
+  quroBadgeContainer: {
     position: 'absolute',
     top: 8 * SCALE,
     left: 8 * SCALE,
-    backgroundColor: '#DEA430',
+    backgroundColor: 'rgba(10, 8, 4, 0.75)',
     borderWidth: 1,
-    borderColor: '#C69330',
-    borderRadius: 10 * SCALE,
-    paddingHorizontal: 8 * SCALE,
-    paddingVertical: 2.5 * SCALE,
+    borderColor: 'rgba(212, 175, 55, 0.45)',
+    borderRadius: 8 * SCALE,
+    paddingHorizontal: 6 * SCALE,
+    paddingVertical: 3 * SCALE,
     zIndex: 10,
   },
-  oneBadgeText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 11 * SCALE,
-    color: '#422608',
-    lineHeight: 13 * SCALE,
+  quroBadgeImg: {
+    width: 44 * SCALE,
+    height: 15 * SCALE,
   },
   favBtn: {
     position: 'absolute',
@@ -1376,6 +1417,9 @@ const styles = StyleSheet.create({
     zIndex: 95,
   },
   whatsOnMindHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 6,
   },
@@ -1385,43 +1429,75 @@ const styles = StyleSheet.create({
     color: '#C9C9C9',
     letterSpacing: 0.8,
   },
-  expCategoriesRow: {
-    flexDirection: 'row',
+  clearFilterBtn: {
+    backgroundColor: '#18140A',
+    borderWidth: 1,
+    borderColor: '#D4AF37',
+    paddingHorizontal: 10 * SCALE,
+    paddingVertical: 3 * SCALE,
+    borderRadius: 12 * SCALE,
+  },
+  clearFilterText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11 * SCALE,
+    color: '#D4AF37',
+  },
+  expCategoriesScroll: {
     paddingHorizontal: 14,
     paddingTop: 4,
-    paddingBottom: 4,
-    gap: 6,
+    paddingBottom: 8,
+    gap: 10 * SCALE,
   },
   expCatCard: {
-    flex: 1,
-    backgroundColor: '#090806',
+    width: 76 * SCALE,
+    backgroundColor: '#0A0A0A',
     borderWidth: 1,
-    borderColor: '#1F1F1F',
+    borderColor: '#1C1C1C',
     borderRadius: 18 * SCALE,
     paddingVertical: 8 * SCALE,
     paddingHorizontal: 4,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 84 * SCALE,
+    justifyContent: 'center',
   },
   expCatCardActive: {
-    backgroundColor: '#0E0D0A',
-    borderColor: 'rgba(212,175,55,0.4)',
+    backgroundColor: '#17140B',
+    borderColor: '#D4AF37',
+    shadowColor: '#D4AF37',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  expCatImgWrapper: {
+    width: 50 * SCALE,
+    height: 50 * SCALE,
+    borderRadius: 25 * SCALE,
+    backgroundColor: '#121212',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6 * SCALE,
+    overflow: 'hidden',
+  },
+  expCatImgWrapperActive: {
+    backgroundColor: '#26200D',
+    borderWidth: 1,
+    borderColor: '#D4AF37',
   },
   expCatImg: {
-    width: 48 * SCALE,
+    width: 44 * SCALE,
     height: 44 * SCALE,
-    resizeMode: 'contain',
-    marginBottom: 4,
+    borderRadius: 22 * SCALE,
+    resizeMode: 'cover',
   },
   expCatLabel: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 11 * SCALE,
-    color: '#787878',
+    color: '#8A8A8A',
     textAlign: 'center',
   },
   expCatLabelActive: {
-    color: '#9F853E',
+    color: '#D4AF37',
+    fontFamily: 'Urbanist-ExtraBold',
   },
 
   // ── 10. EXPLORE SECTION HEADER ─────────────────────────────────
@@ -1603,11 +1679,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 3,
   },
-  vResOneText: {
-    fontFamily: 'Urbanist-ExtraBold',
-    fontSize: 12 * SCALE,
-    color: '#C19539',
-    lineHeight: 14 * SCALE,
+  vResQuroBadgeImg: {
+    width: 36 * SCALE,
+    height: 12 * SCALE,
+    marginRight: 2 * SCALE,
   },
   vResBenefitsText: {
     fontFamily: 'Urbanist-Bold',

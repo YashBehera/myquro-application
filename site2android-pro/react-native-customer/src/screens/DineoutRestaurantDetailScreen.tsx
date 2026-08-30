@@ -69,7 +69,10 @@ import {
   moderateScale,
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
+  isTablet,
 } from '../utils/responsive';
+
+const quroBadgeImg = require('../assets/images/quro_badge.png');
 
 interface DineoutRestaurantDetailScreenProps {
   restaurant: any;
@@ -765,7 +768,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
             </View>
 
             <View style={styles.promoHeaderBadgeRow}>
-              <Text style={styles.promoOneLogo}>one</Text>
+              <Image source={quroBadgeImg} style={styles.quroDineoutPromoImg} resizeMode="contain" />
               <Text style={styles.promoExclusiveText}> EXCLUSIVE</Text>
             </View>
 
@@ -1901,11 +1904,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 10 * SCALE,
   },
-  promoOneLogo: {
-    color: '#FF5722',
-    fontSize: 16 * SCALE,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
+  quroDineoutPromoImg: {
+    width: 50 * SCALE,
+    height: 17 * SCALE,
+    marginRight: 4 * SCALE,
   },
   promoExclusiveText: {
     color: '#CCCCCC',

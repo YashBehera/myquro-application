@@ -74,12 +74,22 @@ export const StatementSubView: React.FC<StatementSubViewProps> = ({
           activeOpacity={isReportEnabled ? 0.7 : 1}
           onPress={() => {
             if (!isReportEnabled) return;
+            if (!email || !email.includes('@')) {
+              Alert.alert(
+                'Email Required',
+                'Please set a valid email address in your profile to receive account statements.',
+                [{ text: 'OK' }]
+              );
+              return;
+            }
             Alert.alert(
-              'Success',
-              `Detailed report requested for ${statementDuration} (${statementCategory}). It will be delivered to your email: ${email || 'akr073680@gmail.com'} within 3 hours.`,
+              'Statement Requested',
+              `Detailed report requested for ${statementDuration} (${statementCategory}). It will be delivered to ${email} within 3 hours.`,
               [{ text: 'OK', onPress: onBack }]
             );
           }}
+          accessibilityRole="button"
+          accessibilityLabel="Get account statement report"
         >
           <Text style={[styles.profileFigmaStatementSubmitBtnText, isReportEnabled && styles.profileFigmaStatementSubmitBtnTextActive]}>
             Get Report
@@ -89,7 +99,7 @@ export const StatementSubView: React.FC<StatementSubViewProps> = ({
         {/* Info Text */}
         <Text style={styles.profileFigmaStatementInfoText}>
           You will receive your statement within the next 3 hours at{' '}
-          <Text style={styles.profileFigmaStatementInfoTextBold}>{email || 'akr073680@gmail.com'}</Text>
+          <Text style={styles.profileFigmaStatementInfoTextBold}>{email || 'your registered email address'}</Text>
         </Text>
 
         {/* How statements work button */}
