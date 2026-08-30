@@ -54,16 +54,6 @@ const heroPureVegImg   = require('../assets/dineout/cat_hero_pureveg.png');
 const heroNightlifeImg = require('../assets/dineout/cat_hero_nightlife.png');
 const heroBuffetsImg   = require('../assets/dineout/cat_hero_buffets.png');
 
-// ── Restaurant Card Images ──
-const resZoukImg        = require('../assets/dineout/res_zouk_sky_lounge.png');
-const resTeapotImg      = require('../assets/dineout/res_teapot_mayfair.png');
-const resBbqNationImg   = require('../assets/dineout/res_bbq_nation_dineout.png');
-const resMagicalImg     = require('../assets/dineout/res_magical_journey.png');
-const resStarlitImg     = require('../assets/dineout/res_starlit_lounge.png');
-const resEthoosyImg     = require('../assets/dineout/res_ethoosy_club.png');
-const resKakeDiHattiImg = require('../assets/dineout/res_kake_di_hatti.png');
-const resKebabsImg      = require('../assets/dineout/res_kebabs_and_kurries.png');
-
 export type DiningMoodKey =
   | 'CAFE'
   | 'FAMILY'
@@ -102,338 +92,53 @@ interface CategoryConfig {
   title: string;
   heroImage: any;
   aspectRatio: number;
-  restaurants: DiningCardItem[];
 }
 
-const CATEGORY_DATA: Record<DiningMoodKey, CategoryConfig> = {
-  // 1. CAFES & COFFEE
+const CATEGORY_CONFIG: Record<DiningMoodKey, CategoryConfig> = {
   CAFE: {
     title: 'Cafes',
     heroImage: heroCafesImg,
     aspectRatio: 1.777,
-    restaurants: [
-      {
-        id: 'dineout-kruti-coffee',
-        name: 'Kruti Coffee',
-        location: 'Patia, 4.5 km',
-        image: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=600&auto=format&fit=crop&q=80',
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 20% OFF',
-      },
-      {
-        id: 'dineout-bocca-cafe',
-        name: 'Bocca Cafe',
-        location: 'Master Canteen, 3.1 km',
-        image: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=600&auto=format&fit=crop&q=80',
-        cardType: 'detailed',
-        rating: 4.6,
-        cuisines: 'Cafe • Italian • Desserts',
-        priceForTwo: '₹800 for two',
-        tableBookingAvailable: true,
-        bankOffers: ['15% off with ICICI Cards'],
-      },
-      {
-        id: 'dineout-cafe-16',
-        name: 'Cafe 16 Satyanagar',
-        location: 'Satyanagar, 2.8 km',
-        image: 'https://images.unsplash.com/photo-1559925393-8be0ec4767c8?w=600&auto=format&fit=crop&q=80',
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 15% OFF',
-      },
-    ],
   },
-
-  // 2. FAMILY FRIENDLY
   FAMILY: {
     title: 'Family Friendly',
     heroImage: heroFamilyImg,
     aspectRatio: 1.5,
-    restaurants: [
-      {
-        id: 'dineout-bbq-nation-family',
-        name: 'Barbeque Nation',
-        location: 'Khandagiri, 3.9 km',
-        image: resBbqNationImg,
-        cardType: 'detailed',
-        rating: 4.2,
-        cuisines: 'Chinese • North Indian',
-        priceForTwo: '₹1900 for two',
-        tableBookingAvailable: true,
-        bankOffers: [
-          'Up to 10% off with bank offers',
-          'Get extra ₹75 off using PAYTMUPI',
-        ],
-      },
-      {
-        id: 'dineout-mayfair-family',
-        name: 'Tea Pot – Mayfair Lagoon',
-        location: 'Bhubaneswar',
-        image: resTeapotImg,
-        cardType: 'detailed',
-        rating: 4.5,
-        cuisines: 'North Indian • Multi-Cuisine',
-        priceForTwo: '₹1800 for two',
-        isAd: true,
-      },
-      {
-        id: 'dineout-sigree-family',
-        name: 'Sigree Global Grill',
-        location: 'Patrapada, 3.2 km',
-        image: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=600&auto=format&fit=crop&q=80',
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 25% OFF',
-      },
-    ],
   },
-
-  // 3. BUDGET FRIENDLY
   BUDGET: {
     title: 'Budget Friendly',
     heroImage: heroBudgetImg,
     aspectRatio: 1.5,
-    restaurants: [
-      {
-        id: 'dineout-chappan-budget',
-        name: 'Chappan Bhog',
-        location: 'Jaydev Vihar, 4.0 km',
-        image: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=600&auto=format&fit=crop&q=80',
-        cardType: 'detailed',
-        rating: 4.7,
-        cuisines: 'Pure Veg • Sweets • Street Food',
-        priceForTwo: '₹400 for two',
-        tableBookingAvailable: true,
-      },
-      {
-        id: 'dineout-rolls-king',
-        name: 'Rolls King & Fast Food',
-        location: 'Saheed Nagar, 2.1 km',
-        image: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=600&auto=format&fit=crop&q=80',
-        cardType: 'wide-promo',
-        discountTag: 'FLAT ₹100 OFF',
-      },
-    ],
   },
-
-  // 4. LUXURY DINING
   LUXURY: {
     title: 'Luxury Dining',
     heroImage: heroLuxuryImg,
     aspectRatio: 1.779,
-    restaurants: [
-      {
-        id: 'dineout-teapot-lux',
-        name: 'Tea Pot – Mayfair Lagoon',
-        location: 'Bhubaneswar',
-        image: resTeapotImg,
-        cardType: 'detailed',
-        rating: 4.8,
-        cuisines: 'North Indian • Chinese',
-        priceForTwo: '₹1800 for two',
-        isAd: true,
-      },
-      {
-        id: 'dineout-kebabs-lux',
-        name: 'Kebabs and Kurries',
-        location: 'Bhubaneswar',
-        image: resKebabsImg,
-        cardType: 'detailed',
-        rating: 5.0,
-        cuisines: 'North Indian • Mughlai',
-        priceForTwo: '₹2200 for two',
-        tableBookingAvailable: true,
-      },
-      {
-        id: 'dineout-swosti-lux',
-        name: 'Panorama – The Crown Hotel',
-        location: 'IRC Village, 4.8 km',
-        image: 'https://images.unsplash.com/photo-1550966871-3ed3cdb5ed0c?w=600&auto=format&fit=crop&q=80',
-        cardType: 'wide-promo',
-        discountTag: 'FLAT 20% OFF',
-      },
-    ],
   },
-
-  // 5. ROOFTOP & OUTDOORS
   ROOFTOP: {
     title: 'Rooftop Places',
     heroImage: heroRooftopImg,
     aspectRatio: 1.5,
-    restaurants: [
-      {
-        id: 'dineout-zouk',
-        name: 'Zouk Restro Sky Lounge',
-        location: 'Bhubaneswar',
-        image: resZoukImg,
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 20% OFF',
-      },
-      {
-        id: 'dineout-teapot',
-        name: 'Tea Pot – Mayfair Lagoon',
-        location: 'Bhubaneswar',
-        image: resTeapotImg,
-        cardType: 'detailed',
-        rating: 4.3,
-        cuisines: 'North Indian • Chinese',
-        priceForTwo: '₹1800 for two',
-        isAd: true,
-      },
-      {
-        id: 'dineout-swosti-rooftop',
-        name: 'The Roof Top – Swosti Grand',
-        location: 'Janpath, 4.2 km',
-        image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600&auto=format&fit=crop&q=80',
-        cardType: 'wide-promo',
-        discountTag: 'FLAT 25% OFF',
-      },
-    ],
   },
-
-  // 6. PURE VEG
   PURE_VEG: {
     title: 'Pure Veg',
     heroImage: heroPureVegImg,
     aspectRatio: 1.5,
-    restaurants: [
-      {
-        id: 'dineout-kake-di-hatti',
-        name: 'Kake Di Hatti',
-        location: 'Bhubaneswar',
-        image: resKakeDiHattiImg,
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 35% OFF',
-      },
-      {
-        id: 'dineout-kebabs-kurries',
-        name: 'Kebabs and Kurries',
-        location: 'Bhubaneswar',
-        image: resKebabsImg,
-        cardType: 'detailed',
-        rating: 5.0,
-        cuisines: 'North Indian • Mughlai',
-        priceForTwo: '₹1800 for two',
-        isAd: true,
-      },
-      {
-        id: 'dineout-chappan-bhog',
-        name: 'Chappan Bhog',
-        location: 'Jaydev Vihar, 4.0 km',
-        image: 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=600&auto=format&fit=crop&q=80',
-        cardType: 'detailed',
-        rating: 4.7,
-        cuisines: 'Pure Veg • Sweets • Street Food',
-        priceForTwo: '₹600 for two',
-        tableBookingAvailable: true,
-      },
-    ],
   },
-
-  // 7. NIGHTLIFE & DRINKS
   NIGHTLIFE: {
     title: 'Nightlife & Drinks',
     heroImage: heroNightlifeImg,
     aspectRatio: 1.5,
-    restaurants: [
-      {
-        id: 'dineout-starlit',
-        name: 'Starlit – Lounge Bar & Restaurant',
-        location: 'Bhubaneswar',
-        image: resStarlitImg,
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 15% OFF',
-      },
-      {
-        id: 'dineout-ethoosy',
-        name: 'ETHOOSY CLUB & LOUNGE',
-        location: 'Bhubaneswar',
-        image: resEthoosyImg,
-        cardType: 'detailed',
-        rating: 4.8,
-        cuisines: 'Finger Food • Continental',
-        priceForTwo: '₹2000 for two',
-        isAd: true,
-      },
-      {
-        id: 'dineout-club-nova',
-        name: 'Club Nova High Energy Bar',
-        location: 'Infocity, 6.0 km',
-        image: 'https://images.unsplash.com/photo-1572116469696-31de0f17cc34?w=600&auto=format&fit=crop&q=80',
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 20% OFF',
-      },
-    ],
   },
-
-  // 8. BUFFETS
   BUFFET: {
     title: 'Buffets',
     heroImage: heroBuffetsImg,
     aspectRatio: 1.5,
-    restaurants: [
-      {
-        id: 'dineout-bbq-nation',
-        name: 'Barbeque Nation',
-        location: 'Khandagiri, 3.9 km',
-        image: resBbqNationImg,
-        cardType: 'detailed',
-        rating: 4.2,
-        cuisines: 'Chinese • North Indian',
-        priceForTwo: '₹1900 for two',
-        tableBookingAvailable: true,
-        bankOffers: [
-          'Up to 10% off with bank offers',
-          'Get extra ₹75 off using PAYTMUPI',
-        ],
-      },
-      {
-        id: 'dineout-magical-journey',
-        name: 'A Magical Journey – Mayfair',
-        location: 'Jaydev Vihar, 5.1 km',
-        image: resMagicalImg,
-        cardType: 'detailed',
-        rating: 4.7,
-        cuisines: 'Multi-Cuisine Buffet',
-        priceForTwo: '₹2200 for two',
-        tableBookingAvailable: true,
-        bankOffers: ['Flat 15% OFF on HDFC Cards'],
-      },
-      {
-        id: 'dineout-sigree-grill',
-        name: 'Sigree Global Grill',
-        location: 'Patrapada, 3.2 km',
-        image: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=600&auto=format&fit=crop&q=80',
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 30% OFF',
-      },
-    ],
   },
-
-  // DEFAULT / ALL
   ALL: {
     title: 'Explore Restaurants',
     heroImage: heroBudgetImg,
     aspectRatio: 1.5,
-    restaurants: [
-      {
-        id: 'dineout-zouk-all',
-        name: 'Zouk Restro Sky Lounge',
-        location: 'Bhubaneswar',
-        image: resZoukImg,
-        cardType: 'wide-promo',
-        discountTag: 'UP TO 20% OFF',
-      },
-      {
-        id: 'dineout-teapot-all',
-        name: 'Tea Pot – Mayfair Lagoon',
-        location: 'Bhubaneswar',
-        image: resTeapotImg,
-        cardType: 'detailed',
-        rating: 4.3,
-        cuisines: 'North Indian • Chinese',
-        priceForTwo: '₹1800 for two',
-        isAd: true,
-      },
-    ],
   },
 };
 
@@ -450,7 +155,137 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [localFavIds, setLocalFavIds] = useState<Set<string>>(new Set());
 
-  const config = CATEGORY_DATA[moodKey] || CATEGORY_DATA.ROOFTOP;
+  const config = CATEGORY_CONFIG[moodKey] || CATEGORY_CONFIG.ALL;
+
+  // Dynamically compute real restaurants based on selected moodKey and active filters
+  const dynamicRestaurants: DiningCardItem[] = React.useMemo(() => {
+    if (!allRestaurants || allRestaurants.length === 0) {
+      return [];
+    }
+
+    // Filter by moodKey
+    let filtered = allRestaurants.filter((r) => {
+      const cat = (r.category || '').toLowerCase();
+      const cuisine = (r.cuisine || '').toLowerCase();
+      const dishesCat = (r.dishesCategory || '').toLowerCase();
+      const tags = (r.tags || []).map((t: string) => t.toLowerCase()).join(' ');
+      const desc = (r.description || '').toLowerCase();
+      const allText = `${cat} ${cuisine} ${dishesCat} ${tags} ${desc}`;
+
+      switch (moodKey) {
+        case 'CAFE':
+          return (
+            allText.includes('cafe') ||
+            allText.includes('coffee') ||
+            allText.includes('bakery') ||
+            allText.includes('dessert') ||
+            allText.includes('tea') ||
+            allText.includes('beverage')
+          );
+        case 'FAMILY':
+          return (
+            allText.includes('family') ||
+            allText.includes('north indian') ||
+            allText.includes('thali') ||
+            allText.includes('biryani') ||
+            allText.includes('indian') ||
+            allText.includes('multi')
+          );
+        case 'BUDGET':
+          return (
+            allText.includes('street') ||
+            allText.includes('fast food') ||
+            allText.includes('rolls') ||
+            allText.includes('budget') ||
+            (r.offer && (r.offer.includes('400') || r.offer.includes('500') || r.offer.includes('300') || r.offer.includes('200')))
+          );
+        case 'LUXURY':
+          return (
+            allText.includes('fine') ||
+            allText.includes('luxury') ||
+            allText.includes('lounge') ||
+            (typeof r.rating === 'number' && r.rating >= 4.3)
+          );
+        case 'ROOFTOP':
+          return (
+            allText.includes('rooftop') ||
+            allText.includes('sky') ||
+            allText.includes('lounge') ||
+            allText.includes('outdoor') ||
+            allText.includes('terrace')
+          );
+        case 'PURE_VEG':
+          return (
+            r.category === 'Veg' ||
+            allText.includes('pure veg') ||
+            allText.includes('vegetarian') ||
+            allText.includes('jain')
+          );
+        case 'NIGHTLIFE':
+          return (
+            allText.includes('nightlife') ||
+            allText.includes('bar') ||
+            allText.includes('pub') ||
+            allText.includes('club') ||
+            allText.includes('brewery') ||
+            allText.includes('drinks')
+          );
+        case 'BUFFET':
+          return (
+            allText.includes('buffet') ||
+            allText.includes('unlimited') ||
+            allText.includes('barbeque') ||
+            allText.includes('grill') ||
+            allText.includes('bbq')
+          );
+        case 'ALL':
+        default:
+          return true;
+      }
+    });
+
+    // If no specific match found for a niche category, show all active restaurants
+    if (filtered.length === 0) {
+      filtered = allRestaurants;
+    }
+
+    // Apply secondary filter
+    if (selectedFilter === 'today' || selectedFilter === 'tomorrow') {
+      filtered = filtered.filter((r) => !r.isClosed);
+    } else if (selectedFilter === 'sort') {
+      filtered = [...filtered].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    }
+
+    return filtered.map((r, index) => {
+      const cardType: 'wide-promo' | 'detailed' = index % 3 === 0 ? 'wide-promo' : 'detailed';
+      const imgUri =
+        typeof r.image === 'string'
+          ? r.image
+          : (r.image as any)?.uri ||
+            'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800&auto=format&fit=crop&q=80';
+      const distStr =
+        typeof r.distance === 'number' && !isNaN(r.distance) ? `${r.distance.toFixed(1)} km` : '';
+      const locStr = r.address ? `${r.address}${distStr ? `, ${distStr}` : ''}` : (r.city || 'Bhubaneswar');
+
+      return {
+        id: r.id,
+        name: r.name,
+        location: locStr,
+        image: imgUri,
+        cardType,
+        discountTag: r.discount || (index % 2 === 0 ? 'UP TO 20% OFF' : 'FLAT 15% OFF'),
+        rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.5,
+        cuisines: r.cuisine || r.category || 'Multi-Cuisine',
+        priceForTwo: r.offer ? `₹${r.offer} for two` : '₹800 for two',
+        isAd: index === 1,
+        tableBookingAvailable: true,
+        bankOffers: [
+          'Up to 10% off with bank cards',
+          'Get extra ₹75 off with UPI',
+        ],
+      };
+    });
+  }, [allRestaurants, moodKey, selectedFilter]);
 
   const isFavorite = useCallback(
     (id: string) => {
@@ -463,7 +298,7 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
   );
 
   const handleToggleFav = (item: DiningCardItem) => {
-    setLocalFavIds(prev => {
+    setLocalFavIds((prev) => {
       const next = new Set(prev);
       if (next.has(item.id)) {
         next.delete(item.id);
@@ -473,27 +308,11 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
       return next;
     });
 
-    const matchingRest = allRestaurants.find(
-      r => r.id === item.id || r.name.toLowerCase() === item.name.toLowerCase()
-    );
-    if (matchingRest) {
-      toggleFavourite(matchingRest.id);
-    } else {
-      toggleFavourite(item.id);
-    }
+    toggleFavourite(item.id);
   };
 
   const handleRestaurantPress = (item: DiningCardItem) => {
-    const matchingRest = allRestaurants.find(
-      r => r.id === item.id || r.name.toLowerCase() === item.name.toLowerCase()
-    );
-    if (matchingRest) {
-      onNavigateToRestaurant(matchingRest.id);
-    } else if (allRestaurants.length > 0) {
-      onNavigateToRestaurant(allRestaurants[0].id);
-    } else {
-      onNavigateToRestaurant(item.id);
-    }
+    onNavigateToRestaurant(item.id);
   };
 
   return (
@@ -586,7 +405,15 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
 
         {/* ── RESTAURANT CARDS LIST ── */}
         <View style={styles.cardsContainer}>
-          {config.restaurants.map((item) => {
+          {dynamicRestaurants.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyTitle}>No Restaurants Found</Text>
+              <Text style={styles.emptySubtitle}>
+                No live restaurants currently match this dining mood.
+              </Text>
+            </View>
+          ) : (
+            dynamicRestaurants.map((item) => {
             const fav = isFavorite(item.id);
 
             // TYPE A: WIDE PROMO CARD (e.g. Zouk Restro Sky Lounge, Starlit, Kake Di Hatti)
@@ -746,7 +573,8 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
                 </View>
               </TouchableOpacity>
             );
-          })}
+          })
+        )}
         </View>
 
         {/* Bottom spacer */}
@@ -1063,5 +891,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Medium',
     fontSize: 11.5,
     color: '#BDBDBD',
+  },
+  emptyContainer: {
+    paddingVertical: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  emptyTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 18,
+    color: '#DEA430',
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 14,
+    color: '#8E8E8E',
+    textAlign: 'center',
   },
 });

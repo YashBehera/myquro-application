@@ -44,6 +44,7 @@ import { LocationSelectorSheet } from './LocationSelectorSheet';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
 import { DineoutRestaurantDetailScreen } from './DineoutRestaurantDetailScreen';
 import { DiningCategoryScreen, DiningMoodKey } from './DiningCategoryScreen';
+import { BookingConfirmationScreen } from './BookingConfirmationScreen';
 import { Restaurant } from '../types';
 
 import {
@@ -179,6 +180,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
 
   // Reservations List
   const [myReservations, setMyReservations] = useState<TableReservation[]>([]);
+  const [selectedBookingForConfirmation, setSelectedBookingForConfirmation] = useState<any | null>(null);
 
   const showToast = (msg: string) => {
     if (Platform.OS === 'android') {
@@ -278,7 +280,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         restaurantName: selectedRestaurant.name,
         restaurantAddress: selectedRestaurant.location,
         numberOfGuests: selectedGuests,
-        dateLabel: dateOptions[selectedDateIndex].full,
+        dateLabel: dateOptions[selectedDateIndex]?.full || 'Today',
         timeSlot: selectedTimeSlot,
         seatingArea: selectedSeating,
         occasion: selectedOccasion,
@@ -291,36 +293,73 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
       setMyReservations((prev) => [newRes, ...prev]);
       setIsBookingSubmitting(false);
       setBookingModalVisible(false);
-      setBookingSuccessModal(newRes);
+      setSelectedBookingForConfirmation(newRes);
     }, 800);
   };
 
-  const handleCancelBooking = (resId: string) => {
+  const handleCancelBooking = (bookingId: string) => {
     Alert.alert(
-      'Cancel Reservation',
+      'Cancel Reservation?',
       'Are you sure you want to cancel this table booking?',
       [
-        { text: 'Keep Booking', style: 'cancel' },
+        { text: 'Keep Reservation', style: 'cancel' },
         {
-          text: 'Cancel Table',
+          text: 'Yes, Cancel',
           style: 'destructive',
           onPress: () => {
             setMyReservations((prev) =>
-              prev.map((r) => (r.id === resId ? { ...r, status: 'cancelled' } : r))
+              prev.map((r) => (r.id === bookingId ? { ...r, status: 'cancelled' } : r))
             );
-            showToast('Reservation cancelled successfully.');
+            showToast('Reservation Cancelled');
           },
         },
       ]
     );
   };
 
-  // Filtered Venues
+  // Filter venues by selected mood & veg-only
   const filteredVenues = dineoutVenues.filter((venue) => {
     const matchesMood = selectedMood === 'ALL' || venue.mood === selectedMood;
     const matchesVeg = !isVegOnly || venue.isVegOnly;
     return matchesMood && matchesVeg;
   });
+
+  // If a booking is selected for confirmation review -> Render BookingConfirmationScreen!
+  if (selectedBookingForConfirmation) {
+    return (
+      <BookingConfirmationScreen
+        bookingDetails={{
+          id: selectedBookingForConfirmation.id,
+          restaurantId: selectedBookingForConfirmation.restaurantId,
+          restaurantName: selectedBookingForConfirmation.restaurantName,
+          restaurantAddress: selectedBookingForConfirmation.restaurantAddress,
+          date: selectedBookingForConfirmation.dateLabel || '29 Aug 2026',
+          dayName: 'TODAY',
+          time: selectedBookingForConfirmation.timeSlot || '10:30 PM',
+          mealType: 'Dinner',
+          guests: selectedBookingForConfirmation.numberOfGuests || 2,
+          offerText: selectedBookingForConfirmation.totalDiscount || 'Flat 10% off on total bill',
+          tableNumber: selectedBookingForConfirmation.tableNumber || 'Table #4',
+        }}
+        onDone={() => setSelectedBookingForConfirmation(null)}
+        onViewRestaurantDetails={() => {
+          const restId = selectedBookingForConfirmation.restaurantId;
+          setSelectedBookingForConfirmation(null);
+          const matched = allRestaurants.find((r) => r.id === restId);
+          if (matched) {
+            handleSelectDineoutRestaurant(matched);
+          }
+        }}
+        onCancelBooking={(bookingId) => {
+          setMyReservations((prev) =>
+            prev.map((r) => (r.id === bookingId ? { ...r, status: 'cancelled' } : r))
+          );
+          setSelectedBookingForConfirmation(null);
+          showToast('Reservation Cancelled');
+        }}
+      />
+    );
+  }
 
   // If a restaurant is selected in Dineout -> Render pixel-perfect Dineout detail UI!
   if (selectedDineoutDetail) {
@@ -482,20 +521,6 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
           >
             <Image source={imgImage37} style={styles.catDineoutImg} />
             <Text style={[styles.catTileLabel, styles.catTileLabelActive]}>Dineout</Text>
-          </TouchableOpacity>
-
-          {/* Tile 4: Wine Stores */}
-          <TouchableOpacity
-            style={styles.catTile}
-            activeOpacity={0.85}
-            onPress={() => {
-              if (Platform.OS === 'android') {
-                ToastAndroid.show('Showing Beverages & Refreshments', ToastAndroid.SHORT);
-              }
-            }}
-          >
-            <Image source={imgImage36} style={styles.catWineImg} />
-            <Text style={styles.catTileLabel}>Wine Stores</Text>
           </TouchableOpacity>
         </View>
 
@@ -901,7 +926,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                 ══════════════════════════════════════════════════════════════════════ */}
             <View style={styles.figmaExploreTitleSection}>
               <Text style={styles.figmaExploreMainTitle}>
-                <Text style={styles.figmaExploreCountGold}>{filteredVenues.length + 350}</Text> restaurants to explore
+                <Text style={styles.figmaExploreCountGold}>{filteredVenues.length}</Text> restaurants to explore
               </Text>
               <Text style={styles.figmaExploreSubtitle}>Featured restaurants</Text>
             </View>
@@ -909,7 +934,17 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
             {/* ══════════════════════════════════════════════════════════════════════
                 [9] PREMIUM RESTAURANT CARDS (PIXEL-PERFECT FROM FIGMA SCREENSHOT)
                 ══════════════════════════════════════════════════════════════════════ */}
-            {filteredVenues.map((venue) => {
+            {filteredVenues.length === 0 ? (
+              <View style={{ paddingVertical: 40, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: 'Urbanist-Bold', fontSize: 16, color: '#DEA430', marginBottom: 6 }}>
+                  No Restaurants Available
+                </Text>
+                <Text style={{ fontFamily: 'Urbanist-Regular', fontSize: 13, color: '#8E8E8E' }}>
+                  Try changing your mood or search filters.
+                </Text>
+              </View>
+            ) : (
+              filteredVenues.map((venue) => {
               const isFav = favouriteRestaurantsList?.some((f) => f.id === venue.id);
               
               const rating = typeof venue.rating === 'number' ? venue.rating.toFixed(1) : venue.rating;
@@ -1004,7 +1039,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                   </View>
                 </TouchableOpacity>
               );
-            })}
+            }))}
           </>
         ) : (
           /* ─── MY BOOKINGS TAB ─── */
@@ -1030,7 +1065,11 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                 return (
                   <View key={res.id} style={styles.reservationCard}>
                     {/* Res Card Header */}
-                    <View style={styles.resCardHeader}>
+                    <TouchableOpacity
+                      style={styles.resCardHeader}
+                      activeOpacity={0.8}
+                      onPress={() => setSelectedBookingForConfirmation(res)}
+                    >
                       <View style={{ flex: 1 }}>
                         <Text style={styles.resVenueName}>{res.restaurantName}</Text>
                         <View style={styles.venueLocRow}>
@@ -1050,7 +1089,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                         </Text>
                         {isConfirmed && <CheckCircle2 size={12 * SCALE} color="#4ADE80" style={{ marginLeft: 4 }} />}
                       </View>
-                    </View>
+                    </TouchableOpacity>
 
                     {/* Res Details Grid */}
                     <View style={styles.resDetailsGrid}>

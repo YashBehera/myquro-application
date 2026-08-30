@@ -65,110 +65,6 @@ interface Min200RestaurantItem {
   tag?: string;
 }
 
-const TOP_GOURMET_DATA: GourmetOptionItem[] = [
-  {
-    id: 'gourmet-punjab-grill',
-    name: 'Street Foods By...',
-    image: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=500&auto=format&fit=crop&q=80',
-    rating: 4.3,
-    time: '40–45 mins',
-    cuisines: 'Kebabs, Biryani, Mugh...',
-    discount: '₹200 OFF',
-    subDiscount: 'ABOVE ₹499',
-  },
-  {
-    id: 'gourmet-behrouz-biryani',
-    name: 'Behrouz Biryani',
-    image: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=500&auto=format&fit=crop&q=80',
-    rating: 4.3,
-    time: '30–35 mins',
-    cuisines: 'Biryani, Mughlai, Luck...',
-    discount: '₹250 OFF',
-    subDiscount: 'ABOVE ₹599',
-    badgeTag: 'Dum pukht in\nNawabi Andaaz',
-  },
-  {
-    id: 'gourmet-bocca-cafe',
-    name: 'Bocca Cafe',
-    image: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=500&auto=format&fit=crop&q=80',
-    rating: 4.5,
-    time: '35–45 mins',
-    cuisines: 'Cafe, Italian, Pizza',
-    discount: '₹200 OFF',
-    subDiscount: 'ABOVE ₹499',
-  },
-];
-
-const MIN200_RESTAURANTS: Min200RestaurantItem[] = [
-  {
-    id: 'deal-subway',
-    name: 'Subway',
-    image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?w=600&auto=format&fit=crop&q=80',
-    rating: 4.4,
-    ratingCount: '2.9K+',
-    time: '25–30 mins',
-    cuisines: 'sandwich, Salads, wrap',
-    location: 'IRC Colony',
-    distance: '7.1 km',
-    discountAmount: '₹200 OFF',
-    discountCondition: 'ABOVE ₹499',
-    eatRight: true,
-  },
-  {
-    id: 'deal-begum-biryani',
-    name: 'Begum Noor Jahan Biry...',
-    image: 'https://images.unsplash.com/photo-1633945274405-b6c8069047b0?w=600&auto=format&fit=crop&q=80',
-    rating: 4.2,
-    ratingCount: '1.6K+',
-    time: '40–50 mins',
-    cuisines: 'Biryani, Kebabs',
-    location: 'Patrapada',
-    distance: '5.0 km',
-    discountAmount: '₹200 OFF',
-    discountCondition: 'ABOVE ₹499',
-  },
-  {
-    id: 'deal-dominos',
-    name: "Domino's Pizza",
-    image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&auto=format&fit=crop&q=80',
-    rating: 4.3,
-    ratingCount: '3.8K+',
-    time: '30–40 mins',
-    cuisines: 'Pizza, Italian',
-    location: 'Patrapada',
-    distance: '4.2 km',
-    discountAmount: '₹200 OFF',
-    discountCondition: 'ABOVE ₹499',
-  },
-  {
-    id: 'deal-bbq-nation',
-    name: 'Barbeque Nation',
-    image: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=600&auto=format&fit=crop&q=80',
-    rating: 4.1,
-    ratingCount: '2.4K+',
-    time: '45–55 mins',
-    cuisines: 'North Indian, Barbecue, Kebabs',
-    location: 'Patrapada',
-    distance: '5.0 km',
-    discountAmount: '₹250 OFF',
-    discountCondition: 'ABOVE ₹599',
-  },
-  {
-    id: 'deal-asia-seven',
-    name: 'Asia Seven – Sizzling Chinese',
-    image: 'https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?w=600&auto=format&fit=crop&q=80',
-    rating: 4.4,
-    ratingCount: '8.3K+',
-    time: '40–45 mins',
-    cuisines: 'Chinese, Asian, Pan-Asian',
-    location: 'Patrapada',
-    distance: '5.0 km',
-    discountAmount: '₹200 OFF',
-    discountCondition: 'ABOVE ₹499',
-    tag: 'Best in Chinese',
-  },
-];
-
 export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
   onBack,
   onNavigateToRestaurant,
@@ -178,6 +74,58 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
   const { allRestaurants, favouriteRestaurantsList, toggleFavourite } = useViewModel();
 
   const [localFavIds, setLocalFavIds] = useState<Set<string>>(new Set());
+
+  // Dynamically compute gourmet options from real allRestaurants
+  const gourmetList: GourmetOptionItem[] = React.useMemo(() => {
+    if (!allRestaurants || allRestaurants.length === 0) return [];
+    return allRestaurants.slice(0, 6).map((r, idx) => {
+      const imgUri =
+        typeof r.image === 'string'
+          ? r.image
+          : (r.image as any)?.uri ||
+            'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=500&auto=format&fit=crop&q=80';
+      return {
+        id: r.id,
+        name: r.name,
+        image: imgUri,
+        rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.3,
+        time: '35–45 mins',
+        cuisines: r.cuisine || r.category || 'Gourmet Selection',
+        discount: idx % 2 === 0 ? '₹200 OFF' : '₹250 OFF',
+        subDiscount: idx % 2 === 0 ? 'ABOVE ₹499' : 'ABOVE ₹599',
+        badgeTag: idx === 1 ? 'Chef Special' : undefined,
+      };
+    });
+  }, [allRestaurants]);
+
+  // Dynamically compute minimum 200 off restaurants from real allRestaurants
+  const min200List: Min200RestaurantItem[] = React.useMemo(() => {
+    if (!allRestaurants || allRestaurants.length === 0) return [];
+    return allRestaurants.map((r, idx) => {
+      const imgUri =
+        typeof r.image === 'string'
+          ? r.image
+          : (r.image as any)?.uri ||
+            'https://images.unsplash.com/photo-1509722747041-616f39b57569?w=600&auto=format&fit=crop&q=80';
+      const distStr =
+        typeof r.distance === 'number' && !isNaN(r.distance) ? `${r.distance.toFixed(1)} km` : '4.5 km';
+      return {
+        id: r.id,
+        name: r.name,
+        image: imgUri,
+        rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.2,
+        ratingCount: r.reviewCount ? `${r.reviewCount}+` : '2.8K+',
+        time: '25–35 mins',
+        cuisines: r.cuisine || r.category || 'Multi-cuisine',
+        location: r.address || r.city || 'Bhubaneswar',
+        distance: distStr,
+        discountAmount: idx % 2 === 0 ? '₹200 OFF' : '₹250 OFF',
+        discountCondition: idx % 2 === 0 ? 'ABOVE ₹499' : 'ABOVE ₹599',
+        eatRight: idx % 3 === 0,
+        tag: idx === 1 ? 'Best in Town' : undefined,
+      };
+    });
+  }, [allRestaurants]);
 
   const isFavorite = useCallback(
     (id: string) => {
@@ -189,8 +137,8 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
     [favouriteRestaurantsList, localFavIds]
   );
 
-  const handleToggleFav = (item: { id: string; name: string }) => {
-    setLocalFavIds(prev => {
+  const handleToggleFav = (item: { id: string; name?: string }) => {
+    setLocalFavIds((prev) => {
       const next = new Set(prev);
       if (next.has(item.id)) {
         next.delete(item.id);
@@ -200,28 +148,12 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
       return next;
     });
 
-    const matchingRest = allRestaurants.find(
-      r => r.id === item.id || r.name.toLowerCase() === item.name.toLowerCase()
-    );
-    if (matchingRest) {
-      toggleFavourite(matchingRest.id);
-    } else {
-      toggleFavourite(item.id);
-    }
+    toggleFavourite(item.id);
   };
 
-  const handleCardPress = (item: { id: string; name: string }) => {
+  const handleCardPress = (item: { id: string; name?: string }) => {
     if (onNavigateToRestaurant) {
-      const matchingRest = allRestaurants.find(
-        r => r.id === item.id || r.name.toLowerCase() === item.name.toLowerCase()
-      );
-      if (matchingRest) {
-        onNavigateToRestaurant(matchingRest.id);
-      } else if (allRestaurants.length > 0) {
-        onNavigateToRestaurant(allRestaurants[0].id);
-      } else {
-        onNavigateToRestaurant(item.id);
-      }
+      onNavigateToRestaurant(item.id);
     }
   };
 
@@ -281,7 +213,7 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.gourmetScroll}
           >
-            {TOP_GOURMET_DATA.map((item) => {
+            {gourmetList.map((item) => {
               const fav = isFavorite(item.id);
               return (
                 <TouchableOpacity
@@ -352,7 +284,7 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
 
         {/* ── SECTION 2: VERTICAL RESTAURANTS LIST ── */}
         <View style={styles.restaurantsContainer}>
-          {MIN200_RESTAURANTS.map((item) => {
+          {min200List.map((item) => {
             const fav = isFavorite(item.id);
             return (
               <TouchableOpacity

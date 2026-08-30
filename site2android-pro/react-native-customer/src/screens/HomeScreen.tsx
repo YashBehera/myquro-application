@@ -407,20 +407,6 @@ export const HomeScreen = ({
             <Image source={imgImage37} style={styles.catDineoutImg} />
             <Text style={styles.catTileLabel}>Dineout</Text>
           </TouchableOpacity>
-
-          {/* Tile 4: Wine Stores */}
-          <TouchableOpacity
-            style={styles.catTile}
-            activeOpacity={0.85}
-            onPress={() => {
-              if (Platform.OS === 'android') {
-                ToastAndroid.show('Showing Beverages & Refreshments', ToastAndroid.SHORT);
-              }
-            }}
-          >
-            <Image source={imgImage36} style={styles.catWineImg} />
-            <Text style={styles.catTileLabel}>Wine Stores</Text>
-          </TouchableOpacity>
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════

@@ -48,6 +48,7 @@ import { StudentRewardsSubView } from './profile/StudentRewardsSubView';
 import { SettingsSubView } from './profile/SettingsSubView';
 import { LogoutSubView } from './profile/LogoutSubView';
 import { OrderDetailsSubView } from './profile/OrderDetailsSubView';
+import { RefundScreen } from './profile/RefundScreen';
 
 // ─── Figma Node 3025:799 & 3029:1729 Profile Assets ──────────────────────────
 const profHeadphones         = require('../assets/profile/profHeadphones.png');
@@ -60,13 +61,9 @@ const profSavedAddress       = require('../assets/profile/profSavedAddress.png')
 const profPaymentModes       = require('../assets/profile/profPaymentModes.png');
 const profMyRefunds          = require('../assets/profile/profMyRefunds.png');
 const profMyQuroMoney        = require('../assets/profile/profMyQuroMoney.png');
-const profHdfcCard           = require('../assets/profile/profHdfcCard.png');
 const profVouchers           = require('../assets/profile/profVouchers.png');
 const profAccountStatement   = require('../assets/profile/profAccountStatement.png');
-const profOrderTrain         = require('../assets/profile/profOrderTrain.png');
-const profCorporateRewards   = require('../assets/profile/profCorporateRewards.png');
 const profStudentRewards     = require('../assets/profile/profStudentRewards.png');
-const profInstamartWishlist  = require('../assets/profile/profInstamartWishlist.png');
 
 const orderResAsiaSeven      = require('../assets/profile/orderResAsiaSeven.png');
 
@@ -93,7 +90,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
   // Navigation states
   const [currentView, setCurrentView] = useState<
-    'main' | 'edit_profile' | 'addresses' | 'payments' | 'help' | 'favourites' | 'vouchers' | 'statement' | 'student_rewards' | 'settings' | 'logout' | 'order_details'
+    'main' | 'edit_profile' | 'addresses' | 'payments' | 'help' | 'favourites' | 'vouchers' | 'statement' | 'student_rewards' | 'settings' | 'logout' | 'order_details' | 'refunds'
   >('main');
 
   // Selected Order for Figma Node 3029:1553 Details View
@@ -267,20 +264,47 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
   const handleReorder = (order: any) => {
     if (order.items && order.items.length > 0) {
-      order.items.forEach((it: any) => {
-        addToCart({
-          id: it.id || `reorder_${Date.now()}_${Math.random()}`,
-          name: it.name || it.menuItemName || 'Food Item',
-          price: it.price || it.unitPrice || 150,
-          quantity: it.quantity || 1,
-          restaurantId: order.restaurantId || 'restaurant_1',
-          restaurantName: order.restaurantName || 'Restaurant',
-          isVeg: it.isVeg ?? false,
-        });
+      const itemsToAdd = order.items.flatMap((it: any) => {
+        // Resolve price from all possible field names
+        const resolvedPrice =
+          typeof it.price === 'number' && it.price > 0 ? it.price :
+          typeof it.unitPrice === 'number' && it.unitPrice > 0 ? it.unitPrice :
+          typeof it.basePrice === 'number' && it.basePrice > 0 ? it.basePrice :
+          parseFloat(it.price || it.unitPrice || it.basePrice || '0') || 0;
+
+        // Resolve quantity (must be at least 1)
+        const resolvedQty = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+
+        // Create one cart entry per item (with correct quantity)
+        return [{
+          id: it.id || it.menuItemId || `reorder_${Date.now()}_${Math.random()}`,
+          name: it.name || it.menuItemName || it.itemName || 'Food Item',
+          price: resolvedPrice,
+          quantity: resolvedQty,
+          restaurantId: order.restaurantId || order.restaurant_id || 'restaurant_1',
+          restaurantName: order.restaurantName || order.restaurant_name || 'Restaurant',
+          image: it.image || it.imageUrl || it.coverUrl || undefined,
+          isVeg: it.isVeg ?? it.is_veg ?? false,
+          description: it.description || '',
+          variantId: it.variantId || it.variant_id || null,
+        }];
       });
-      showToast(`Added items from ${order.restaurantName || 'Restaurant'} to your cart!`);
+
+      if (itemsToAdd.length > 0) {
+        // Use the first item to trigger the cart (handles restaurant conflict dialog)
+        addToCart(itemsToAdd[0]);
+        // Add remaining items after a tiny delay to avoid state race
+        if (itemsToAdd.length > 1) {
+          setTimeout(() => {
+            itemsToAdd.slice(1).forEach((cartItem: any) => addToCart(cartItem));
+          }, 200);
+        }
+        showToast(`${itemsToAdd.length} item${itemsToAdd.length > 1 ? 's' : ''} from ${order.restaurantName || 'Restaurant'} added to cart!`);
+      } else {
+        showToast(`Reordering from ${order.restaurantName || 'Restaurant'}...`);
+      }
     } else {
-      showToast(`Reordering from ${order.restaurantName || 'Restaurant'}...`);
+      showToast(`No items found in this order to reorder.`);
     }
   };
 
@@ -422,6 +446,24 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
     );
   }
 
+  if (currentView === 'refunds') {
+    return (
+      <RefundScreen
+        orders={ordersList}
+        onBack={() => setCurrentView('main')}
+        onNavigateToOrder={(ordId) => {
+          const matching = ordersList.find((o) => String(o.id || o.orderId) === String(ordId));
+          if (matching) {
+            setSelectedOrderForDetails(matching);
+            setCurrentView('order_details');
+          } else {
+            showToast(`Order #${ordId}`);
+          }
+        }}
+      />
+    );
+  }
+
   if (currentView === 'order_details') {
     return (
       <OrderDetailsSubView
@@ -482,6 +524,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
             onPress={() => setShowMenuOptions(false)}
           />
           <View style={styles.menuDropdownCard}>
+            {/* Option 1: Edit Profile */}
             <TouchableOpacity
               style={styles.menuDropdownItem}
               onPress={() => {
@@ -493,72 +536,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
               <Text style={styles.menuDropdownItemText}>Edit Profile</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.menuDropdownItem}
-              onPress={() => {
-                setShowMenuOptions(false);
-                setCurrentView('addresses');
-              }}
-            >
-              <MapPinned size={16} color="#DEB853" style={{ marginRight: 10 }} />
-              <Text style={styles.menuDropdownItemText}>Saved Addresses</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuDropdownItem}
-              onPress={() => {
-                setShowMenuOptions(false);
-                setCurrentView('payments');
-              }}
-            >
-              <CreditCard size={16} color="#DEB853" style={{ marginRight: 10 }} />
-              <Text style={styles.menuDropdownItemText}>Payment Modes</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuDropdownItem}
-              onPress={() => {
-                setShowMenuOptions(false);
-                setCurrentView('vouchers');
-              }}
-            >
-              <Ticket size={16} color="#DEB853" style={{ marginRight: 10 }} />
-              <Text style={styles.menuDropdownItemText}>My Vouchers</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuDropdownItem}
-              onPress={() => {
-                setShowMenuOptions(false);
-                setCurrentView('favourites');
-              }}
-            >
-              <Heart size={16} color="#DEB853" style={{ marginRight: 10 }} />
-              <Text style={styles.menuDropdownItemText}>Favourites</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuDropdownItem}
-              onPress={() => {
-                setShowMenuOptions(false);
-                setCurrentView('statement');
-              }}
-            >
-              <FileText size={16} color="#DEB853" style={{ marginRight: 10 }} />
-              <Text style={styles.menuDropdownItemText}>Account Statement</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuDropdownItem}
-              onPress={() => {
-                setShowMenuOptions(false);
-                setCurrentView('student_rewards');
-              }}
-            >
-              <GraduationCap size={16} color="#DEB853" style={{ marginRight: 10 }} />
-              <Text style={styles.menuDropdownItemText}>Student Rewards</Text>
-            </TouchableOpacity>
-
+            {/* Option 2: Settings */}
             <TouchableOpacity
               style={styles.menuDropdownItem}
               onPress={() => {
@@ -570,6 +548,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
               <Text style={styles.menuDropdownItemText}>Settings</Text>
             </TouchableOpacity>
 
+            {/* Option 3: Log Out */}
             <TouchableOpacity
               style={[styles.menuDropdownItem, { borderBottomWidth: 0 }]}
               onPress={() => {
@@ -675,7 +654,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
           <TouchableOpacity
             style={styles.quickCard}
             activeOpacity={0.8}
-            onPress={() => showToast('My Refunds: No active pending refunds.')}
+            onPress={() => setCurrentView('refunds')}
           >
             <Image source={profMyRefunds} style={styles.quickCardIcon} />
             <Text style={styles.quickCardText}>My{'\n'}Refunds</Text>
@@ -694,20 +673,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
         {/* ─── [6] GROUPED SERVICES LIST ─── */}
         <View style={styles.servicesGroupedCard}>
-          {/* Row 1: My Quro HDFC Bank Credit Card */}
-          <TouchableOpacity
-            style={styles.serviceRow}
-            activeOpacity={0.7}
-            onPress={() => showToast('My Quro HDFC Card: 5% Cashback on dining & food delivery!')}
-          >
-            <View style={styles.serviceRowLeft}>
-              <Image source={profHdfcCard} style={styles.serviceIcon} />
-              <Text style={styles.serviceTitle}>My Quro HDFC Bank Credit Card</Text>
-            </View>
-            <Image source={profChevron} style={styles.serviceChevron} />
-          </TouchableOpacity>
-
-          {/* Row 2: My Vouchers */}
+          {/* Row 1: My Vouchers */}
           <TouchableOpacity
             style={styles.serviceRow}
             activeOpacity={0.7}
@@ -720,7 +686,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
             <Image source={profChevron} style={styles.serviceChevron} />
           </TouchableOpacity>
 
-          {/* Row 3: Account Statement */}
+          {/* Row 2: Account Statement */}
           <TouchableOpacity
             style={styles.serviceRow}
             activeOpacity={0.7}
@@ -733,33 +699,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
             <Image source={profChevron} style={styles.serviceChevron} />
           </TouchableOpacity>
 
-          {/* Row 4: Order Food on Train */}
-          <TouchableOpacity
-            style={styles.serviceRow}
-            activeOpacity={0.7}
-            onPress={() => showToast('Order on Train: IRCTC meal delivery directly to your berth!')}
-          >
-            <View style={styles.serviceRowLeft}>
-              <Image source={profOrderTrain} style={styles.serviceIcon} />
-              <Text style={styles.serviceTitle}>Order Food on Train</Text>
-            </View>
-            <Image source={profChevron} style={styles.serviceChevron} />
-          </TouchableOpacity>
-
-          {/* Row 5: Corporate Rewards */}
-          <TouchableOpacity
-            style={styles.serviceRow}
-            activeOpacity={0.7}
-            onPress={() => showToast('Corporate Rewards: Link work email for tax-free meal vouchers.')}
-          >
-            <View style={styles.serviceRowLeft}>
-              <Image source={profCorporateRewards} style={styles.serviceIcon} />
-              <Text style={styles.serviceTitle}>Corporate Rewards</Text>
-            </View>
-            <Image source={profChevron} style={styles.serviceChevron} />
-          </TouchableOpacity>
-
-          {/* Row 6: Student Rewards */}
+          {/* Row 3: Student Rewards */}
           <TouchableOpacity
             style={styles.serviceRow}
             activeOpacity={0.7}
@@ -772,15 +712,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
             <Image source={profChevron} style={styles.serviceChevron} />
           </TouchableOpacity>
 
-          {/* Row 7: My Instamart Wishlist */}
+          {/* Row 4: Favourites */}
           <TouchableOpacity
             style={[styles.serviceRow, { borderBottomWidth: 0 }]}
             activeOpacity={0.7}
-            onPress={() => showToast('My Instamart Wishlist: 3 saved items.')}
+            onPress={() => setCurrentView('favourites')}
           >
             <View style={styles.serviceRowLeft}>
-              <Image source={profInstamartWishlist} style={styles.serviceIcon} />
-              <Text style={styles.serviceTitle}>My Instamart Wishlist</Text>
+              <Heart size={20} color="#DEA430" fill="#DEA43033" style={{ marginRight: 14, marginLeft: 1 }} />
+              <Text style={styles.serviceTitle}>Favourites</Text>
             </View>
             <Image source={profChevron} style={styles.serviceChevron} />
           </TouchableOpacity>

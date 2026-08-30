@@ -8,6 +8,7 @@ import {
   Platform,
   StatusBar,
   Modal,
+  Alert,
 } from 'react-native';
 import {
   ArrowLeft,
@@ -35,6 +36,8 @@ import {
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
 } from '../utils/responsive';
+
+import { BookingConfirmationScreen } from './BookingConfirmationScreen';
 
 interface BookTableScreenProps {
   restaurant: any;
@@ -175,8 +178,9 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
     (typeof restaurant?.image === 'string' ? restaurant.image : '') ||
     'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200';
 
-  // Navigation Step: 'select_slot' | 'review_summary'
-  const [currentStep, setCurrentStep] = useState<'select_slot' | 'review_summary'>('select_slot');
+  // Navigation Step: 'select_slot' | 'review_summary' | 'confirmation'
+  const [currentStep, setCurrentStep] = useState<'select_slot' | 'review_summary' | 'confirmation'>('select_slot');
+  const [confirmedBookingData, setConfirmedBookingData] = useState<any | null>(null);
 
   // Guest options (1 through 10+)
   const guestOptions = [1, 2, 3, 4, 5, 6, 7, 8, '10+'];
@@ -237,9 +241,6 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
   // Benefits Modal State
   const [benefitsModalVisible, setBenefitsModalVisible] = useState(false);
 
-  // Success Confirmation Dialog
-  const [bookingSuccessModal, setBookingSuccessModal] = useState<any | null>(null);
-
   const activeDate = dateOptions[selectedDateIndex];
   const offerTitle =
     selectedOfferId === 'one_15'
@@ -258,26 +259,56 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
 
     const newBooking = {
       id: `dine_${Date.now()}`,
+      restaurantId: restaurant?.id || 'res_kruti',
       restaurantName,
       restaurantAddress,
+      restaurantPhone: restaurant?.phone || '+91 98765 43210',
+      restaurantImage: restaurantCover,
       guests: selectedGuests,
-      date: `${activeDate.dayName}, ${activeDate.fullDate}`,
+      date: activeDate.fullDate,
+      dayName: activeDate.dayName,
       time: selectedTimeSlot,
       mealType: mealType === 'lunch' ? 'Lunch' : 'Dinner',
       tableNumber: `Table #${Math.floor(Math.random() * 15) + 1}`,
       discountApplied: discountText,
+      offerText: offerTitle,
       offerSelected: selectedOfferId === 'one_15' ? 'one EXCLUSIVE' : 'REGULAR OFFER',
     };
 
-    setBookingSuccessModal(newBooking);
+    // Notify parent & transition directly to the full confirmation screen
+    onConfirmBooking(newBooking);
+    setConfirmedBookingData(newBooking);
+    setCurrentStep('confirmation');
   };
 
-  const handleFinishBooking = () => {
-    if (bookingSuccessModal) {
-      onConfirmBooking(bookingSuccessModal);
-      setBookingSuccessModal(null);
-    }
-  };
+  // ════════════════════════════════════════════════════════════════════════════
+  // [VIEW 3] DEDICATED BOOKING CONFIRMATION SCREEN ("YOUR TABLE IS BOOKED!")
+  // ════════════════════════════════════════════════════════════════════════════
+  if (currentStep === 'confirmation' && confirmedBookingData) {
+    return (
+      <BookingConfirmationScreen
+        bookingDetails={confirmedBookingData}
+        onDone={onBack}
+        onPayBill={() => {
+          Alert.alert(
+            'Pay Bill',
+            'Please ask your server for the bill and pay via My Quro Dineout during your visit to avail the discount.'
+          );
+        }}
+        onViewRestaurantDetails={() => onBack()}
+        onCancelBooking={() => {
+          Alert.alert('Reservation Cancelled', 'Your table booking has been cancelled.');
+          onBack();
+        }}
+        onHelp={() => {
+          Alert.alert(
+            'Customer Support',
+            'Contact us at support@myquro.com or call 1800-123-4567 for reservation assistance.'
+          );
+        }}
+      />
+    );
+  }
 
   // ════════════════════════════════════════════════════════════════════════════
   // [VIEW 2] REVIEW & SUMMARY TICKET SCREEN (WHEN PROCEED IS CLICKED)
@@ -423,36 +454,6 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Confirmation Dialog */}
-        <Modal visible={!!bookingSuccessModal} transparent animationType="fade">
-          <View style={styles.modalBackdropCenter}>
-            <View style={styles.successDialog}>
-              <CheckCircle2 size={54 * SCALE} color="#4ADE80" />
-              <Text style={styles.successDialogTitle}>Table Reserved!</Text>
-              <Text style={styles.successDialogSub}>
-                {bookingSuccessModal?.restaurantName}
-              </Text>
-              <View style={styles.successTicketBox}>
-                <Text style={styles.successTicketText}>
-                  📅 {bookingSuccessModal?.date} • 🕒 {bookingSuccessModal?.time}
-                </Text>
-                <Text style={styles.successTicketHighlight}>
-                  👥 {bookingSuccessModal?.guests} Guests • {bookingSuccessModal?.tableNumber}
-                </Text>
-                <Text style={styles.successTicketDiscount}>
-                  🎁 {bookingSuccessModal?.discountApplied}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.successDialogBtn}
-                activeOpacity={0.88}
-                onPress={handleFinishBooking}
-              >
-                <Text style={styles.successDialogBtnText}>Awesome, Done!</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
       </View>
     );
   }

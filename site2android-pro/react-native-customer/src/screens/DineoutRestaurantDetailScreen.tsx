@@ -456,7 +456,8 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
         restaurant={restaurant}
         onBack={() => setIsBookTableScreenOpen(false)}
         onConfirmBooking={(bookingDetails) => {
-          setIsBookTableScreenOpen(false);
+          // Do NOT close BookTableScreen here — BookingConfirmationScreen renders
+          // inside BookTableScreen and will call onBack (above) when the user taps "Done".
           if (onBookTable) {
             onBookTable(bookingDetails);
           }

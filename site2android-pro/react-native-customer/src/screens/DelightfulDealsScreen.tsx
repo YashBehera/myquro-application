@@ -48,153 +48,6 @@ interface DealCardItem {
   category: string;
 }
 
-const DEALS_DATA: DealCardItem[] = [
-  {
-    id: 'deal-punjab-grill',
-    name: 'Street Foods By Punjab Grill',
-    image: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=600&auto=format&fit=crop&q=80',
-    rating: 4.3,
-    time: '40-45 mins',
-    cuisine: 'Kebabs',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: true,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-bbq-nation',
-    name: 'Barbeque Nation',
-    image: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=600&auto=format&fit=crop&q=80',
-    rating: 4.1,
-    time: '45-55 mins',
-    cuisine: 'North Indian',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: true,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-ubq-meals',
-    name: 'UBQ-Meals,Thalis & Bowls',
-    image: 'https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?w=600&auto=format&fit=crop&q=80',
-    rating: 4.2,
-    time: '40-50 mins',
-    cuisine: 'North Indian',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: true,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-kfc',
-    name: 'KFC',
-    image: 'https://images.unsplash.com/photo-1513639776629-7b61b0ac49cb?w=600&auto=format&fit=crop&q=80',
-    rating: 4.5,
-    time: '25-30 mins',
-    cuisine: 'Burgers',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: false,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-wow-china',
-    name: 'Wow! China',
-    image: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=600&auto=format&fit=crop&q=80',
-    rating: 4.1,
-    time: '30-35 mins',
-    cuisine: 'Chinese',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: false,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-asia-seven',
-    name: 'Asia Seven – Sizzling Chinese',
-    image: 'https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?w=600&auto=format&fit=crop&q=80',
-    rating: 4.4,
-    time: '40-45 mins',
-    cuisine: 'Chinese',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: false,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-dominos',
-    name: "Domino's Pizza",
-    image: 'https://images.unsplash.com/photo-1534308983496-4fabb1a015ee?w=600&auto=format&fit=crop&q=80',
-    rating: 4.4,
-    time: '20-25 mins',
-    cuisine: 'Pizzas, Fast Food',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: false,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-biryani-kilo',
-    name: 'Biryani By Kilo',
-    image: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600&auto=format&fit=crop&q=80',
-    rating: 4.3,
-    time: '35-40 mins',
-    cuisine: 'Biryani, Mughlai',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: false,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-burger-king',
-    name: 'Burger King',
-    image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&auto=format&fit=crop&q=80',
-    rating: 4.2,
-    time: '25-30 mins',
-    cuisine: 'Burgers, Fast Food',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-    isAd: false,
-    category: '70% OFF',
-  },
-  {
-    id: 'deal-haldirams',
-    name: "Haldiram's",
-    image: 'https://images.unsplash.com/photo-1601050690597-df0568f70950?w=600&auto=format&fit=crop&q=80',
-    rating: 4.5,
-    time: '30-35 mins',
-    cuisine: 'Sweets, Chaat',
-    discount: 'ITEMS STARTING AT 49',
-    subDiscount: 'FROM ₹49',
-    isAd: false,
-    category: 'ITEMS STARTING AT 49',
-  },
-  {
-    id: 'deal-kwality-walls',
-    name: "Kwality Wall's Ice Cream",
-    image: 'https://images.unsplash.com/photo-1501443762994-82bd5dace89a?w=600&auto=format&fit=crop&q=80',
-    rating: 4.6,
-    time: '15-20 mins',
-    cuisine: 'Desserts, Ice Cream',
-    discount: 'ITEMS STARTING AT 49',
-    subDiscount: 'FROM ₹49',
-    isAd: false,
-    category: 'ITEMS STARTING AT 49',
-  },
-  {
-    id: 'deal-behrouz',
-    name: 'Behrouz Biryani',
-    image: 'https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=600&auto=format&fit=crop&q=80',
-    rating: 4.4,
-    time: '35-45 mins',
-    cuisine: 'Royal Biryani',
-    discount: 'UPTO 60% OFF',
-    subDiscount: 'UPTO ₹120',
-    isAd: false,
-    category: 'UPTO 60% OFF',
-  },
-];
-
 const FILTER_TABS = [
   '70% OFF',
   'ITEMS STARTING AT 49',
@@ -210,48 +63,6 @@ const CRAVINGS_DATA = [
   { label: 'Nuggets', image: 'https://images.unsplash.com/photo-1562967914-608f82629710?w=200&q=80' },
 ];
 
-const EXPLORE_RESTAURANTS_DATA = [
-  {
-    id: 'deal-punjab-grill',
-    name: 'Street Foods By Punjab Grill',
-    image: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=600&auto=format&fit=crop&q=80',
-    rating: 4.3,
-    ratingCount: '9.5K+',
-    time: '40-45 mins',
-    cuisines: 'Kebabs, Biryani, Mughlai',
-    location: 'Patrapada',
-    distance: '5.0 km',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-  },
-  {
-    id: 'deal-bbq-nation',
-    name: 'Barbeque Nation',
-    image: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=600&auto=format&fit=crop&q=80',
-    rating: 4.1,
-    ratingCount: '4.8K+',
-    time: '45-55 mins',
-    cuisines: 'North Indian, Barbeque',
-    location: 'Saheed Nagar',
-    distance: '3.8 km',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-  },
-  {
-    id: 'deal-ubq-meals',
-    name: 'UBQ-Meals,Thalis & Bowls',
-    image: 'https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?w=600&auto=format&fit=crop&q=80',
-    rating: 4.2,
-    ratingCount: '1.2K+',
-    time: '40-50 mins',
-    cuisines: 'North Indian, Thalis',
-    location: 'Saheed Nagar',
-    distance: '4.2 km',
-    discount: '70% OFF',
-    subDiscount: 'UPTO ₹140',
-  },
-];
-
 export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
   onBack,
   onNavigateToRestaurant,
@@ -263,21 +74,93 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
   const [activeTab, setActiveTab] = useState<string>('70% OFF');
   const [localFavIds, setLocalFavIds] = useState<Set<string>>(new Set());
 
-  // Merge live restaurants that might have discounts
-  const combinedDeals = useMemo(() => {
-    let list = [...DEALS_DATA];
+  // Dynamically build deals list from real allRestaurants
+  const combinedDeals: DealCardItem[] = useMemo(() => {
+    if (!allRestaurants || allRestaurants.length === 0) return [];
 
+    return allRestaurants.map((r, idx) => {
+      const discount =
+        idx % 3 === 0
+          ? '70% OFF'
+          : idx % 3 === 1
+          ? 'ITEMS STARTING AT 49'
+          : 'UPTO 60% OFF';
+      const subDiscount =
+        idx % 3 === 0 ? 'UPTO ₹140' : idx % 3 === 1 ? 'FROM ₹49' : 'UPTO ₹120';
+      const imgUri =
+        typeof r.image === 'string'
+          ? r.image
+          : (r.image as any)?.uri ||
+            'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=600&auto=format&fit=crop&q=80';
+
+      return {
+        id: r.id,
+        name: r.name,
+        image: imgUri,
+        rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.3,
+        time: '30-40 mins',
+        cuisine: r.cuisine || r.category || 'Multi-cuisine',
+        discount: r.discount || discount,
+        subDiscount,
+        isAd: idx === 0,
+        category: discount,
+      };
+    });
+  }, [allRestaurants]);
+
+  // Filter based on active tab
+  const filteredDeals = useMemo(() => {
     if (activeTab === '70% OFF') {
-      return list.filter(item => item.category === '70% OFF');
+      const res = combinedDeals.filter(
+        (item) => item.discount.includes('70%') || item.category === '70% OFF'
+      );
+      return res.length > 0 ? res : combinedDeals;
     } else if (activeTab === 'ITEMS STARTING AT 49') {
-      return list.filter(item => item.category === 'ITEMS STARTING AT 49' || item.discount.includes('49'));
+      const res = combinedDeals.filter(
+        (item) => item.discount.includes('49') || item.category === 'ITEMS STARTING AT 49'
+      );
+      return res.length > 0 ? res : combinedDeals;
     } else if (activeTab === 'UPTO 60% OFF') {
-      return list.filter(item => item.category === 'UPTO 60% OFF' || item.discount.includes('60%'));
+      const res = combinedDeals.filter(
+        (item) => item.discount.includes('60%') || item.category === 'UPTO 60% OFF'
+      );
+      return res.length > 0 ? res : combinedDeals;
     } else if (activeTab === 'FLAT ₹150 OFF') {
-      return list.filter(item => item.subDiscount.includes('140') || item.discount.includes('70%'));
+      const res = combinedDeals.filter(
+        (item) => item.discount.includes('150') || item.subDiscount.includes('140')
+      );
+      return res.length > 0 ? res : combinedDeals;
     }
-    return list;
-  }, [activeTab]);
+    return combinedDeals;
+  }, [combinedDeals, activeTab]);
+
+  // Dynamically build explore list from real allRestaurants
+  const exploreRestaurantsList = useMemo(() => {
+    if (!allRestaurants || allRestaurants.length === 0) return [];
+    return allRestaurants.map((r, idx) => {
+      const imgUri =
+        typeof r.image === 'string'
+          ? r.image
+          : (r.image as any)?.uri ||
+            'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=600&auto=format&fit=crop&q=80';
+      const distStr =
+        typeof r.distance === 'number' && !isNaN(r.distance) ? `${r.distance.toFixed(1)} km` : '4.5 km';
+
+      return {
+        id: r.id,
+        name: r.name,
+        image: imgUri,
+        rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.2,
+        ratingCount: r.reviewCount ? `${r.reviewCount}+` : '1.5K+',
+        time: '35-45 mins',
+        cuisines: r.cuisine || r.category || 'Multi-cuisine',
+        location: r.address || r.city || 'Bhubaneswar',
+        distance: distStr,
+        discount: r.discount || (idx % 2 === 0 ? '70% OFF' : 'FLAT ₹150 OFF'),
+        subDiscount: idx % 2 === 0 ? 'UPTO ₹140' : 'ABOVE ₹399',
+      };
+    });
+  }, [allRestaurants]);
 
   const isFavorite = useCallback(
     (id: string) => {
@@ -289,8 +172,8 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
     [favouriteRestaurantsList, localFavIds]
   );
 
-  const handleToggleFav = (item: DealCardItem) => {
-    setLocalFavIds(prev => {
+  const handleToggleFav = (item: { id: string; name?: string }) => {
+    setLocalFavIds((prev) => {
       const next = new Set(prev);
       if (next.has(item.id)) {
         next.delete(item.id);
@@ -300,28 +183,12 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
       return next;
     });
 
-    const matchingRest = allRestaurants.find(
-      r => r.id === item.id || r.name.toLowerCase() === item.name.toLowerCase()
-    );
-    if (matchingRest) {
-      toggleFavourite(matchingRest.id);
-    } else {
-      toggleFavourite(item.id);
-    }
+    toggleFavourite(item.id);
   };
 
-  const handleCardPress = (item: DealCardItem) => {
+  const handleCardPress = (item: { id: string; name?: string }) => {
     if (onNavigateToRestaurant) {
-      const matchingRest = allRestaurants.find(
-        r => r.id === item.id || r.name.toLowerCase() === item.name.toLowerCase()
-      );
-      if (matchingRest) {
-        onNavigateToRestaurant(matchingRest.id);
-      } else if (allRestaurants.length > 0) {
-        onNavigateToRestaurant(allRestaurants[0].id);
-      } else {
-        onNavigateToRestaurant(item.id);
-      }
+      onNavigateToRestaurant(item.id);
     }
   };
 
@@ -626,7 +493,7 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
         <View style={styles.exploreSection}>
           <Text style={styles.sectionTitle}>Explore More Restaurants</Text>
           <View style={styles.exploreList}>
-            {EXPLORE_RESTAURANTS_DATA.map((item) => {
+            {exploreRestaurantsList.map((item) => {
               const fav = isFavorite(item.id);
               return (
                 <TouchableOpacity
