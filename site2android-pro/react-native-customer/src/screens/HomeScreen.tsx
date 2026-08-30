@@ -22,6 +22,7 @@ import {
   Alert,
 } from 'react-native';
 import { Heart, MoreVertical } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
@@ -106,8 +107,10 @@ export const HomeScreen = ({
   onNavigateToDelightfulDeals,
   onNavigateToFreeTreat,
   onNavigateToMin200,
+  onNavigateToInstamart,
   navigation,
 }: any) => {
+  const insets = useSafeAreaInsets();
   const {
     allRestaurants,
     restaurantsList,
@@ -310,7 +313,7 @@ export const HomeScreen = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 0] TOP HEADER (Location on left, Free Delivery + Profile on right)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
           {/* Left Column: Home label + Location Address */}
           <View style={styles.headerLeftCol}>
             <TouchableOpacity
@@ -384,11 +387,7 @@ export const HomeScreen = ({
           <TouchableOpacity
             style={styles.catTile}
             activeOpacity={0.85}
-            onPress={() => {
-              if (Platform.OS === 'android') {
-                ToastAndroid.show('Instamart delivery in 4 mins', ToastAndroid.SHORT);
-              }
-            }}
+            onPress={() => onNavigateToInstamart && onNavigateToInstamart()}
           >
             <View style={styles.instamartImgWrap}>
               <Image source={imgImage38} style={styles.catInstamartImg} />
@@ -854,7 +853,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 2 : 4,
     paddingBottom: 8,
     backgroundColor: '#000000',
   },

@@ -43,6 +43,7 @@ import { useViewModel } from '../state/MainViewModel';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
 import { DineoutRestaurantDetailScreen } from './DineoutRestaurantDetailScreen';
+import { DiningCategoryScreen, DiningMoodKey } from './DiningCategoryScreen';
 import { Restaurant } from '../types';
 
 import {
@@ -112,6 +113,7 @@ interface DiningOutScreenProps {
   onNavigateToHome?: () => void;
   onNavigateToDelivery?: () => void;
   onNavigateToPickup?: () => void;
+  onNavigateToInstamart?: () => void;
   initialRestaurantId?: string | null;
 }
 
@@ -137,6 +139,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
   onNavigateToSearch,
   onNavigateToProfile,
   onNavigateToHome,
+  onNavigateToInstamart,
   initialRestaurantId,
 }) => {
   const insets = useSafeAreaInsets();
@@ -159,6 +162,9 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
 
   // Selected Dineout Detail Screen State
   const [selectedDineoutDetail, setSelectedDineoutDetail] = useState<any | null>(null);
+
+  // Selected Dineout Mood Category Screen State ("What's on your mind?")
+  const [selectedMoodCategory, setSelectedMoodCategory] = useState<DiningMoodKey | null>(null);
 
   // Booking Modal States
   const [selectedRestaurant, setSelectedRestaurant] = useState<any | null>(null);
@@ -344,6 +350,29 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
     );
   }
 
+  // If a Mood Category is selected ("What's on your mind?") -> Render DiningCategoryScreen!
+  if (selectedMoodCategory) {
+    return (
+      <DiningCategoryScreen
+        moodKey={selectedMoodCategory}
+        onBack={() => setSelectedMoodCategory(null)}
+        onNavigateToRestaurant={(id) => {
+          const rest = allRestaurants.find((r) => r.id === id);
+          if (rest) {
+            handleSelectDineoutRestaurant(rest);
+          } else {
+            onNavigateToRestaurant(id);
+          }
+        }}
+        onNavigateToSearch={onNavigateToSearch}
+        onBookTable={(venue) => {
+          setSelectedRestaurant(venue);
+          setBookingModalVisible(true);
+        }}
+      />
+    );
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent={false} />
@@ -435,11 +464,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
           <TouchableOpacity
             style={styles.catTile}
             activeOpacity={0.85}
-            onPress={() => {
-              if (Platform.OS === 'android') {
-                ToastAndroid.show('Instamart delivery in 4 mins', ToastAndroid.SHORT);
-              }
-            }}
+            onPress={() => onNavigateToInstamart && onNavigateToInstamart()}
           >
             <View style={styles.instamartImgWrap}>
               <Image source={imgImage38} style={styles.catInstamartImg} />
@@ -593,7 +618,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
               <TouchableOpacity
                 style={styles.figmaCatCard}
                 activeOpacity={0.85}
-                onPress={() => setSelectedMood('BUFFET')}
+                onPress={() => setSelectedMoodCategory('BUFFET')}
               >
                 <View style={styles.figmaCatCardHeader}>
                   <Text style={styles.figmaCatCardTitleMuted}>Up To</Text>
@@ -606,7 +631,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
               <TouchableOpacity
                 style={styles.figmaCatCard}
                 activeOpacity={0.85}
-                onPress={() => setSelectedMood('ALL')}
+                onPress={() => setSelectedMoodCategory('ROOFTOP')}
               >
                 <View style={styles.figmaCatCardHeader}>
                   <Text style={styles.figmaCatCardTitleWhite}>Top</Text>
@@ -619,7 +644,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
               <TouchableOpacity
                 style={styles.figmaCatCard}
                 activeOpacity={0.85}
-                onPress={() => setSelectedMood('LUXURY')}
+                onPress={() => setSelectedMoodCategory('LUXURY')}
               >
                 <View style={styles.figmaCatCardHeader}>
                   <Text style={styles.figmaCatCardTitleWhite}>Fine</Text>
@@ -632,7 +657,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
               <TouchableOpacity
                 style={styles.figmaCatCard}
                 activeOpacity={0.85}
-                onPress={() => setSelectedMood('ROOFTOP')}
+                onPress={() => setSelectedMoodCategory('NIGHTLIFE')}
               >
                 <View style={styles.figmaCatCardHeader}>
                   <Text style={styles.figmaCatCardTitleWhite}>Nightlife</Text>
@@ -656,7 +681,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                 <TouchableOpacity
                   style={styles.wideBannerCard}
                   activeOpacity={0.85}
-                  onPress={() => setSelectedMood('ALL')}
+                  onPress={() => setSelectedMoodCategory('ALL')}
                 >
                   <Text style={styles.wideBannerTitle}>Restaurants{'\n'}near me</Text>
                   <Image source={restaurantsNearMe} style={styles.wideBannerImg} resizeMode="contain" />
@@ -666,7 +691,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                 <TouchableOpacity
                   style={styles.wideBannerCard}
                   activeOpacity={0.85}
-                  onPress={() => setSelectedMood('ROOFTOP')}
+                  onPress={() => setSelectedMoodCategory('ROOFTOP')}
                 >
                   <Text style={styles.wideBannerTitle}>Late night{'\n'}specials</Text>
                   <Image source={lateNightSpecials} style={styles.wideBannerImg} resizeMode="contain" />
@@ -678,7 +703,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                 {/* Row 1 */}
                 <View style={styles.moodGridRow}>
                   {/* Category 1: Cafes */}
-                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('CAFE')}>
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMoodCategory('CAFE')}>
                     <View style={styles.gridMoodHeaderWrap}>
                       <Coffee size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
                       <Text style={styles.gridMoodTitle}>Cafes</Text>
@@ -687,7 +712,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                   </TouchableOpacity>
 
                   {/* Category 2: Nightlife & Drinks */}
-                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('ROOFTOP')}>
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMoodCategory('NIGHTLIFE')}>
                     <View style={styles.gridMoodHeaderWrap}>
                       <Wine size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
                       <Text style={styles.gridMoodTitle}>Nightlife &{'\n'}Drinks</Text>
@@ -696,7 +721,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                   </TouchableOpacity>
 
                   {/* Category 3: Buffets */}
-                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('BUFFET')}>
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMoodCategory('BUFFET')}>
                     <View style={styles.gridMoodHeaderWrap}>
                       <Utensils size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
                       <Text style={styles.gridMoodTitle}>Buffets</Text>
@@ -705,7 +730,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                   </TouchableOpacity>
 
                   {/* Category 4: Pure Veg */}
-                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setIsVegOnly(!isVegOnly)}>
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMoodCategory('PURE_VEG')}>
                     <View style={styles.gridMoodHeaderWrap}>
                       <Leaf size={15 * SCALE} color="#4ADE80" style={styles.gridMoodIcon} />
                       <Text style={[styles.gridMoodTitle, { color: '#4ADE80' }]}>Pure Veg</Text>
@@ -717,7 +742,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                 {/* Row 2 */}
                 <View style={styles.moodGridRow}>
                   {/* Category 5: Rooftop Places */}
-                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('ROOFTOP')}>
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMoodCategory('ROOFTOP')}>
                     <View style={styles.gridMoodHeaderWrap}>
                       <Sunset size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
                       <Text style={styles.gridMoodTitle}>Rooftop{'\n'}Places</Text>
@@ -726,7 +751,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                   </TouchableOpacity>
 
                   {/* Category 6: Family Friendly */}
-                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('ALL')}>
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMoodCategory('FAMILY')}>
                     <View style={styles.gridMoodHeaderWrap}>
                       <Users size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
                       <Text style={styles.gridMoodTitle}>Family{'\n'}Friendly</Text>
@@ -735,7 +760,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                   </TouchableOpacity>
 
                   {/* Category 7: Luxury Dining */}
-                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('LUXURY')}>
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMoodCategory('LUXURY')}>
                     <View style={styles.gridMoodHeaderWrap}>
                       <Crown size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
                       <Text style={styles.gridMoodTitle}>Luxury{'\n'}dining</Text>
@@ -744,7 +769,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
                   </TouchableOpacity>
 
                   {/* Category 8: Budget Friendly */}
-                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMood('ALL')}>
+                  <TouchableOpacity style={styles.gridMoodCard} activeOpacity={0.85} onPress={() => setSelectedMoodCategory('BUDGET')}>
                     <View style={styles.gridMoodHeaderWrap}>
                       <Coins size={15 * SCALE} color="#DEA430" style={styles.gridMoodIcon} />
                       <Text style={styles.gridMoodTitle}>Budget{'\n'}friendly</Text>
@@ -1331,7 +1356,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 2 : 4,
     paddingBottom: 8,
     backgroundColor: '#000000',
   },
@@ -1574,24 +1598,27 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   vegBtnTextActive: {
-    color: '#00A352',
+    color: '#00D06C',
   },
   vegTrack: {
-    width: 24 * SCALE,
-    height: 13 * SCALE,
+    width: 26 * SCALE,
+    height: 14 * SCALE,
     borderRadius: 7 * SCALE,
-    backgroundColor: '#262626',
+    backgroundColor: '#1E1E1E',
+    borderWidth: 1,
+    borderColor: '#333333',
+    padding: 1.5,
     justifyContent: 'center',
-    paddingHorizontal: 1.5,
   },
   vegTrackActive: {
     backgroundColor: '#00A352',
+    borderColor: '#00D06C',
   },
   vegThumb: {
-    width: 10 * SCALE,
-    height: 10 * SCALE,
-    borderRadius: 5 * SCALE,
-    backgroundColor: '#737373',
+    width: 9 * SCALE,
+    height: 9 * SCALE,
+    borderRadius: 4.5 * SCALE,
+    backgroundColor: '#777777',
   },
   vegThumbActive: {
     backgroundColor: '#FFFFFF',
@@ -1601,12 +1628,10 @@ const styles = StyleSheet.create({
   // ── 3. STICKY SEARCH & TAB SWITCHER WRAPPER ───────────────────
   stickySearchAndNavWrapper: {
     backgroundColor: '#000000',
-    paddingTop: 4,
+    paddingTop: 0,
     paddingBottom: 2,
     zIndex: 20,
     elevation: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#161614',
   },
   tabContentContainer: {
     paddingTop: 8,

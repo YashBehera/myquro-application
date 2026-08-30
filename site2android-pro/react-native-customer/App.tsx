@@ -52,6 +52,8 @@ import { ReorderScreen } from './src/screens/ReorderScreen';
 import { DelightfulDealsScreen } from './src/screens/DelightfulDealsScreen';
 import { FreeTreatScreen } from './src/screens/FreeTreatScreen';
 import { Min200OffScreen } from './src/screens/Min200OffScreen';
+import { InstamartScreen } from './src/screens/InstamartScreen';
+import { DiningCategoryScreen, DiningMoodKey } from './src/screens/DiningCategoryScreen';
 
 import {
   ShoppingBag,
@@ -59,7 +61,7 @@ import {
   X,
 } from 'lucide-react-native';
 
-type ScreenId = 'home' | 'explore' | 'favourites' | 'profile' | 'login' | 'search' | 'restaurant-detail' | 'cart' | 'checkout' | 'dining' | 'tracking' | 'reorder' | 'delightful-deals' | 'free-treat' | 'min-200';
+type ScreenId = 'home' | 'explore' | 'favourites' | 'profile' | 'login' | 'search' | 'restaurant-detail' | 'cart' | 'checkout' | 'dining' | 'tracking' | 'reorder' | 'delightful-deals' | 'free-treat' | 'min-200' | 'instamart' | 'dining-category';
 
 // Direct Figma Bottom Nav Assets
 const navFoodImg     = require('./src/assets/home/figma/imgImage7.png');
@@ -83,6 +85,7 @@ const MainAppContent: React.FC = () => {
   const [autoOpenCheckout, setAutoOpenCheckout] = useState(false);
   const [checkoutCart, setCheckoutCart] = useState<SimCartItem[]>([]);
   const [checkoutRestaurantId, setCheckoutRestaurantId] = useState<string | null>(null);
+  const [activeMoodKey, setActiveMoodKey] = useState<DiningMoodKey>('ROOFTOP');
 
   useEffect(() => {
     const checkAppInit = async () => {
@@ -190,6 +193,10 @@ const MainAppContent: React.FC = () => {
               setPrevScreen('home');
               setActiveScreen('min-200');
             }}
+            onNavigateToInstamart={() => {
+              setPrevScreen('home');
+              setActiveScreen('instamart');
+            }}
           />
         );
       case 'explore':
@@ -294,6 +301,10 @@ const MainAppContent: React.FC = () => {
             onNavigateToProfile={() => setActiveScreen('profile')}
             onNavigateToDelivery={() => setActiveScreen('home')}
             onNavigateToPickup={() => setActiveScreen('home')}
+            onNavigateToInstamart={() => {
+              setPrevScreen('dining');
+              setActiveScreen('instamart');
+            }}
           />
         );
       case 'delightful-deals':
@@ -329,6 +340,28 @@ const MainAppContent: React.FC = () => {
             }}
           />
         );
+      case 'instamart':
+        return (
+          <InstamartScreen
+            onBack={() => setActiveScreen(prevScreen || 'home')}
+            onNavigateToSearch={() => {
+              setPrevScreen('instamart');
+              setActiveScreen('search');
+            }}
+          />
+        );
+      case 'dining-category':
+        return (
+          <DiningCategoryScreen
+            moodKey={activeMoodKey}
+            onBack={() => setActiveScreen(prevScreen || 'dining')}
+            onNavigateToRestaurant={navigateToRestaurant}
+            onNavigateToSearch={() => {
+              setPrevScreen('dining-category');
+              setActiveScreen('search');
+            }}
+          />
+        );
       default:
         return (
           <HomeScreen
@@ -355,6 +388,10 @@ const MainAppContent: React.FC = () => {
               setPrevScreen('home');
               setActiveScreen('min-200');
             }}
+            onNavigateToInstamart={() => {
+              setPrevScreen('home');
+              setActiveScreen('instamart');
+            }}
           />
         );
     }
@@ -363,19 +400,19 @@ const MainAppContent: React.FC = () => {
   return (
     <SafeAreaView
       style={[styles.mainContainer, { backgroundColor: '#000000' }]}
-      edges={activeScreen === 'tracking' || activeScreen === 'dining' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' ? [] : ['top', 'left', 'right']}
+      edges={activeScreen === 'home' || activeScreen === 'dining' || activeScreen === 'tracking' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' || activeScreen === 'instamart' || activeScreen === 'dining-category' ? [] : ['top', 'left', 'right']}
     >
       <StatusBar
         barStyle="light-content"
-        backgroundColor={activeScreen === 'tracking' || activeScreen === 'dining' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' ? 'transparent' : '#000000'}
-        translucent={activeScreen === 'tracking' || activeScreen === 'dining' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200'}
+        backgroundColor={activeScreen === 'home' || activeScreen === 'dining' || activeScreen === 'tracking' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' || activeScreen === 'instamart' || activeScreen === 'dining-category' ? 'transparent' : '#000000'}
+        translucent={activeScreen === 'home' || activeScreen === 'dining' || activeScreen === 'tracking' || activeScreen === 'delightful-deals' || activeScreen === 'free-treat' || activeScreen === 'min-200' || activeScreen === 'instamart' || activeScreen === 'dining-category'}
       />
 
       {/* Screen Viewport with Crossfade simulator */}
       <View style={styles.viewport}>{renderScreen()}</View>
 
       {/* ── FIGMA BOTTOM NAV BAR ── (node 3019:296–316) */}
-      {activeScreen !== 'restaurant-detail' && activeScreen !== 'checkout' && activeScreen !== 'cart' && activeScreen !== 'search' && activeScreen !== 'dining' && activeScreen !== 'tracking' && activeScreen !== 'profile' && activeScreen !== 'delightful-deals' && activeScreen !== 'free-treat' && activeScreen !== 'min-200' && (
+      {activeScreen !== 'restaurant-detail' && activeScreen !== 'checkout' && activeScreen !== 'cart' && activeScreen !== 'search' && activeScreen !== 'dining' && activeScreen !== 'tracking' && activeScreen !== 'profile' && activeScreen !== 'delightful-deals' && activeScreen !== 'free-treat' && activeScreen !== 'min-200' && activeScreen !== 'instamart' && activeScreen !== 'dining-category' && (
         <View style={[styles.bottomNavBar, { bottom: Math.max(insets.bottom, 14) }]}>
           {/* Food */}
           <TouchableOpacity
