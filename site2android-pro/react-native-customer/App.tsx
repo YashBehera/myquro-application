@@ -137,12 +137,6 @@ const MainAppContent: React.FC = () => {
   }, [navStack.length]);
 
   useEffect(() => {
-    if (authState.type === 'Authenticated' && activeScreen === 'login') {
-      switchTab('home');
-    }
-  }, [authState.type, activeScreen]);
-
-  useEffect(() => {
     const checkAppInit = async () => {
       try {
         const onboarded = await AsyncStorage.getItem('@has_completed_onboarding');

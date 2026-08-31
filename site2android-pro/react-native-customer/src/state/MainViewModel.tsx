@@ -712,7 +712,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || 'Failed to send verification code. Please try again.');
+      throw new Error(errorData.message || 'Failed to send OTP. Please check the number and try again.');
     }
   };
 
@@ -741,8 +741,8 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || 'Invalid or expired OTP. Please try again.');
       }
-      const data = await response.json();
 
+      const data = await response.json();
       const userName = data?.user?.name || 'Customer';
       const userEmail = data?.user?.email || `${phone}@myquro.customer`;
       const userRole = data?.user?.role || 'customer';

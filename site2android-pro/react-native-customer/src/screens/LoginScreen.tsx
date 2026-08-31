@@ -68,7 +68,8 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setIsLoading(true);
     setOtpError(null);
     try {
-      await sendOtp(phone);
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      await sendOtp(fullPhone);
       setAuthMode("otp");
       setCooldown(30);
     } catch (error: any) {
@@ -86,9 +87,10 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setIsLoading(true);
     setOtpError(null);
     try {
-      await sendOtp(phone);
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      await sendOtp(fullPhone);
       setCooldown(30);
-      Alert.alert("OTP Resent", `A new 6-digit verification code has been sent to +91 ${phone}`);
+      Alert.alert("OTP Resent", `A new 6-digit code has been sent to +91 ${phone}`);
     } catch (error: any) {
       setOtpError(error.message || "Failed to resend OTP. Please try again.");
     } finally {
@@ -105,18 +107,15 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setIsLoading(true);
     setOtpError(null);
     try {
-      const authStateResult = await verifyOtp(phone, otpCode);
+      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
+      const authStateResult = await verifyOtp(fullPhone, otpCode);
       setVerifiedState(authStateResult);
-      if (authStateResult && authStateResult.type === 'Authenticated') {
-        await setAuthenticatedState(authStateResult);
-        onBack();
-      } else {
-        setAuthMode("verified");
-      }
-    } catch (error: any) {
-      setOtpError(error.message || "Invalid OTP. Please check the code and try again.");
-    } finally {
+      await setAuthenticatedState(authStateResult);
       setIsLoading(false);
+      setAuthMode("verified");
+    } catch (error: any) {
+      setIsLoading(false);
+      setOtpError(error.message || "Invalid OTP. Please try again.");
     }
   };
 
