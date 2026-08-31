@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "204432755757",
+    "project_id": "myquro-89e0b",
+    "storage_bucket": "myquro-89e0b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:204432755757:android:af8464eb433d986554bca4",
+        "android_client_info": {
+          "package_name": "com.aistudio.myquro.pkfxt"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKoWNZCHtJpatnvOWQJ9iKc95ge0149BM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

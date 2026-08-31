@@ -13,6 +13,7 @@ import { RestaurantRepository } from '../data/RestaurantRepository';
 import { RestaurantDatabase } from '../data/RestaurantDatabase';
 import { BACKEND_URL } from '../config';
 import { SecureStorage } from '../utils/secureStorage';
+import { sendFirebasePhoneOtp, verifyFirebasePhoneOtp, isFirebaseConfigured } from '../services/firebaseAuth';
 
 export interface SavedAddress {
   id: string;
@@ -36,8 +37,8 @@ interface ViewModelContextType {
   toggleBiometrics: () => void;
   authState: AuthState;
   login: (email: string, name: string, password?: string, isLogin?: boolean) => Promise<void>;
-  sendOtp: (phone: string) => Promise<void>;
-  verifyOtp: (phone: string, otp: string) => Promise<AuthState>;
+  sendOtp: (phone: string, recaptchaToken?: string) => Promise<void>;
+  verifyOtp: (phone: string, otp: string, directIdToken?: string) => Promise<AuthState>;
   setAuthenticatedState: (state: AuthState) => Promise<void>;
   logout: () => void;
   deleteAccount: () => Promise<void>;
@@ -118,6 +119,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [userOrders, setUserOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [firebaseSessionInfo, setFirebaseSessionInfo] = useState<string | null>(null);
 
   // Global currentLocation state
   const [currentLocation, setCurrentLocation] = useState({
@@ -701,7 +703,22 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   };
 
-  const sendOtp = async (phone: string) => {
+  const sendOtp = async (phone: string, recaptchaToken?: string) => {
+    // If Firebase is configured with valid API keys, use real-time Firebase SMS
+    if (isFirebaseConfigured()) {
+      try {
+        const { sessionInfo } = await sendFirebasePhoneOtp(phone, recaptchaToken);
+        if (sessionInfo) {
+          setFirebaseSessionInfo(sessionInfo);
+          return;
+        }
+      } catch (err: any) {
+        console.warn("⚠️ [MainViewModel] Firebase Phone OTP failed, trying backend fallback:", err.message);
+        throw err;
+      }
+    }
+
+    // Fallback to Backend OTP route
     const response = await fetch(`${BACKEND_URL}/api/customer/auth/send-otp`, {
       method: 'POST',
       headers: {
@@ -726,23 +743,64 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     await AsyncStorage.setItem('@auth_state', JSON.stringify(safeAuthState));
   };
 
-  const verifyOtp = async (phone: string, otp: string): Promise<AuthState> => {
+  const verifyOtp = async (phone: string, otp: string, directIdToken?: string): Promise<AuthState> => {
     setAuthState({ type: 'Loading' });
     try {
-      const response = await fetch(`${BACKEND_URL}/api/customer/auth/verify-otp`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ phone, otp }),
-      });
+      let data: any = null;
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Invalid or expired OTP. Please try again.');
+      // 1. Direct verified Firebase ID Token from webview bridge
+      if (directIdToken) {
+        try {
+          const tokenResponse = await fetch(`${BACKEND_URL}/api/customer/auth/verify-firebase-token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken: directIdToken, phone }),
+          });
+          if (tokenResponse.ok) {
+            data = await tokenResponse.json();
+          }
+        } catch (err: any) {
+          console.warn("⚠️ [MainViewModel] verify-firebase-token failed:", err.message);
+        }
       }
 
-      const data = await response.json();
+      // 2. If we have an active Firebase session, verify with Firebase first
+      if (!data && firebaseSessionInfo && isFirebaseConfigured()) {
+        try {
+          const { idToken } = await verifyFirebasePhoneOtp(firebaseSessionInfo, otp);
+          if (idToken) {
+            // Send verified Firebase ID token to backend
+            const tokenResponse = await fetch(`${BACKEND_URL}/api/customer/auth/verify-firebase-token`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ idToken, phone }),
+            });
+            if (tokenResponse.ok) {
+              data = await tokenResponse.json();
+            }
+          }
+        } catch (firebaseErr: any) {
+          console.warn("⚠️ [MainViewModel] Firebase verify failed, trying backend direct OTP:", firebaseErr.message);
+        }
+      }
+
+      // 2. Direct backend verify fallback
+      if (!data) {
+        const response = await fetch(`${BACKEND_URL}/api/customer/auth/verify-otp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ phone, otp }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Invalid or expired OTP. Please try again.');
+        }
+        data = await response.json();
+      }
+
       const userName = data?.user?.name || 'Customer';
       const userEmail = data?.user?.email || `${phone}@myquro.customer`;
       const userRole = data?.user?.role || 'customer';

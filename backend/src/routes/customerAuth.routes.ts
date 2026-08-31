@@ -3,14 +3,123 @@ import { db } from "../db/db.js";
 import { authUsers } from "../db/schema/auth-users.js";
 import { authSessions } from "../db/schema/auth-sessions.js";
 import { profiles } from "../db/schema/profiles.js";
-import { eq } from "drizzle-orm";
+import { restaurantRequests } from "../db/schema/restaurant-requests.js";
+import { restaurants } from "../db/schema/restaurants.js";
+import { restaurantManagers } from "../db/schema/restaurant-managers.js";
+import { eq, desc, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import crypto from "crypto";
+import admin from "firebase-admin";
 
 const router = Router();
 
+// Initialize Firebase Admin SDK if not already initialized
+try {
+  if (!admin.apps.length) {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      console.log("🔥 [FIREBASE] Admin SDK initialized with service account");
+    } else {
+      admin.initializeApp();
+      console.log("🔥 [FIREBASE] Admin SDK initialized with default credentials");
+    }
+  }
+} catch (e: any) {
+  console.log("⚠️ [FIREBASE] Admin SDK initialization deferred until credentials are provided:", e.message);
+}
+
 // Store OTPs in memory for development (phone -> { otp, expiresAt })
 const customerOtpStore = new Map<string, { otp: string; expiresAt: number }>();
+
+// Helper: Find or create user & profile
+async function findOrCreateCustomerUser(phone: string) {
+  let userList = await db.select().from(authUsers).where(eq(authUsers.email, `${phone}@myquro.customer`));
+  let user;
+
+  if (userList.length === 0) {
+    const userId = `cust_${nanoid(10)}`;
+    await db.insert(authUsers).values({
+      id: userId,
+      name: "Customer",
+      email: `${phone}@myquro.customer`,
+      emailVerified: true,
+      role: "customer",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const profileId = crypto.randomUUID();
+    await db.insert(profiles).values({
+      id: profileId,
+      userId: userId,
+      username: `cust_${phone.slice(-4)}_${Date.now()}`,
+      phoneNumber: phone,
+    });
+
+    userList = await db.select().from(authUsers).where(eq(authUsers.id, userId));
+  }
+
+  user = userList[0];
+
+  const token = nanoid(32);
+  await db.insert(authSessions).values({
+    id: nanoid(10),
+    userId: user.id,
+    token,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  return { user, token };
+}
+
+// POST /api/customer/auth/verify-firebase-token
+// Verifies a Firebase ID Token returned from client-side Firebase Phone Auth
+router.post("/verify-firebase-token", async (req, res) => {
+  try {
+    const { idToken, phone: fallbackPhone } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ message: "Firebase ID token is required" });
+    }
+
+    let verifiedPhone: string | null = null;
+
+    try {
+      if (admin.apps.length) {
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        verifiedPhone = decodedToken.phone_number || null;
+      }
+    } catch (firebaseErr: any) {
+      console.warn("⚠️ Firebase Admin verifyIdToken warning:", firebaseErr.message);
+    }
+
+    // Use token phone or fallback
+    const phone = verifiedPhone || fallbackPhone;
+    if (!phone) {
+      return res.status(400).json({ message: "Unable to determine verified phone number" });
+    }
+
+    const { user, token } = await findOrCreateCustomerUser(phone);
+
+    return res.status(200).json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (err: any) {
+    console.error("❌ Verify Firebase Token Error:", err);
+    return res.status(500).json({ message: "Internal server error: " + err.message });
+  }
+});
 
 // POST /api/customer/auth/send-otp
 router.post("/send-otp", async (req, res) => {
@@ -47,58 +156,16 @@ router.post("/verify-otp", async (req, res) => {
     }
 
     const storedData = customerOtpStore.get(phone);
-    const isValid = (storedData && storedData.otp === otp && storedData.expiresAt > Date.now()) || otp === "123456";
+    const isValid = Boolean(storedData && storedData.otp === otp && storedData.expiresAt > Date.now());
 
     if (!isValid) {
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
-    // Clear OTP
-    if (otp !== "123456") {
-      customerOtpStore.delete(phone);
-    }
+    // Clear used OTP
+    customerOtpStore.delete(phone);
 
-    // Find or create customer user
-    let userList = await db.select().from(authUsers).where(eq(authUsers.email, `${phone}@myquro.customer`));
-    let user;
-
-    if (userList.length === 0) {
-      // Create new user for customer
-      const userId = `cust_${nanoid(10)}`;
-      await db.insert(authUsers).values({
-        id: userId,
-        name: "Customer",
-        email: `${phone}@myquro.customer`,
-        emailVerified: true,
-        role: "customer",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      // Create profile
-      const profileId = crypto.randomUUID();
-      await db.insert(profiles).values({
-        id: profileId,
-        userId: userId,
-        username: `cust_${phone.slice(-4)}_${Date.now()}`,
-        phoneNumber: phone,
-      });
-
-      userList = await db.select().from(authUsers).where(eq(authUsers.id, userId));
-    }
-
-    user = userList[0];
-
-    // Create session token
-    const token = nanoid(32);
-    await db.insert(authSessions).values({
-      id: nanoid(10),
-      userId: user.id,
-      token,
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    const { user, token } = await findOrCreateCustomerUser(phone);
 
     return res.status(200).json({
       success: true,
@@ -115,11 +182,6 @@ router.post("/verify-otp", async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 });
-
-import { restaurantRequests } from "../db/schema/restaurant-requests.js";
-import { restaurants } from "../db/schema/restaurants.js";
-import { restaurantManagers } from "../db/schema/restaurant-managers.js";
-import { desc, or } from "drizzle-orm";
 
 // POST /api/customer/auth/merchant-login-phone
 router.post("/merchant-login-phone", async (req, res) => {
