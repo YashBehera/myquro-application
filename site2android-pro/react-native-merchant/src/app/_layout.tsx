@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
+import { BACKEND_URL } from '../config';
+import { initBackendKeepAlive } from '../utils/backendKeepAlive';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -18,6 +20,10 @@ const queryClient = new QueryClient({
 });
 
 export default function RootLayout() {
+  useEffect(() => {
+    const cleanup = initBackendKeepAlive(BACKEND_URL);
+    return cleanup;
+  }, []);
   const [fontsLoaded, fontError] = useFonts({
     'Urbanist-Regular': require('../../assets/fonts/Urbanist-Regular.ttf'),
     'Urbanist-Medium': require('../../assets/fonts/Urbanist-SemiBold.ttf'),

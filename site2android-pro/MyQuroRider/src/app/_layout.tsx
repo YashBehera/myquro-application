@@ -1,9 +1,12 @@
+import React, { useEffect } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { useColorScheme, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RiderProvider } from '@/context/RiderContext';
 import { IncomingRequestModal } from '@/components/IncomingRequestModal';
+import { BACKEND_URL } from '@/config';
+import { initBackendKeepAlive } from '@/utils/backendKeepAlive';
 import {
   useFonts,
   Urbanist_400Regular,
@@ -13,6 +16,11 @@ import {
 } from '@expo-google-fonts/urbanist';
 
 export default function RootLayout() {
+  useEffect(() => {
+    const cleanup = initBackendKeepAlive(BACKEND_URL);
+    return cleanup;
+  }, []);
+
   const colorScheme = useColorScheme();
 
   const [fontsLoaded] = useFonts({

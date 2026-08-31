@@ -34,6 +34,8 @@ import {
 import { ViewModelProvider, useViewModel } from './src/state/MainViewModel';
 import { THEME, COLORS } from './src/theme/Theme';
 import { moderateScale, scale, isTablet, isSmallDevice, SCREEN_WIDTH } from './src/utils/responsive';
+import { BACKEND_URL } from './src/config';
+import { initBackendKeepAlive } from './src/utils/backendKeepAlive';
 
 // Screen Imports
 import { SplashScreen } from './src/screens/SplashScreen';
@@ -608,8 +610,60 @@ const MainAppContent: React.FC = () => {
   );
 };
 
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('💥 [ErrorBoundary] Uncaught application error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <StatusBar barStyle="light-content" backgroundColor="#000000" />
+          <Text style={{ color: '#E8C547', fontSize: 20, fontWeight: 'bold', marginBottom: 12 }}>
+            Something went wrong
+          </Text>
+          <Text style={{ color: '#A0A0A0', fontSize: 13, textAlign: 'center', marginBottom: 20 }}>
+            {this.state.error?.message || 'An unexpected error occurred.'}
+          </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: '#E8C547', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
+            onPress={() => this.setState({ hasError: false, error: null })}
+          >
+            <Text style={{ color: '#000000', fontWeight: 'bold', fontSize: 14 }}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
-  const [fontsLoaded] = useFonts({
+  useEffect(() => {
+    const cleanup = initBackendKeepAlive(BACKEND_URL);
+    return cleanup;
+  }, []);
+
+  const [fontsLoaded, fontError] = useFonts({
     'Urbanist-Regular': require('./src/assets/fonts/Urbanist-Regular.ttf'),
     'Urbanist-SemiBold': require('./src/assets/fonts/Urbanist-SemiBold.ttf'),
     'Urbanist-Bold': require('./src/assets/fonts/Urbanist-Bold.ttf'),
@@ -627,7 +681,7 @@ export default function App() {
     Urbanist_900Black,
   });
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded && !fontError) {
     return (
       <View style={{ flex: 1, backgroundColor: '#000000', justifyContent: 'center', alignItems: 'center' }}>
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
@@ -638,9 +692,11 @@ export default function App() {
 
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics} style={{ flex: 1, backgroundColor: '#000000' }}>
-      <ViewModelProvider>
-        <MainAppContent />
-      </ViewModelProvider>
+      <ErrorBoundary>
+        <ViewModelProvider>
+          <MainAppContent />
+        </ViewModelProvider>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }
