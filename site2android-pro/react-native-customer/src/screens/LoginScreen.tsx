@@ -22,7 +22,6 @@ import Svg, {
   RadialGradient,
   Stop,
 } from "react-native-svg";
-import { FirebaseRecaptcha, FirebasePhoneAuthRef } from "../components/FirebaseRecaptcha";
 import { useViewModel } from "../state/MainViewModel";
 import {
   SCALE,
@@ -49,7 +48,6 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [cooldown, setCooldown] = useState(0);
 
   const otpInputRef = useRef<TextInput>(null);
-  const recaptchaRef = useRef<FirebasePhoneAuthRef>(null);
 
   useEffect(() => {
     let timer: any;
@@ -70,12 +68,7 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setIsLoading(true);
     setOtpError(null);
     try {
-      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
-      if (recaptchaRef.current) {
-        await recaptchaRef.current.sendOtp(fullPhone);
-      } else {
-        await sendOtp(fullPhone);
-      }
+      await sendOtp(phone);
       setAuthMode("otp");
       setCooldown(30);
     } catch (error: any) {
@@ -93,14 +86,9 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setIsLoading(true);
     setOtpError(null);
     try {
-      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
-      if (recaptchaRef.current) {
-        await recaptchaRef.current.sendOtp(fullPhone);
-      } else {
-        await sendOtp(fullPhone);
-      }
+      await sendOtp(phone);
       setCooldown(30);
-      Alert.alert("OTP Resent", `A new 6-digit code has been sent to +91 ${phone}`);
+      Alert.alert("OTP Resent", `A new 6-digit verification code has been sent to +91 ${phone}`);
     } catch (error: any) {
       setOtpError(error.message || "Failed to resend OTP. Please try again.");
     } finally {
@@ -117,16 +105,7 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     setIsLoading(true);
     setOtpError(null);
     try {
-      const fullPhone = phone.startsWith('+91') ? phone : '+91' + phone;
-      let directIdToken: string | undefined;
-      if (recaptchaRef.current) {
-        try {
-          directIdToken = await recaptchaRef.current.verifyOtp(otpCode);
-        } catch (e: any) {
-          console.warn("Direct webview verify failed, falling back to REST:", e.message);
-        }
-      }
-      const authStateResult = await verifyOtp(fullPhone, otpCode, directIdToken);
+      const authStateResult = await verifyOtp(phone, otpCode);
       setVerifiedState(authStateResult);
       if (authStateResult && authStateResult.type === 'Authenticated') {
         await setAuthenticatedState(authStateResult);
@@ -589,7 +568,6 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           </View>
         </View>
       </ScrollView>
-      <FirebaseRecaptcha ref={recaptchaRef} />
     </View>
   );
 };
