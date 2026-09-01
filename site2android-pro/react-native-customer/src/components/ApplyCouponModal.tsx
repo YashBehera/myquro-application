@@ -272,7 +272,6 @@ export const ApplyCouponModal: React.FC<ApplyCouponModalProps> = ({
     };
 
     onApplyCoupon(applied);
-    showToast(`Coupon ${coupon.code} applied! Saved ₹${calculatedDiscount}`);
     onClose();
   };
 

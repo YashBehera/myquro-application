@@ -294,8 +294,8 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
   const restaurantCost = restaurant?.costForTwo || '₹1,000 for two';
   const restaurantPhone = restaurant?.phone || '';
 
-  const restaurantLat = restaurant?.latitude || 20.2520;
-  const restaurantLng = restaurant?.longitude || 85.7950;
+  const restaurantLat = Number(restaurant?.latitude || restaurant?.lat || 20.2520);
+  const restaurantLng = Number(restaurant?.longitude || restaurant?.lng || 85.7950);
 
   const isFav = favouriteRestaurantsList?.some((f) => f.id === restaurant?.id);
 
@@ -496,7 +496,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
         style={[
           styles.headerContainer,
           {
-            paddingTop: Math.max(insets.top, 12) + (isScrolled ? 6 * SCALE : 2 * SCALE),
+            paddingTop: isScrolled ? 10 * SCALE : 8 * SCALE,
           },
           isScrolled && styles.headerContainerScrolled,
         ]}
@@ -1044,17 +1044,23 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
           <View style={styles.locationSectionWrapper}>
             <Text style={styles.locationSectionTitle}>Location</Text>
 
-            {/* Real Ola Maps API Embedded MapView */}
-            <View style={styles.olaMapContainerBox}>
+            {/* Real Ola Maps API Embedded MapView with Fixed Immovable Pin */}
+            <TouchableOpacity
+              style={styles.olaMapContainerBox}
+              activeOpacity={0.9}
+              onPress={handleDirections}
+            >
               <OlaMapView
                 initialLatitude={restaurantLat}
                 initialLongitude={restaurantLng}
                 initialZoom={15.5}
-                showCenterMarker={true}
+                showCenterMarker={false}
+                fixedMarker={true}
+                interactive={false}
                 showLocateMeButton={false}
                 style={styles.olaMapViewInstance}
               />
-            </View>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.locationAddressRow}

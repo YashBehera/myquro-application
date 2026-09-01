@@ -7,7 +7,7 @@
  * - /app/src/main/java/com/example/MainActivity.kt
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets, initialWindowMetrics } from 'react-native-safe-area-context';
 import {
   StyleSheet,
@@ -20,6 +20,8 @@ import {
   ActivityIndicator,
   Platform,
   BackHandler,
+  Animated,
+  Easing,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -135,6 +137,39 @@ const MainAppContent: React.FC = () => {
     const backSub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
     return () => backSub.remove();
   }, [navStack.length]);
+
+  // ─── Smooth Screen Transition Physics ───
+  const screenOpacity = useRef(new Animated.Value(1)).current;
+  const screenTranslateY = useRef(new Animated.Value(0)).current;
+  const screenScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    // Whenever activeScreen or currentParams changes, run a buttery smooth 60fps entrance
+    screenOpacity.setValue(0.35);
+    screenTranslateY.setValue(10);
+    screenScale.setValue(0.985);
+
+    Animated.parallel([
+      Animated.timing(screenOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(screenTranslateY, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(screenScale, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [activeScreen, selectedRestaurantId, activeOrderId, activeMoodKey]);
 
   useEffect(() => {
     const checkAppInit = async () => {
@@ -439,8 +474,21 @@ const MainAppContent: React.FC = () => {
         backgroundColor="#000000"
       />
 
-      {/* Screen Viewport with Crossfade simulator */}
-      <View style={styles.viewport}>{renderScreen()}</View>
+      {/* Screen Viewport with Smooth Native Transition */}
+      <Animated.View
+        style={[
+          styles.viewport,
+          {
+            opacity: screenOpacity,
+            transform: [
+              { translateY: screenTranslateY },
+              { scale: screenScale },
+            ],
+          },
+        ]}
+      >
+        {renderScreen()}
+      </Animated.View>
 
       {/* ── FIGMA BOTTOM NAV BAR ── (node 3019:296–316) */}
       {activeScreen !== 'restaurant-detail' && activeScreen !== 'checkout' && activeScreen !== 'cart' && activeScreen !== 'search' && activeScreen !== 'dining' && activeScreen !== 'tracking' && activeScreen !== 'profile' && activeScreen !== 'delightful-deals' && activeScreen !== 'free-treat' && activeScreen !== 'min-200' && activeScreen !== 'instamart' && activeScreen !== 'dining-category' && (

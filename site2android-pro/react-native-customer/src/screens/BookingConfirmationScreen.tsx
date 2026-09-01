@@ -203,7 +203,7 @@ export const BookingConfirmationScreen: React.FC<BookingConfirmationScreenProps>
       <View
         style={[
           styles.headerRow,
-          { paddingTop: Math.max(insets.top, 12) + 4 },
+          { paddingTop: 10 * SCALE },
         ]}
       >
         <View style={{ flex: 1 }} />

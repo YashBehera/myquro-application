@@ -318,7 +318,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   const renderContent = () => {
     if (currentIndex === 0) {
       return (
-        <View style={StyleSheet.absoluteFillObject}>
+        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "#000000" }]}>
           <Image
             source={require("../assets/images/background_onboarding.png")}
             style={{
@@ -333,7 +333,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
 
     // Combined screens case 1 & case 2 for active animated rotation transition
     return (
-      <View style={StyleSheet.absoluteFillObject}>
+      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "#000000" }]}>
         <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
           <Svg
             style={StyleSheet.absoluteFillObject}
@@ -583,7 +583,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#191919",
+    backgroundColor: "#000000",
   },
   // Logo
   logoContainer: {
@@ -737,7 +737,7 @@ const styles = StyleSheet.create({
     fontFamily: "Urbanist-ExtraBold",
     fontWeight: "800",
     fontSize: 13 * scale,
-    color: "#191919",
+    color: "#000000",
     letterSpacing: 0.5 * scale,
   },
 
@@ -786,7 +786,7 @@ const styles = StyleSheet.create({
     fontFamily: "Ultra-Regular",
     fontWeight: "bold", // Explicit bold constraint
     fontSize: 12 * scale, // Exact Figma size for pill text
-    color: "#0F0F0F", // Exact charcoal color from Figma
+    color: "#000000", // Solid black text
   },
   badgeLabelText: {
     fontFamily: "Ultra-Regular",
@@ -863,7 +863,7 @@ const styles = StyleSheet.create({
     fontFamily: "Urbanist-Bold",
     fontWeight: "700",
     fontSize: 14,
-    color: "#191919",
+    color: "#000000",
     letterSpacing: 0.5,
   },
 });

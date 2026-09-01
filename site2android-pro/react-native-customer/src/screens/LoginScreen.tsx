@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   Keyboard,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, {
@@ -259,6 +260,7 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
   return (
     <View style={styles.safeArea}>
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
       {/* Golden ambient background glows */}
       <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
         <Svg style={StyleSheet.absoluteFillObject} width={SCREEN_WIDTH} height={SCREEN_HEIGHT}>
@@ -574,11 +576,11 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#191919",
+    backgroundColor: "#000000",
   },
   root: {
     flex: 1,
-    backgroundColor: "transparent",
+    backgroundColor: "#000000",
   },
   scrollContent: {
     flexGrow: 1,

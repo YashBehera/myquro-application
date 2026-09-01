@@ -18,7 +18,7 @@
  * - Sticky Footer Tactical Payment Bar (Paytm / Google Pay Quick Select + Unified Place Order CTA + Wallet Row)
  */
 
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -34,6 +34,7 @@ import {
   Image,
   ToastAndroid,
   StatusBar,
+  Animated,
 } from 'react-native';
 import {
   X,
@@ -43,13 +44,19 @@ import {
   Plus,
   Minus,
   Sparkles,
+  Banknote,
 } from 'lucide-react-native';
+import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useViewModel } from '../state/MainViewModel';
 import { BACKEND_URL } from '../config';
 import { ApplyCouponModal } from '../components/ApplyCouponModal';
 import { OrderPaymentLoaderScreen } from './OrderPaymentLoaderScreen';
+import { CelebrationPoppers } from '../components/CelebrationPoppers';
+import { PaymentOptionsSheet } from './PaymentOptionsSheet';
+import { ChooseDeliveryAddressModal } from '../components/ChooseDeliveryAddressModal';
+import { LocationSelectorSheet } from './LocationSelectorSheet';
 import {
   SCALE,
   scale,
@@ -176,7 +183,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   addLog = () => {},
 }) => {
   const insets = useSafeAreaInsets();
-  const { authState, updateCartQuantity, removeFromCart, savedAddresses, currentLocation, syncCartItems, cartItems, allRestaurants } = useViewModel();
+  const { authState, updateCartQuantity, removeFromCart, savedAddresses, currentLocation, setCurrentLocation, syncCartItems, cartItems, allRestaurants } = useViewModel();
 
   // Resolved dynamic restaurant details
   const currentRestaurant = useMemo(() => {
@@ -209,7 +216,111 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   const [showCookingModal, setShowCookingModal] = useState(false);
   const [showCouponModal, setShowCouponModal] = useState(false);
   const [showPaymentLoader, setShowPaymentLoader] = useState(false);
+  const [showPaymentOptionsSheet, setShowPaymentOptionsSheet] = useState(false);
+  const [showAddressModal, setShowAddressModal] = useState(false);
+  const [showLocationSelectorSheet, setShowLocationSelectorSheet] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [appliedCelebrationCoupon, setAppliedCelebrationCoupon] = useState<SimCoupon | null>(null);
+  const modalScaleAnim = useRef(new Animated.Value(0.82)).current;
+  const modalOpacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (appliedCelebrationCoupon) {
+      modalScaleAnim.setValue(0.82);
+      modalOpacityAnim.setValue(0);
+      Animated.parallel([
+        Animated.spring(modalScaleAnim, {
+          toValue: 1,
+          tension: 68,
+          friction: 7,
+          useNativeDriver: true,
+        }),
+        Animated.timing(modalOpacityAnim, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [appliedCelebrationCoupon]);
+
+  const getSelectedPaymentDisplayName = () => {
+    switch (selectedPayment) {
+      case 'UPI':
+        return 'PAYTM UPI';
+      case 'Google Pay':
+        return 'GOOGLE PAY';
+      case 'Card':
+        return 'VISA (•••• 0484)';
+      case 'super.money':
+        return 'SUPER.MONEY';
+      case 'PhonePe':
+        return 'PHONEPE UPI';
+      case 'Amazon Pay':
+        return 'AMAZON PAY';
+      case 'WhatsApp':
+        return 'WHATSAPP';
+      case 'COD':
+        return 'PAY ON DELIVERY';
+      default:
+        return (selectedPayment || 'PAYTM UPI').toUpperCase();
+    }
+  };
+
+  const renderFooterPaymentIcon = () => {
+    switch (selectedPayment) {
+      case 'Google Pay':
+        return (
+          <View style={styles.footerGpayIconBox}>
+            <Text style={styles.footerGpayLetter}>G</Text>
+            <Text style={styles.footerGpayText}>Pay</Text>
+          </View>
+        );
+      case 'Card':
+        return (
+          <View style={styles.footerVisaBadge}>
+            <Text style={styles.footerVisaText}>VISA</Text>
+          </View>
+        );
+      case 'super.money':
+        return (
+          <View style={styles.footerSuperMoneyBadge}>
+            <Text style={styles.footerSuperMoneyText}>S</Text>
+          </View>
+        );
+      case 'PhonePe':
+        return (
+          <View style={styles.footerPhonePeBadge}>
+            <Text style={styles.footerPhonePeText}>पे</Text>
+          </View>
+        );
+      case 'Amazon Pay':
+        return (
+          <View style={styles.footerAmazonBadge}>
+            <Text style={styles.footerAmazonText}>pay</Text>
+          </View>
+        );
+      case 'WhatsApp':
+        return (
+          <View style={styles.footerWhatsappBadge}>
+            <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91C2.13 13.66 2.59 15.36 3.45 16.86L2.05 22L7.3 20.62C8.75 21.41 10.38 21.83 12.04 21.83C17.5 21.83 21.95 17.38 21.95 11.92C21.95 9.27 20.92 6.78 19.05 4.91C17.18 3.03 14.69 2 12.04 2Z"
+                fill="#25D366"
+              />
+            </Svg>
+          </View>
+        );
+      case 'COD':
+        return (
+          <View style={styles.footerCodBadge}>
+            <Banknote size={16 * SCALE} color="#10B981" />
+          </View>
+        );
+      default:
+        return <Image source={PAYTM_LOGO} style={styles.paytmLogoImg} />;
+    }
+  };
 
   // Delivery Tab (Delivery Type | Tip | Instructions)
   const [activeDeliveryTab, setActiveDeliveryTab] = useState<'delivery_type' | 'tip' | 'instructions'>('delivery_type');
@@ -456,7 +567,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           <TouchableOpacity
             style={styles.headerAddressRow}
             activeOpacity={0.8}
-            onPress={onChangeLocationPress}
+            onPress={() => setShowAddressModal(true)}
           >
             <Image source={checkHome} style={styles.headerHomeImg} />
             <Text style={styles.headerAddressText} numberOfLines={1}>
@@ -1028,46 +1139,14 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           {/* Payment Method Selector */}
           <TouchableOpacity
             activeOpacity={0.85}
-            onPress={() => {
-              Alert.alert(
-                "Select Payment Method",
-                "Choose how you'd like to pay:",
-                [
-                  {
-                    text: "UPI · Paytm/Google Pay",
-                    onPress: () => {
-                      setSelectedPayment("UPI");
-                      if (parentSetSelectedPayment) parentSetSelectedPayment("UPI");
-                      addLog("Selected payment mode: UPI");
-                    }
-                  },
-                  {
-                    text: "Credit/Debit Card",
-                    onPress: () => {
-                      setSelectedPayment("Card");
-                      if (parentSetSelectedPayment) parentSetSelectedPayment("Card");
-                      addLog("Selected payment mode: Card");
-                    }
-                  },
-                  {
-                    text: "Cash on Delivery (COD)",
-                    onPress: () => {
-                      setSelectedPayment("COD");
-                      if (parentSetSelectedPayment) parentSetSelectedPayment("COD");
-                      addLog("Selected payment mode: COD");
-                    }
-                  },
-                  { text: "Cancel", style: "cancel" }
-                ]
-              );
-            }}
+            onPress={() => setShowPaymentOptionsSheet(true)}
             style={styles.paymentMethodQuickSelect}
           >
-            <Image source={PAYTM_LOGO} style={styles.paytmLogoImg} />
+            {renderFooterPaymentIcon()}
             <View style={styles.paymentTextsRow}>
               <View style={styles.paymentTexts}>
-                <Text style={styles.paymentMethodName}>
-                  {selectedPayment === 'UPI' ? "PAYTM UPI" : selectedPayment === 'Card' ? "CREDIT CARD" : "COD"}
+                <Text style={styles.paymentMethodName} numberOfLines={1}>
+                  {getSelectedPaymentDisplayName()}
                 </Text>
                 <Text style={styles.paymentChangeText}>CHANGE</Text>
               </View>
@@ -1164,9 +1243,99 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
             parentSetAppliedCoupon(coupon);
           }
           setInternalCoupon(coupon);
+          if (coupon && coupon.discount > 0) {
+            setAppliedCelebrationCoupon(coupon);
+          }
         }}
         restaurantId={currentRestaurant?.id || restaurantId || (cartItems && cartItems.length > 0 ? cartItems[0].restaurantId : '') || ''}
       />
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          [12.5] COUPON CELEBRATION MODAL (FIGMA / SCREENSHOT PIXEL-PERFECT)
+          ════════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={!!appliedCelebrationCoupon}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAppliedCelebrationCoupon(null)}
+      >
+        <View style={styles.celebrationModalOverlay}>
+          {/* Party Poppers / Confetti Celebration blasting behind the modal */}
+          <CelebrationPoppers active={!!appliedCelebrationCoupon} />
+
+          <TouchableOpacity
+            style={StyleSheet.absoluteFillObject}
+            activeOpacity={1}
+            onPress={() => setAppliedCelebrationCoupon(null)}
+          />
+          {appliedCelebrationCoupon && (
+            <Animated.View
+              style={[
+                styles.celebrationModalCard,
+                {
+                  opacity: modalOpacityAnim,
+                  transform: [{ scale: modalScaleAnim }],
+                  zIndex: 100,
+                  elevation: 50,
+                },
+              ]}
+            >
+              {/* Top Overflow Gold Badge with % */}
+              <View style={styles.celebrationTopBadge}>
+                <Svg width={48 * SCALE} height={48 * SCALE} viewBox="0 0 24 24" fill="none">
+                  {/* Scalloped Gold Badge */}
+                  <Path
+                    d="M12 2L14.4 3.9L17.5 3.6L18.8 6.4L21.7 7.7L21.4 10.8L23.3 13.2L21.4 15.6L21.7 18.7L18.8 20L17.5 22.8L14.4 22.5L12 24.4L9.6 22.5L6.5 22.8L5.2 20L2.3 18.7L2.6 15.6L0.7 13.2L2.6 10.8L2.3 7.7L5.2 6.4L6.5 3.6L9.6 3.9L12 2Z"
+                    fill="#DEA430"
+                  />
+                  {/* Black % Symbol */}
+                  <Path
+                    d="M9 8.5C9 9.3 8.3 10 7.5 10C6.7 10 6 9.3 6 8.5C6 7.7 6.7 7 7.5 7C8.3 7 9 7.7 9 8.5ZM18 17.5C18 18.3 17.3 19 16.5 19C15.7 19 15 18.3 15 17.5C15 16.7 15.7 16 16.5 16C17.3 16 18 16.7 18 17.5ZM17.3 7.2L6.7 18.8"
+                    stroke="#000000"
+                    strokeWidth={2.4}
+                    strokeLinecap="round"
+                  />
+                </Svg>
+              </View>
+
+              {/* Close Button X */}
+              <TouchableOpacity
+                style={styles.celebrationCloseBtn}
+                activeOpacity={0.7}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                onPress={() => setAppliedCelebrationCoupon(null)}
+              >
+                <X size={16 * SCALE} color="#FFFFFF" strokeWidth={2.5} />
+              </TouchableOpacity>
+
+              {/* Line 1: 'COUPON' applied */}
+              <Text style={styles.celebrationAppliedCodeText}>
+                ‘{appliedCelebrationCoupon.code}’ applied
+              </Text>
+
+              {/* Line 2: ₹X savings with this coupon. */}
+              <Text style={styles.celebrationSavingsHeading}>
+                <Text style={styles.celebrationSavingsGold}>₹{appliedCelebrationCoupon.discount} savings </Text>
+                with this coupon.
+              </Text>
+
+              {/* Line 3: Description */}
+              <Text style={styles.celebrationDescText}>
+                {appliedCelebrationCoupon.code} and save every time you order
+              </Text>
+
+              {/* Action Button: YAY! */}
+              <TouchableOpacity
+                style={styles.celebrationYayBtn}
+                activeOpacity={0.85}
+                onPress={() => setAppliedCelebrationCoupon(null)}
+              >
+                <Text style={styles.celebrationYayBtnText}>YAY!</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        </View>
+      </Modal>
 
       {/* ════════════════════════════════════════════════════════════════════════
           [13] FIGMA 3046:48 "HOLD ON! PAYMENT VERIFICATION" LOADER SCREEN
@@ -1203,6 +1372,83 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
         }}
         onCancel={() => {
           setShowPaymentLoader(false);
+        }}
+      />
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          [14] FULL-SCREEN FIGMA/SCREENSHOT PAYMENT OPTIONS SHEET
+          ════════════════════════════════════════════════════════════════════════ */}
+      <PaymentOptionsSheet
+        visible={showPaymentOptionsSheet}
+        onClose={() => setShowPaymentOptionsSheet(false)}
+        finalTotal={finalTotal}
+        totalItemsCount={safeCart.reduce((sum, item) => sum + (item.quantity || 1), 0)}
+        restaurantName={displayRestaurantName}
+        deliveryTime={selectedDeliveryType === 'express' ? expressEta : (selectedDeliveryType === 'eco' ? ecoEta : standardEta)}
+        deliveryAddressLabel={currentLocation?.label || (savedAddresses.length > 0 ? savedAddresses[0].type : 'Home')}
+        deliveryAddressText={currentLocation?.address || (savedAddresses.length > 0 ? savedAddresses[0].address : 'Select delivery location')}
+        selectedPayment={selectedPayment}
+        onSelectPayment={(method) => {
+          setSelectedPayment(method);
+          if (parentSetSelectedPayment) {
+            parentSetSelectedPayment(method);
+          }
+          addLog(`Selected payment mode: ${method}`);
+        }}
+        onProceedToPayWithMethod={(method) => {
+          setSelectedPayment(method);
+          if (parentSetSelectedPayment) {
+            parentSetSelectedPayment(method);
+          }
+          addLog(`Selected payment mode: ${method}`);
+        }}
+      />
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          [15] CHOOSE DELIVERY ADDRESS MODAL (POPUP)
+          ════════════════════════════════════════════════════════════════════════ */}
+      <ChooseDeliveryAddressModal
+        visible={showAddressModal}
+        onClose={() => setShowAddressModal(false)}
+        savedAddresses={savedAddresses}
+        currentLocation={currentLocation}
+        onSelectAddress={(addr) => {
+          if (setCurrentLocation) {
+            setCurrentLocation({
+              address: addr.address || `${addr.houseNo ? addr.houseNo + ', ' : ''}${addr.landmark ? addr.landmark + ', ' : ''}${addr.area ? addr.area + ', ' : ''}${addr.city || ''}`.trim(),
+              latitude: addr.latitude || currentLocation?.latitude || 20.2961,
+              longitude: addr.longitude || currentLocation?.longitude || 85.8245,
+              label: addr.type,
+            });
+          }
+          addLog(`Selected delivery address: ${addr.type || 'Custom'}`);
+        }}
+        onAddNewAddress={() => {
+          setShowAddressModal(false);
+          setShowLocationSelectorSheet(true);
+          if (onChangeLocationPress) {
+            onChangeLocationPress();
+          }
+        }}
+      />
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          [16] FULL LOCATION SELECTOR SHEET (MAP / SEARCH / ADD FORM)
+          ════════════════════════════════════════════════════════════════════════ */}
+      <LocationSelectorSheet
+        visible={showLocationSelectorSheet}
+        onClose={() => setShowLocationSelectorSheet(false)}
+        onLocationSelected={(loc) => {
+          if (setCurrentLocation) {
+            setCurrentLocation({
+              address: loc.address,
+              latitude: loc.latitude,
+              longitude: loc.longitude,
+              label: loc.label || 'Home',
+            });
+          }
+          setShowLocationSelectorSheet(false);
+          addLog(`Updated delivery address from selector: ${loc.label || loc.address}`);
         }}
       />
     </View>
@@ -2137,6 +2383,97 @@ const styles = StyleSheet.create({
     resizeMode: 'contain',
     borderRadius: 6 * SCALE,
   },
+  footerGpayIconBox: {
+    width: 28 * SCALE,
+    height: 28 * SCALE,
+    borderRadius: 6 * SCALE,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerGpayLetter: {
+    fontFamily: 'Urbanist-Black',
+    fontSize: 12 * SCALE,
+    color: '#4285F4',
+  },
+  footerGpayText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 9 * SCALE,
+    color: '#5F6368',
+    marginLeft: 0.5,
+  },
+  footerVisaBadge: {
+    width: 28 * SCALE,
+    height: 20 * SCALE,
+    borderRadius: 4 * SCALE,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerVisaText: {
+    fontFamily: 'Urbanist-Black',
+    fontSize: 8.5 * SCALE,
+    color: '#1A1F71',
+    letterSpacing: 0.5,
+  },
+  footerSuperMoneyBadge: {
+    width: 26 * SCALE,
+    height: 26 * SCALE,
+    borderRadius: 6 * SCALE,
+    backgroundColor: '#4338CA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerSuperMoneyText: {
+    fontFamily: 'Urbanist-Black',
+    fontSize: 13 * SCALE,
+    color: '#FFFFFF',
+  },
+  footerPhonePeBadge: {
+    width: 26 * SCALE,
+    height: 26 * SCALE,
+    borderRadius: 6 * SCALE,
+    backgroundColor: '#5F259F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerPhonePeText: {
+    fontFamily: 'Urbanist-Black',
+    fontSize: 14 * SCALE,
+    color: '#FFFFFF',
+  },
+  footerAmazonBadge: {
+    width: 26 * SCALE,
+    height: 26 * SCALE,
+    borderRadius: 6 * SCALE,
+    backgroundColor: '#18181B',
+    borderWidth: 1,
+    borderColor: '#27272A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerAmazonText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 9 * SCALE,
+    color: '#FFFFFF',
+  },
+  footerWhatsappBadge: {
+    width: 26 * SCALE,
+    height: 26 * SCALE,
+    borderRadius: 6 * SCALE,
+    backgroundColor: '#25D366',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerCodBadge: {
+    width: 26 * SCALE,
+    height: 26 * SCALE,
+    borderRadius: 6 * SCALE,
+    backgroundColor: '#064E3B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   paymentTextsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2348,5 +2685,98 @@ const styles = StyleSheet.create({
   },
   applyBtnTextActive: {
     color: '#000000',
+  },
+
+  // ── Coupon Celebration Modal Styles (Pixel-Perfect Figma/Screenshot) ──
+  celebrationModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28 * SCALE,
+    zIndex: 99999,
+  },
+  celebrationModalCard: {
+    width: '100%',
+    maxWidth: 325 * SCALE,
+    backgroundColor: '#141416',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 24 * SCALE,
+    paddingHorizontal: 22 * SCALE,
+    paddingBottom: 22 * SCALE,
+    paddingTop: 36 * SCALE,
+    alignItems: 'center',
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.8,
+    shadowRadius: 20,
+    elevation: 25,
+  },
+  celebrationTopBadge: {
+    position: 'absolute',
+    top: -24 * SCALE,
+    alignSelf: 'center',
+    width: 48 * SCALE,
+    height: 48 * SCALE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  celebrationCloseBtn: {
+    position: 'absolute',
+    top: 14 * SCALE,
+    right: 14 * SCALE,
+    width: 32 * SCALE,
+    height: 32 * SCALE,
+    borderRadius: 16 * SCALE,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  celebrationAppliedCodeText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 14.5 * SCALE,
+    color: '#D4D4D8',
+    textAlign: 'center',
+    marginBottom: 8 * SCALE,
+  },
+  celebrationSavingsHeading: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 22 * SCALE,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    lineHeight: 28 * SCALE,
+    marginBottom: 8 * SCALE,
+    paddingHorizontal: 6 * SCALE,
+  },
+  celebrationSavingsGold: {
+    fontFamily: 'Urbanist-Black',
+    color: '#DEA430',
+  },
+  celebrationDescText: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 13 * SCALE,
+    color: '#A1A1AA',
+    textAlign: 'center',
+    lineHeight: 18 * SCALE,
+    marginBottom: 22 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+  },
+  celebrationYayBtn: {
+    width: '100%',
+    height: 48 * SCALE,
+    borderRadius: 14 * SCALE,
+    backgroundColor: '#DEA430',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  celebrationYayBtnText: {
+    fontFamily: 'Urbanist-Black',
+    fontSize: 16 * SCALE,
+    color: '#000000',
+    letterSpacing: 0.5,
   },
 });

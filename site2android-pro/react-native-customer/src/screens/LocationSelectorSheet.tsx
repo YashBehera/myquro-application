@@ -23,6 +23,10 @@ import {
   X,
   MapPin,
   ArrowLeft,
+  Edit2,
+  Trash2,
+  Share2,
+  MoreVertical,
 } from 'lucide-react-native';
 import { OlaMapView, OlaMapViewRef } from '../components/OlaMapView';
 import { useViewModel, SavedAddress } from '../state/MainViewModel';
@@ -177,6 +181,29 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
   const [mapSearchQuery, setMapSearchQuery] = useState('');
   const [mapSuggestions, setMapSuggestions] = useState<any[]>([]);
   const [isMapSearching, setIsMapSearching] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{
+    item: any;
+    top: number;
+    right: number;
+  } | null>(null);
+
+  const openAddressMenu = (item: any, e: any) => {
+    const pageY = e?.nativeEvent?.pageY;
+    const pageX = e?.nativeEvent?.pageX;
+    if (pageY !== undefined && pageX !== undefined) {
+      setMenuAnchor({
+        item,
+        top: Math.min(pageY + 12, Dimensions.get('window').height - 150),
+        right: Math.max(16, SCREEN_WIDTH - pageX - 10),
+      });
+    } else {
+      setMenuAnchor({
+        item,
+        top: 250,
+        right: 20,
+      });
+    }
+  };
 
   // Form details states
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
@@ -302,27 +329,24 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
 
     try {
       const locationResult = await detectCurrentLocationWithOla();
-      if (locationResult) {
-        setMapRegion({
-          latitude: locationResult.latitude,
-          longitude: locationResult.longitude,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        });
-        setUserLocation({
-          latitude: locationResult.latitude,
-          longitude: locationResult.longitude,
-        });
-        setSelectedLocationInfo({
-          label: locationResult.label,
-          address: locationResult.address,
-        });
-        setArea(locationResult.label);
-        setCity(locationResult.address.split(',')[1]?.trim() || '');
-        olaMapRef.current?.recenter(locationResult.latitude, locationResult.longitude, 16.5);
-        olaMapRef.current?.setUserLocation(locationResult.latitude, locationResult.longitude);
-        return;
-      }
+      setMapRegion({
+        latitude: locationResult.latitude,
+        longitude: locationResult.longitude,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005,
+      });
+      setUserLocation({
+        latitude: locationResult.latitude,
+        longitude: locationResult.longitude,
+      });
+      setSelectedLocationInfo({
+        label: locationResult.label,
+        address: locationResult.address,
+      });
+      setArea(locationResult.label);
+      setCity(locationResult.address.split(',')[1]?.trim() || '');
+      olaMapRef.current?.recenter(locationResult.latitude, locationResult.longitude, 16.5);
+      olaMapRef.current?.setUserLocation(locationResult.latitude, locationResult.longitude);
     } catch (err) {
       console.error("Ola Maps GPS detect error:", err);
     } finally {
@@ -334,27 +358,24 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
     setIsResolvingAddress(true);
     try {
       const locationResult = await detectCurrentLocationWithOla();
-      if (locationResult) {
-        setMapRegion({
-          latitude: locationResult.latitude,
-          longitude: locationResult.longitude,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        });
-        setUserLocation({
-          latitude: locationResult.latitude,
-          longitude: locationResult.longitude,
-        });
-        setSelectedLocationInfo({
-          label: locationResult.label,
-          address: locationResult.address,
-        });
-        setArea(locationResult.label);
-        setCity(locationResult.address.split(',')[1]?.trim() || '');
-        olaMapRef.current?.recenter(locationResult.latitude, locationResult.longitude, 16.5);
-        olaMapRef.current?.setUserLocation(locationResult.latitude, locationResult.longitude);
-        return;
-      }
+      setMapRegion({
+        latitude: locationResult.latitude,
+        longitude: locationResult.longitude,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005,
+      });
+      setUserLocation({
+        latitude: locationResult.latitude,
+        longitude: locationResult.longitude,
+      });
+      setSelectedLocationInfo({
+        label: locationResult.label,
+        address: locationResult.address,
+      });
+      setArea(locationResult.label);
+      setCity(locationResult.address.split(',')[1]?.trim() || '');
+      olaMapRef.current?.recenter(locationResult.latitude, locationResult.longitude, 16.5);
+      olaMapRef.current?.setUserLocation(locationResult.latitude, locationResult.longitude);
     } catch (err) {
       console.error("Ola Maps map detect error:", err);
     } finally {
@@ -701,66 +722,59 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
 
                             return (
                               <React.Fragment key={item.id || index}>
-                                <TouchableOpacity
-                                  style={styles.figmaLocAddressRow}
-                                  activeOpacity={0.7}
-                                  onPress={() => {
-                                    onLocationSelected({
-                                      label: item.type,
-                                      address: item.address || `${item.houseNo}, ${item.area}`,
-                                      latitude: item.latitude || mapRegion.latitude,
-                                      longitude: item.longitude || mapRegion.longitude,
-                                    });
-                                    onClose();
-                                  }}
-                                >
-                                  {/* Left Distance Badge Container */}
-                                  <View style={styles.figmaLocDistanceBadge}>
-                                    {renderBadgeIcon()}
-                                    {distanceText ? (
-                                      <Text style={styles.figmaLocDistanceText}>{distanceText}</Text>
-                                    ) : null}
-                                  </View>
-
-                                  {/* Middle Details */}
-                                  <View style={styles.figmaLocAddressMiddle}>
-                                    <View style={styles.figmaLocNameRow}>
-                                      <Text style={styles.figmaLocAddressName}>{item.type}</Text>
-                                      {isSelected && (
-                                        <View style={styles.figmaLocSelectedBadge}>
-                                          <Text style={styles.figmaLocSelectedText}>SELECTED</Text>
-                                        </View>
-                                      )}
+                                <View style={styles.figmaLocAddressRow}>
+                                  <TouchableOpacity
+                                    style={styles.figmaLocAddressClickArea}
+                                    activeOpacity={0.7}
+                                    onPress={() => {
+                                      onLocationSelected({
+                                        label: item.type,
+                                        address: item.address || `${item.houseNo}, ${item.area}`,
+                                        latitude: item.latitude || mapRegion.latitude,
+                                        longitude: item.longitude || mapRegion.longitude,
+                                      });
+                                      onClose();
+                                    }}
+                                  >
+                                    {/* Left Distance Badge Container */}
+                                    <View style={styles.figmaLocDistanceBadge}>
+                                      {renderBadgeIcon()}
+                                      {distanceText ? (
+                                        <Text style={styles.figmaLocDistanceText}>{distanceText}</Text>
+                                      ) : null}
                                     </View>
-                                    {Boolean(item.houseNo || item.landmark) && (
-                                      <Text style={styles.figmaLocAddressLine1} numberOfLines={1}>
-                                        {item.houseNo ? `${item.houseNo}, ` : ''}{item.landmark || ''}
+
+                                    {/* Middle Details */}
+                                    <View style={styles.figmaLocAddressMiddle}>
+                                      <View style={styles.figmaLocNameRow}>
+                                        <Text style={styles.figmaLocAddressName}>{item.type}</Text>
+                                        {isSelected && (
+                                          <View style={styles.figmaLocSelectedBadge}>
+                                            <Text style={styles.figmaLocSelectedText}>SELECTED</Text>
+                                          </View>
+                                        )}
+                                      </View>
+                                      {Boolean(item.houseNo || item.landmark) && (
+                                        <Text style={styles.figmaLocAddressLine1} numberOfLines={1}>
+                                          {item.houseNo ? `${item.houseNo}, ` : ''}{item.landmark || ''}
+                                        </Text>
+                                      )}
+                                      <Text style={styles.figmaLocAddressLine2} numberOfLines={2}>
+                                        {item.area || item.city || item.address || ''}
                                       </Text>
-                                    )}
-                                    <Text style={styles.figmaLocAddressLine2} numberOfLines={2}>
-                                      {item.area || item.city || item.address || ''}
-                                    </Text>
-                                  </View>
+                                    </View>
+                                  </TouchableOpacity>
 
                                   {/* Right 3-Dots Action Button */}
                                   <TouchableOpacity
                                     style={styles.figmaLocRowMoreBtn}
                                     activeOpacity={0.6}
-                                    onPress={() => {
-                                      Alert.alert(
-                                        "Address Options",
-                                        `Manage address: ${item.type}`,
-                                        [
-                                          { text: "Cancel", style: "cancel" },
-                                          { text: "Edit Address", onPress: () => handleStartEditAddress(item) },
-                                          { text: "Delete Address", style: "destructive", onPress: () => deleteSavedAddress(item.id) }
-                                        ]
-                                      );
-                                    }}
+                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                    onPress={(e) => openAddressMenu(item, e)}
                                   >
                                     <VerticalThreeDots size={18} />
                                   </TouchableOpacity>
-                                </TouchableOpacity>
+                                </View>
 
                                 {!isLast && <View style={styles.figmaLocRowDivider} />}
                               </React.Fragment>
@@ -1134,6 +1148,83 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
             )}
           </KeyboardAvoidingView>
       </View>
+      {/* ── ANCHORED MINI ADDRESS DROPDOWN MODAL ── */}
+      <Modal
+        visible={!!menuAnchor}
+        transparent
+        animationType="none"
+        onRequestClose={() => setMenuAnchor(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdropTransparent}
+          activeOpacity={1}
+          onPress={() => setMenuAnchor(null)}
+        >
+          {menuAnchor && (
+            <View
+              style={[
+                styles.miniAddressDropdownCard,
+                {
+                  top: menuAnchor.top,
+                  right: menuAnchor.right,
+                },
+              ]}
+            >
+              {/* Option 1: Edit Address */}
+              <TouchableOpacity
+                style={styles.miniAddressDropdownItem}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const item = menuAnchor.item;
+                  setMenuAnchor(null);
+                  handleStartEditAddress(item);
+                }}
+              >
+                <Edit2 size={13 * SCALE} color="#DEA430" style={{ marginRight: 8 * SCALE }} />
+                <Text style={styles.miniAddressDropdownText} numberOfLines={1}>
+                  Edit
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 2: Share Address */}
+              <TouchableOpacity
+                style={styles.miniAddressDropdownItem}
+                activeOpacity={0.7}
+                onPress={async () => {
+                  const item = menuAnchor.item;
+                  setMenuAnchor(null);
+                  try {
+                    await Share.share({
+                      message: `My saved address: ${item.type} - ${item.houseNo ? item.houseNo + ', ' : ''}${item.area || item.address}`,
+                    });
+                  } catch (e) {}
+                }}
+              >
+                <Share2 size={13 * SCALE} color="#DEA430" style={{ marginRight: 8 * SCALE }} />
+                <Text style={styles.miniAddressDropdownText} numberOfLines={1}>
+                  Share
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 3: Delete Address */}
+              <TouchableOpacity
+                style={[styles.miniAddressDropdownItem, { borderBottomWidth: 0 }]}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const item = menuAnchor.item;
+                  setMenuAnchor(null);
+                  deleteSavedAddress(item.id);
+                }}
+              >
+                <Trash2 size={13 * SCALE} color="#EF4444" style={{ marginRight: 8 * SCALE }} />
+                <Text style={[styles.miniAddressDropdownText, { color: '#EF4444' }]} numberOfLines={1}>
+                  Delete
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </TouchableOpacity>
+      </Modal>
     </Modal>
   );
 };
@@ -1342,6 +1433,45 @@ const styles = StyleSheet.create({
     padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  figmaLocAddressClickArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modalBackdropTransparent: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+    zIndex: 99999,
+  },
+  miniAddressDropdownCard: {
+    position: 'absolute',
+    width: 140 * SCALE,
+    backgroundColor: '#16171B',
+    borderRadius: 12 * SCALE,
+    borderWidth: 1.2,
+    borderColor: 'rgba(222, 164, 48, 0.4)',
+    paddingVertical: 3 * SCALE,
+    zIndex: 999999,
+    elevation: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.75,
+    shadowRadius: 12,
+  },
+  miniAddressDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 11 * SCALE,
+    paddingVertical: 10 * SCALE,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  miniAddressDropdownText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 12.5 * SCALE,
+    color: '#E4E4E7',
+    flex: 1,
   },
   figmaLocRowDivider: {
     height: 1,

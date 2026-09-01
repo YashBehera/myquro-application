@@ -327,7 +327,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
         <View
           style={[
             styles.checkoutHeaderContainer,
-            { paddingTop: Math.max(insets.top, 12) + 4 },
+            { paddingTop: 10 * SCALE },
           ]}
         >
           {/* Back Button */}
@@ -716,7 +716,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
         <View
           style={[
             styles.topBarContainer,
-            { top: Math.max(insets.top, 12) + 2 },
+            { top: 10 * SCALE },
           ]}
         >
           <TouchableOpacity
@@ -733,7 +733,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
           style={styles.scrollContent}
           contentContainerStyle={[
             styles.scrollInner,
-            { paddingTop: Math.max(insets.top, 12) + 50 * SCALE },
+            { paddingTop: 58 * SCALE },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"

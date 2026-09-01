@@ -324,7 +324,7 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
         <View
           style={[
             styles.reviewHeaderContainer,
-            { paddingTop: Math.max(insets.top, 12) + 4 },
+            { paddingTop: 10 * SCALE },
           ]}
         >
           <TouchableOpacity
@@ -471,7 +471,7 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
       <View
         style={[
           styles.headerContainer,
-          { paddingTop: Math.max(insets.top, 12) + 4 },
+          { paddingTop: 10 * SCALE },
         ]}
       >
         <TouchableOpacity

@@ -166,6 +166,47 @@ interface PairingItem {
   image: any;
 }
 
+const parseIsVeg = (item: any): boolean => {
+  if (item.isVeg !== undefined && item.isVeg !== null) {
+    if (typeof item.isVeg === 'boolean') return item.isVeg;
+    if (typeof item.isVeg === 'string') return item.isVeg.toLowerCase() === 'true' || item.isVeg === '1' || item.isVeg.toLowerCase() === 'veg';
+    if (typeof item.isVeg === 'number') return item.isVeg === 1;
+  }
+  if (item.is_veg !== undefined && item.is_veg !== null) {
+    if (typeof item.is_veg === 'boolean') return item.is_veg;
+    if (typeof item.is_veg === 'string') return item.is_veg.toLowerCase() === 'true' || item.is_veg === '1' || item.is_veg.toLowerCase() === 'veg';
+    if (typeof item.is_veg === 'number') return item.is_veg === 1;
+  }
+  if (item.foodType) {
+    return item.foodType.toLowerCase() === 'veg';
+  }
+  if (item.type) {
+    return item.type.toLowerCase() === 'veg';
+  }
+  const nonVegKeywords = /chicken|mutton|fish|prawn|prawns|egg|eggs|crab|meat|beef|pork|non-?veg|wings|keema|gosht|tandoori chicken|butter chicken|tikka chicken|biryani.*(chicken|mutton)|salmon|tuna|lamb|bacon|pepperoni|seekh/i;
+  const nameDesc = `${item.name || ''} ${item.description || ''} ${item.category || ''}`;
+  if (nonVegKeywords.test(nameDesc)) {
+    return false;
+  }
+  return true;
+};
+
+const parseIsEatRight = (item: any): boolean => {
+  if (item.isEatRight !== undefined && item.isEatRight !== null) {
+    if (typeof item.isEatRight === 'boolean') return item.isEatRight;
+    if (typeof item.isEatRight === 'string') return item.isEatRight.toLowerCase() === 'true' || item.isEatRight === '1';
+    if (typeof item.isEatRight === 'number') return item.isEatRight === 1;
+  }
+  if (item.is_eat_right !== undefined && item.is_eat_right !== null) {
+    if (typeof item.is_eat_right === 'boolean') return item.is_eat_right;
+    if (typeof item.is_eat_right === 'string') return item.is_eat_right.toLowerCase() === 'true' || item.is_eat_right === '1';
+    if (typeof item.is_eat_right === 'number') return item.is_eat_right === 1;
+  }
+  const healthyKeywords = /salad|sprout|oats|quinoa|fruit|green|keto|healthy|diet|soup|protein|boiled|grilled|steamed|avocado|juice|smoothie|roti|curd/i;
+  const nameDesc = `${item.name || ''} ${item.description || ''} ${item.category || ''}`;
+  return healthyKeywords.test(nameDesc) || (item.rating >= 4.5 && (item.price || 0) <= 250);
+};
+
 export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
   restaurantId,
   onBack,
@@ -352,8 +393,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                   rating: item.rating || 4.5,
                   ratingCount: item.ratingCount || 18,
                   category: cat.name,
-                  isVeg: item.isVeg ?? true,
-                  isEatRight: item.isEatRight ?? false,
+                  isVeg: parseIsVeg(item),
+                  isEatRight: parseIsEatRight(item),
                   image: item.imageURL || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80',
                   description: item.description || 'Prepared with authentic hand-ground spices and fresh artisanal ingredients.',
                   mrp: Math.round(price * 1.25),
@@ -392,8 +433,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                   rating: item.rating || 4.5,
                   ratingCount: item.ratingCount || 18,
                   category: cat.name,
-                  isVeg: item.isVeg ?? true,
-                  isEatRight: item.isEatRight ?? false,
+                  isVeg: parseIsVeg(item),
+                  isEatRight: parseIsEatRight(item),
                   image: item.imageURL || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80',
                   description: item.description || 'Prepared with authentic hand-ground spices and fresh artisanal ingredients.',
                   mrp: Math.round(price * 1.25),
@@ -495,12 +536,14 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
 
   // Dynamic Top Picks Slice
   const dynamicTopPicks = useMemo(() => {
+    if (filteredFoodItems.length === 0) return [];
     const list = filteredFoodItems.filter(f => f.bestseller || f.rating >= 4.5 || f.category.toLowerCase().includes('top'));
     return list.length > 0 ? list.slice(0, 6) : filteredFoodItems.slice(0, 4);
   }, [filteredFoodItems]);
 
   // Dynamic 99 Store Slice
   const dynamic99StoreItems = useMemo(() => {
+    if (filteredFoodItems.length === 0) return [];
     const list = filteredFoodItems.filter(
       f => f.price <= 180 || f.category.toLowerCase().includes('99') || f.category.toLowerCase().includes('store') || f.category.toLowerCase().includes('snack') || f.category.toLowerCase().includes('roll')
     );
@@ -509,23 +552,25 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
 
   // Dynamic Recommended Slice
   const dynamicRecommendedItems = useMemo(() => {
+    if (filteredFoodItems.length === 0) return [];
     const list = filteredFoodItems.filter(
       f => f.category.toLowerCase().includes('recommended') || f.rating >= 4.3 || f.bestseller
     );
-    return list.length > 0 ? list.slice(0, 6) : filteredFoodItems.slice(2, 6);
+    return list.length > 0 ? list.slice(0, 6) : filteredFoodItems.slice(0, 4);
   }, [filteredFoodItems]);
 
   // Dynamic Pairing Items derived from actual restaurant menu
   const dynamicPairingList: SimFoodItem[] = useMemo(() => {
-    const pairs = foodItems.filter(f =>
+    if (filteredFoodItems.length === 0) return [];
+    const pairs = filteredFoodItems.filter(f =>
       /bread|roti|naan|paratha|drink|beverage|side|chaat|tikka|dessert|accompaniment|dip|sauce/i.test(f.category || '') ||
       /bread|roti|naan|paratha|coke|shake|chaat|tikka|kulcha|raita|chutney/i.test(f.name || '')
     );
     if (pairs.length >= 2) {
       return pairs.slice(0, 4);
     }
-    return foodItems.slice(0, 4);
-  }, [foodItems]);
+    return filteredFoodItems.slice(0, 4);
+  }, [filteredFoodItems]);
 
   // Group items by category dynamically
   const menuCategories = useMemo(() => {

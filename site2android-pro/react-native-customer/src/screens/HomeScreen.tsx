@@ -14,14 +14,30 @@ import {
   TouchableOpacity,
   Image,
   Animated,
+  Easing,
   Dimensions,
   StatusBar,
   Platform,
   RefreshControl,
   ToastAndroid,
-  Alert,
+  Modal,
+  Share,
 } from 'react-native';
-import { Heart, MoreVertical } from 'lucide-react-native';
+import Svg, { Defs, RadialGradient, Stop, Rect } from 'react-native-svg';
+import {
+  Heart,
+  MoreVertical,
+  Sparkles,
+  User,
+  Settings,
+  ShoppingBag,
+  Utensils,
+  Share2,
+  X,
+  Star,
+  MapPin,
+  Clock,
+} from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
@@ -73,12 +89,21 @@ const imgImage17      = require('../assets/home/figma/imgImage17.png'); // Star 
 const imgImage14      = require('../assets/home/figma/imgImage14.png'); // Star icon
 const imgImage11      = require('../assets/home/figma/imgImage11.png'); // Star icon
 
-// ─── Direct Figma Asset Imports (Node 3023:477 - Explore Section) ──────────────
-const expImg27 = require('../assets/home/figma_explore/imgImage27.png'); // Specials
-const expImg26 = require('../assets/home/figma_explore/imgImage26.png'); // Biryani
-const expImg25 = require('../assets/home/figma_explore/imgImage25.png'); // Pizzas
-const expImg24 = require('../assets/home/figma_explore/imgImage24.png'); // Burgers
-const expImg23 = require('../assets/home/figma_explore/imgImage23.png'); // Rolls
+// ─── "WHAT'S ON YOUR MIND?" Food Category Assets ──────────────────────────────
+const catImgSpecials    = require('../assets/categories/cat_specials.png');
+const catImgBiryani     = require('../assets/categories/cat_biryani.png');
+const catImgPizzas      = require('../assets/categories/cat_pizzas.png');
+const catImgBurgers     = require('../assets/categories/cat_burgers.png');
+const catImgRolls       = require('../assets/categories/cat_rolls.png');
+const catImgNorthIndian = require('../assets/categories/cat_north_indian.png');
+const catImgChinese     = require('../assets/categories/cat_chinese.png');
+const catImgSouthIndian = require('../assets/categories/cat_south_indian.png');
+const catImgDesserts    = require('../assets/categories/cat_desserts.png');
+const catImgBeverages   = require('../assets/categories/cat_beverages.png');
+const catImgChaat       = require('../assets/categories/cat_chaat.png');
+const catImgHealthy     = require('../assets/categories/cat_healthy.png');
+const catImgMomos       = require('../assets/categories/cat_momos.png');
+const catImgThali       = require('../assets/categories/cat_thali.png');
 
 // Vertical Cards Icons
 const expImg18 = require('../assets/home/figma_explore/imgImage18.png'); // Truck icon
@@ -99,20 +124,20 @@ const getRestaurantImageSource = (restaurant: Restaurant) => {
 
 // ─── Extended Food Categories for "WHAT'S ON YOUR MIND?" ──────────────────
 export const WHATS_ON_MIND_CATEGORIES = [
-  { id: 'Specials', label: 'Specials', img: expImg27, regex: /.*/ },
-  { id: 'Biryani', label: 'Biryani', img: expImg26, regex: /biryani|dum|pulao|hyderabadi/i },
-  { id: 'Pizzas', label: 'Pizzas', img: expImg25, regex: /pizza|italian|pasta|crust|cheese/i },
-  { id: 'Burgers', label: 'Burgers', img: expImg24, regex: /burger|sandwich|patty|slider/i },
-  { id: 'Rolls', label: 'Rolls & Wraps', img: expImg23, regex: /roll|kathi|shawarma|wrap|frankie/i },
-  { id: 'North Indian', label: 'North Indian', img: { uri: 'https://images.unsplash.com/photo-1588166524941-3bf61a9c41db?w=240&q=80' }, regex: /north indian|curry|punjabi|mughlai|paneer|dal|roti|tandoori|butter chicken/i },
-  { id: 'Chinese', label: 'Chinese', img: require('../assets/images/food-noodle.png'), regex: /chinese|asian|noodle|manchurian|fried rice|dimsum|momo|schezwan|hakka/i },
-  { id: 'South Indian', label: 'South Indian', img: { uri: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?w=240&q=80' }, regex: /south indian|dosa|idli|sambhar|vada|uttapam|chennai/i },
-  { id: 'Desserts', label: 'Desserts', img: { uri: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=240&q=80' }, regex: /dessert|sweet|cake|ice cream|pastry|waffle|bakery|halwa|gulab jamun|mithai/i },
-  { id: 'Beverages', label: 'Beverages', img: { uri: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=240&q=80' }, regex: /beverage|drink|juice|shake|coffee|tea|smoothie|soda|mocktail|cold coffee/i },
-  { id: 'Chaat', label: 'Chaat & Snacks', img: { uri: 'https://images.unsplash.com/photo-1601050690597-df0568f70950?w=240&q=80' }, regex: /chaat|street food|samosa|pani puri|kachori|snack|pav bhaji|tikki|golgappe/i },
-  { id: 'Healthy', label: 'Healthy & Salads', img: require('../assets/images/food-salad.png'), regex: /healthy|salad|diet|bowl|keto|vegan|greens|protein/i },
-  { id: 'Momos', label: 'Momos', img: { uri: 'https://images.unsplash.com/photo-1625220194771-7ebdea0b70b9?w=240&q=80' }, regex: /momo|dim sum|dumpling|tibetan|steamed momo/i },
-  { id: 'Thali', label: 'Grand Thali', img: { uri: 'https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?w=240&q=80' }, regex: /thali|meal|combo|platter|lunch box/i },
+  { id: 'Specials', label: 'Specials', img: catImgSpecials, regex: /.*/ },
+  { id: 'Biryani', label: 'Biryani', img: catImgBiryani, regex: /biryani|dum|pulao|hyderabadi/i },
+  { id: 'Pizzas', label: 'Pizzas', img: catImgPizzas, regex: /pizza|italian|pasta|crust|cheese/i },
+  { id: 'Burgers', label: 'Burgers', img: catImgBurgers, regex: /burger|sandwich|patty|slider/i },
+  { id: 'Rolls', label: 'Rolls & Wraps', img: catImgRolls, regex: /roll|kathi|shawarma|wrap|frankie/i },
+  { id: 'North Indian', label: 'North Indian', img: catImgNorthIndian, regex: /north indian|curry|punjabi|mughlai|paneer|dal|roti|tandoori|butter chicken/i },
+  { id: 'Chinese', label: 'Chinese', img: catImgChinese, regex: /chinese|asian|noodle|manchurian|fried rice|dimsum|momo|schezwan|hakka/i },
+  { id: 'South Indian', label: 'South Indian', img: catImgSouthIndian, regex: /south indian|dosa|idli|sambhar|vada|uttapam|chennai/i },
+  { id: 'Desserts', label: 'Desserts', img: catImgDesserts, regex: /dessert|sweet|cake|ice cream|pastry|waffle|bakery|halwa|gulab jamun|mithai/i },
+  { id: 'Beverages', label: 'Beverages', img: catImgBeverages, regex: /beverage|drink|juice|shake|coffee|tea|smoothie|soda|mocktail|cold coffee/i },
+  { id: 'Chaat', label: 'Chaat & Snacks', img: catImgChaat, regex: /chaat|street food|samosa|pani puri|kachori|snack|pav bhaji|tikki|golgappe/i },
+  { id: 'Healthy', label: 'Healthy & Salads', img: catImgHealthy, regex: /healthy|salad|diet|bowl|keto|vegan|greens|protein/i },
+  { id: 'Momos', label: 'Momos', img: catImgMomos, regex: /momo|dim sum|dumpling|tibetan|steamed momo/i },
+  { id: 'Thali', label: 'Grand Thali', img: catImgThali, regex: /thali|meal|combo|platter|lunch box/i },
 ];
 
 export const HomeScreen = ({
@@ -147,6 +172,11 @@ export const HomeScreen = ({
   const [activeSegment, setActiveSegment]         = useState<'reorder' | 'food15'>('reorder');
   const [activeExploreCat, setActiveExploreCat]   = useState('Specials');
   const [activeDealOffer, setActiveDealOffer]     = useState<string | null>(null);
+  const [restaurantMenuAnchor, setRestaurantMenuAnchor] = useState<{
+    restaurant: Restaurant;
+    top: number;
+    right: number;
+  } | null>(null);
 
   // Safe area top padding calculation ensuring status bar & notch are never collided
   const safeTopPadding = Math.max(
@@ -154,24 +184,102 @@ export const HomeScreen = ({
     Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 44
   ) + (Platform.OS === 'android' ? 8 : 4);
 
-  // Floating bounce loop animation
+  // ─── Cinematic Ambient & Interactive Animations ───
   const bounceAnim = useRef(new Animated.Value(0)).current;
+  const glowAnim = useRef(new Animated.Value(0.4)).current;
+
+  // Staggered Entrance Animations
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const categoryTilesAnim = useRef(new Animated.Value(0)).current;
+  const searchRowAnim = useRef(new Animated.Value(0)).current;
+  const heroBannerAnim = useRef(new Animated.Value(0)).current;
+  const dealsRowAnim = useRef(new Animated.Value(0)).current;
+  const categoriesAnim = useRef(new Animated.Value(0)).current;
+  const restaurantsAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
+    // 1. Dual-phase Floating 3D loop for Pizza & Burger
     Animated.loop(
       Animated.sequence([
         Animated.timing(bounceAnim, {
           toValue: 1,
-          duration: 1800,
+          duration: 2200,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(bounceAnim, {
           toValue: 0,
-          duration: 1800,
+          duration: 2200,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
     ).start();
-  }, [bounceAnim]);
+
+    // 2. Ambient Gold Radiance Pulsing Loop
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 0.9,
+          duration: 2400,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0.35,
+          duration: 2400,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    // 3. Staggered Cinematic Page Entrance
+    Animated.stagger(70, [
+      Animated.timing(headerAnim, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(categoryTilesAnim, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(searchRowAnim, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(heroBannerAnim, {
+        toValue: 1,
+        friction: 7,
+        tension: 42,
+        useNativeDriver: true,
+      }),
+      Animated.timing(dealsRowAnim, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(categoriesAnim, {
+        toValue: 1,
+        duration: 320,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(restaurantsAnim, {
+        toValue: 1,
+        duration: 350,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [bounceAnim, glowAnim, headerAnim, categoryTilesAnim, searchRowAnim, heroBannerAnim, dealsRowAnim, categoriesAnim, restaurantsAnim]);
 
   const isFav = useCallback(
     (id: string) => {
@@ -302,25 +410,22 @@ export const HomeScreen = ({
     }
   };
 
-  const handleOpenActionMenu = (restaurant: Restaurant) => {
-    Alert.alert(
-      restaurant.name,
-      `${restaurant.cuisine} • ${restaurant.address}`,
-      [
-        {
-          text: isFav(restaurant.id) ? 'Remove Favorite' : 'Add to Favorites',
-          onPress: () => handleToggleFav(restaurant.id, restaurant.name),
-        },
-        {
-          text: 'View Full Menu',
-          onPress: () => onSelectRestaurant(restaurant.id),
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ]
-    );
+  const handleOpenActionMenu = (restaurant: Restaurant, e: any) => {
+    const pageY = e?.nativeEvent?.pageY;
+    const pageX = e?.nativeEvent?.pageX;
+    if (pageY !== undefined && pageX !== undefined) {
+      setRestaurantMenuAnchor({
+        restaurant,
+        top: Math.min(pageY + 12, Dimensions.get('window').height - 150),
+        right: Math.max(16, SCREEN_WIDTH - pageX - 10),
+      });
+    } else {
+      setRestaurantMenuAnchor({
+        restaurant,
+        top: 250,
+        right: 20,
+      });
+    }
   };
 
   return (
@@ -343,7 +448,22 @@ export const HomeScreen = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 0] TOP HEADER (Location on left, Free Delivery + Profile on right)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.header}>
+        <Animated.View
+          style={[
+            styles.header,
+            {
+              opacity: headerAnim,
+              transform: [
+                {
+                  translateY: headerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-16, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           {/* Left Column: Home label + Location Address */}
           <View style={styles.headerLeftCol}>
             <TouchableOpacity
@@ -392,12 +512,27 @@ export const HomeScreen = ({
               <Image source={imgImage41} style={styles.hamburgerImg} />
             </TouchableOpacity>
           </View>
-        </View>
+        </Animated.View>
 
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 1] CATEGORY TILES (Food, Instamart, Dineout, Wine Stores)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.categoryRow}>
+        <Animated.View
+          style={[
+            styles.categoryRow,
+            {
+              opacity: categoryTilesAnim,
+              transform: [
+                {
+                  scale: categoryTilesAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.94, 1],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           {/* Tile 1: Food (Active Highlight) */}
           <TouchableOpacity
             style={[styles.catTile, styles.catTileActive]}
@@ -437,12 +572,27 @@ export const HomeScreen = ({
             <Image source={imgImage37} style={styles.catDineoutImg} />
             <Text style={styles.catTileLabel}>Dineout</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 2] SEARCH BAR & FUNCTIONAL VEG TOGGLE
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.searchRow}>
+        <Animated.View
+          style={[
+            styles.searchRow,
+            {
+              opacity: searchRowAnim,
+              transform: [
+                {
+                  translateY: searchRowAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [12, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           {/* Search Input Bar */}
           <TouchableOpacity
             style={styles.searchBar}
@@ -466,64 +616,143 @@ export const HomeScreen = ({
               <View style={[styles.vegThumb, isVegOnly && styles.vegThumbActive]} />
             </View>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         {/* ════════════════════════════════════════════════════════════════════════
-            [CHILD 3] 70% OFF HERO BANNER (Interactive Deals Activation)
+            [CHILD 3] 70% OFF HERO BANNER (Interactive Deals Activation & Glow Aura)
             ════════════════════════════════════════════════════════════════════════ */}
-        <TouchableOpacity
-          style={styles.heroBanner}
-          activeOpacity={0.95}
-          onPress={handleHeroBannerPress}
+        <Animated.View
+          style={{
+            position: 'relative',
+            opacity: heroBannerAnim,
+            transform: [
+              {
+                scale: heroBannerAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.93, 1],
+                }),
+              },
+            ],
+          }}
         >
-          {/* Main 70% Off Banner Background wrapped to clip borders */}
-          <View style={styles.heroBgWrapper}>
-            <Image source={imgNew70OffCenter} style={styles.heroCenterBg} />
-          </View>
-
-          {/* Floating Pizza over the left guide */}
-          <Animated.Image
-            source={imgImage23}
+          {/* Ambient Gold Radial Glow Aura behind Hero */}
+          <Animated.View
+            pointerEvents="none"
             style={[
-              styles.absolutePizzaLeft,
+              styles.heroAmbientGlow,
               {
+                opacity: glowAnim,
                 transform: [
-                  { rotate: '-10deg' },
                   {
-                    translateY: bounceAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, -12],
+                    scale: glowAnim.interpolate({
+                      inputRange: [0.35, 0.9],
+                      outputRange: [0.96, 1.04],
                     }),
                   },
                 ],
               },
             ]}
-          />
+          >
+            <Svg width="100%" height="100%">
+              <Defs>
+                <RadialGradient
+                  id="heroGoldAura"
+                  cx="50%"
+                  cy="50%"
+                  rx="50%"
+                  ry="50%"
+                  fx="50%"
+                  fy="50%"
+                  gradientUnits="userSpaceOnUse"
+                >
+                  <Stop offset="0%" stopColor="#DEA430" stopOpacity="0.35" />
+                  <Stop offset="55%" stopColor="#DEA430" stopOpacity="0.12" />
+                  <Stop offset="100%" stopColor="#000000" stopOpacity="0" />
+                </RadialGradient>
+              </Defs>
+              <Rect width="100%" height="100%" fill="url(#heroGoldAura)" />
+            </Svg>
+          </Animated.View>
 
-          {/* Floating Burger over the right guide */}
-          <Animated.Image
-            source={imgImage26}
-            style={[
-              styles.absoluteBurgerRight,
-              {
-                transform: [
-                  { rotate: '12deg' },
-                  {
-                    translateY: bounceAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-8, 4],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          />
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.heroBanner}
+            activeOpacity={0.95}
+            onPress={handleHeroBannerPress}
+          >
+            {/* Main 70% Off Banner Background wrapped to clip borders */}
+            <View style={styles.heroBgWrapper}>
+              <Image source={imgNew70OffCenter} style={styles.heroCenterBg} />
+            </View>
+
+            {/* Floating 3D Pizza over the left guide */}
+            <Animated.Image
+              source={imgImage23}
+              style={[
+                styles.absolutePizzaLeft,
+                {
+                  transform: [
+                    {
+                      rotate: bounceAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['-14deg', '-6deg'],
+                      }),
+                    },
+                    {
+                      translateY: bounceAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [-10, 8],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            />
+
+            {/* Floating 3D Burger over the right guide */}
+            <Animated.Image
+              source={imgImage26}
+              style={[
+                styles.absoluteBurgerRight,
+                {
+                  transform: [
+                    {
+                      rotate: bounceAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['8deg', '15deg'],
+                      }),
+                    },
+                    {
+                      translateY: bounceAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [6, -10],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            />
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 5] DEALS ROW (Interactive Deals Filtering)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.dealsRow}>
+        <Animated.View
+          style={[
+            styles.dealsRow,
+            {
+              opacity: dealsRowAnim,
+              transform: [
+                {
+                  translateY: dealsRowAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           {/* Deal 1: Delightful Deals */}
           <TouchableOpacity
             style={[styles.dealCard, activeDealOffer === 'DELIGHT' && styles.dealCardActive]}
@@ -562,7 +791,7 @@ export const HomeScreen = ({
             </View>
             <Image source={imgImage20} style={styles.dealPizzaImg} />
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 6] REORDER / FOOD IN 15 MINS SWITCH
@@ -663,7 +892,22 @@ export const HomeScreen = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 8 - NATIVELY STICKY] "WHAT'S ON YOUR MIND?" CATEGORIES SECTION
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.whatsOnMindStickyContainer}>
+        <Animated.View
+          style={[
+            styles.whatsOnMindStickyContainer,
+            {
+              opacity: categoriesAnim,
+              transform: [
+                {
+                  translateY: categoriesAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [16, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <View style={styles.whatsOnMindHeader}>
             <Text style={styles.whatsOnMindTitle}>WHAT'S ON YOUR MIND?</Text>
             {activeExploreCat !== 'Specials' && (
@@ -710,12 +954,27 @@ export const HomeScreen = ({
               );
             })}
           </ScrollView>
-        </View>
+        </Animated.View>
 
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 9] SECTION HEADER: "Top {count} restaurants to explore"
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.exploreSectionHeader}>
+        <Animated.View
+          style={[
+            styles.exploreSectionHeader,
+            {
+              opacity: restaurantsAnim,
+              transform: [
+                {
+                  translateY: restaurantsAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [18, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           <Text style={styles.exploreTitleMain}>
             <Text style={styles.exploreTitleTop}>Top </Text>
             <Text style={styles.exploreTitleGold}>
@@ -728,12 +987,27 @@ export const HomeScreen = ({
               ? `Featured ${activeExploreCat} Restaurants`
               : 'Featured Restaurants'}
           </Text>
-        </View>
+        </Animated.View>
 
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 10] VERTICAL RESTAURANT CARDS (100% Dynamically Mapped)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.verticalCardsContainer}>
+        <Animated.View
+          style={[
+            styles.verticalCardsContainer,
+            {
+              opacity: restaurantsAnim,
+              transform: [
+                {
+                  translateY: restaurantsAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
           {filteredRestaurants.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>No restaurants found matching active filters.</Text>
@@ -795,10 +1069,12 @@ export const HomeScreen = ({
                       <Text style={styles.vResTitleText} numberOfLines={1}>
                         {restaurant.name}
                       </Text>
+
+                      {/* 3 Dots Action Button */}
                       <TouchableOpacity
                         activeOpacity={0.6}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        onPress={() => handleOpenActionMenu(restaurant)}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        onPress={(e) => handleOpenActionMenu(restaurant, e)}
                       >
                         <MoreVertical size={16 * SCALE} color="#777777" />
                       </TouchableOpacity>
@@ -835,8 +1111,93 @@ export const HomeScreen = ({
               );
             })
           )}
-        </View>
+        </Animated.View>
       </ScrollView>
+
+
+
+      {/* ── ANCHORED MINI RESTAURANT DROPDOWN MODAL ── */}
+      <Modal
+        visible={!!restaurantMenuAnchor}
+        transparent
+        animationType="none"
+        onRequestClose={() => setRestaurantMenuAnchor(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdropTransparent}
+          activeOpacity={1}
+          onPress={() => setRestaurantMenuAnchor(null)}
+        >
+          {restaurantMenuAnchor && (
+            <View
+              style={[
+                styles.miniDropdownFloatingCard,
+                {
+                  top: restaurantMenuAnchor.top,
+                  right: restaurantMenuAnchor.right,
+                },
+              ]}
+            >
+              {/* Option 1: Favorite */}
+              <TouchableOpacity
+                style={styles.miniDropdownItem}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const r = restaurantMenuAnchor.restaurant;
+                  setRestaurantMenuAnchor(null);
+                  handleToggleFav(r.id, r.name);
+                }}
+              >
+                <Heart
+                  size={13 * SCALE}
+                  color={isFav(restaurantMenuAnchor.restaurant.id) ? '#FF334B' : '#DEA430'}
+                  fill={isFav(restaurantMenuAnchor.restaurant.id) ? '#FF334B' : 'transparent'}
+                  style={{ marginRight: 8 * SCALE }}
+                />
+                <Text style={styles.miniDropdownText} numberOfLines={1}>
+                  {isFav(restaurantMenuAnchor.restaurant.id) ? 'Favorited' : 'Favorite'}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 2: View Menu */}
+              <TouchableOpacity
+                style={styles.miniDropdownItem}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const r = restaurantMenuAnchor.restaurant;
+                  setRestaurantMenuAnchor(null);
+                  onSelectRestaurant(r.id);
+                }}
+              >
+                <Utensils size={13 * SCALE} color="#DEA430" style={{ marginRight: 8 * SCALE }} />
+                <Text style={styles.miniDropdownText} numberOfLines={1}>
+                  View Menu
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 3: Share */}
+              <TouchableOpacity
+                style={[styles.miniDropdownItem, { borderBottomWidth: 0 }]}
+                activeOpacity={0.7}
+                onPress={async () => {
+                  const r = restaurantMenuAnchor.restaurant;
+                  setRestaurantMenuAnchor(null);
+                  try {
+                    await Share.share({
+                      message: `Check out ${r.name} (${r.cuisine}) on MyQuro!`,
+                    });
+                  } catch (e) {}
+                }}
+              >
+                <Share2 size={13 * SCALE} color="#DEA430" style={{ marginRight: 8 * SCALE }} />
+                <Text style={styles.miniDropdownText} numberOfLines={1}>
+                  Share
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </TouchableOpacity>
+      </Modal>
 
       {/* ── LOCATION SELECTOR MODAL ── */}
       <LocationSelectorSheet
@@ -1152,6 +1513,14 @@ const styles = StyleSheet.create({
   },
 
   // ── 4. 70% OFF HERO BANNER ─────────────────────────────────────
+  heroAmbientGlow: {
+    position: 'absolute',
+    top: -15 * SCALE,
+    left: 4 * SCALE,
+    right: 4 * SCALE,
+    bottom: -15 * SCALE,
+    zIndex: 0,
+  },
   heroBanner: {
     marginHorizontal: 14,
     marginTop: 6,
@@ -1166,6 +1535,7 @@ const styles = StyleSheet.create({
     height: BANNER_HEIGHT,
     position: 'relative',
     overflow: 'visible',
+    zIndex: 1,
   },
   heroBgWrapper: {
     position: 'absolute',
@@ -1449,7 +1819,7 @@ const styles = StyleSheet.create({
     gap: 10 * SCALE,
   },
   expCatCard: {
-    width: 76 * SCALE,
+    width: 82 * SCALE,
     backgroundColor: '#0A0A0A',
     borderWidth: 1,
     borderColor: '#1C1C1C',
@@ -1469,10 +1839,10 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   expCatImgWrapper: {
-    width: 50 * SCALE,
-    height: 50 * SCALE,
-    borderRadius: 25 * SCALE,
-    backgroundColor: '#121212',
+    width: 58 * SCALE,
+    height: 58 * SCALE,
+    borderRadius: 29 * SCALE,
+    backgroundColor: '#141414',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6 * SCALE,
@@ -1480,14 +1850,14 @@ const styles = StyleSheet.create({
   },
   expCatImgWrapperActive: {
     backgroundColor: '#26200D',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#D4AF37',
   },
   expCatImg: {
-    width: 44 * SCALE,
-    height: 44 * SCALE,
-    borderRadius: 22 * SCALE,
-    resizeMode: 'cover',
+    width: 54 * SCALE,
+    height: 54 * SCALE,
+    borderRadius: 27 * SCALE,
+    resizeMode: 'contain',
   },
   expCatLabel: {
     fontFamily: 'Urbanist-Bold',
@@ -1713,5 +2083,42 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     fontSize: 13 * SCALE,
     color: '#CBA143',
+  },
+
+
+
+  modalBackdropTransparent: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+    zIndex: 99999,
+  },
+  miniDropdownFloatingCard: {
+    position: 'absolute',
+    width: 140 * SCALE,
+    backgroundColor: '#16171B',
+    borderRadius: 12 * SCALE,
+    borderWidth: 1.2,
+    borderColor: 'rgba(222, 164, 48, 0.4)',
+    paddingVertical: 3 * SCALE,
+    zIndex: 999999,
+    elevation: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.75,
+    shadowRadius: 12,
+  },
+  miniDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 11 * SCALE,
+    paddingVertical: 10 * SCALE,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  miniDropdownText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 12.5 * SCALE,
+    color: '#E4E4E7',
+    flex: 1,
   },
 });

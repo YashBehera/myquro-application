@@ -36,6 +36,7 @@ import {
   Coins,
   Sliders,
   ChevronDown,
+  Check,
 } from 'lucide-react-native';
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -164,8 +165,35 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
   const [isSearchSheetOpen, setIsSearchSheetOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Veg Only Filter
+  // Veg Only Filter & Advanced Filters
   const [isVegOnly, setIsVegOnly] = useState(false);
+  const [minRatingFilter, setMinRatingFilter] = useState<number | null>(null);
+  const [availabilityFilter, setAvailabilityFilter] = useState<'all' | 'today' | 'tomorrow'>('all');
+  const [sortBy, setSortBy] = useState<'relevance' | 'distance' | 'rating' | 'cost_asc' | 'cost_desc'>('relevance');
+  const [distanceFilter, setDistanceFilter] = useState<number | null>(null);
+  const [discountFilter, setDiscountFilter] = useState<number | null>(null);
+  const [selectedAmenity, setSelectedAmenity] = useState<string | null>(null);
+  const [costRangeFilter, setCostRangeFilter] = useState<'all' | 'under500' | '500_1000' | '1000_2000' | 'above2000'>('all');
+  const [selectedCuisine, setSelectedCuisine] = useState<string | null>(null);
+
+  // Active Tab for 2-column Filter modal
+  const [activeFilterTab, setActiveFilterTab] = useState<
+    | 'sort'
+    | 'today'
+    | 'tomorrow'
+    | 'distance'
+    | 'ratings'
+    | 'category'
+    | 'diet'
+    | 'discount'
+    | 'amenities'
+    | 'cost'
+    | 'more'
+    | 'cuisines'
+  >('sort');
+
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [isSortModalOpen, setIsSortModalOpen] = useState(false);
 
   // Selected Dineout Detail Screen State
   const [selectedDineoutDetail, setSelectedDineoutDetail] = useState<any | null>(null);
@@ -229,6 +257,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
       else if (moodUpper.includes('ROOF')) mood = 'ROOFTOP';
 
       const distanceStr = typeof r.distance === 'number' && !isNaN(r.distance) ? `${r.distance.toFixed(1)} km` : '';
+      const isPureVeg = r.category === 'Veg' || (r.tags && r.tags.some((t: string) => /pure\s*veg|vegetarian/i.test(t))) || /pure\s*veg|vegetarian/i.test(r.cuisine || '') || /pure\s*veg/i.test(r.name || '');
 
       return {
         id: r.id,
@@ -245,7 +274,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         instantBooking: true,
         mood,
         features: r.tags && r.tags.length > 0 ? r.tags : ['AC Dining', 'Live Kitchen'],
-        isVegOnly: r.category === 'Veg' || false,
+        isVegOnly: isPureVeg,
         latitude: r.latitude,
         longitude: r.longitude,
         phone: r.phone,
@@ -323,12 +352,78 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
     );
   };
 
-  // Filter venues by selected mood & veg-only
-  const filteredVenues = dineoutVenues.filter((venue) => {
-    const matchesMood = selectedMood === 'ALL' || venue.mood === selectedMood;
-    const matchesVeg = !isVegOnly || venue.isVegOnly;
-    return matchesMood && matchesVeg;
-  });
+  // Filter venues across all comprehensive 2-column filters and sorting
+  const filteredVenues = useMemo(() => {
+    let list = dineoutVenues.filter((venue) => {
+      // 1. Mood / Category filter
+      if (selectedMood !== 'ALL' && venue.mood !== selectedMood) return false;
+      // 2. Veg only
+      if (isVegOnly && !venue.isVegOnly) return false;
+      // 3. Min rating filter
+      if (minRatingFilter && venue.rating < minRatingFilter) return false;
+      // 4. Availability filter (Today / Tomorrow)
+      if (availabilityFilter === 'today' || availabilityFilter === 'tomorrow') {
+        if (!venue.instantBooking) return false;
+      }
+      // 5. Distance filter
+      if (distanceFilter) {
+        const distNum = parseFloat(String(venue.distance).replace(/[^\d.]/g, '')) || 0;
+        if (distNum > distanceFilter) return false;
+      }
+      // 6. Discount filter
+      if (discountFilter) {
+        const discNum = parseInt(String(venue.discountTag).replace(/\D/g, '')) || 0;
+        if (discNum < discountFilter) return false;
+      }
+      // 7. Cost for two range
+      if (costRangeFilter !== 'all') {
+        const costNum = parseInt(String(venue.costForTwo).replace(/\D/g, '')) || 800;
+        if (costRangeFilter === 'under500' && costNum >= 500) return false;
+        if (costRangeFilter === '500_1000' && (costNum < 500 || costNum > 1000)) return false;
+        if (costRangeFilter === '1000_2000' && (costNum < 1000 || costNum > 2000)) return false;
+        if (costRangeFilter === 'above2000' && costNum < 2000) return false;
+      }
+      // 8. Cuisine
+      if (selectedCuisine && selectedCuisine !== 'all') {
+        if (!venue.cuisine.toLowerCase().includes(selectedCuisine.toLowerCase())) return false;
+      }
+      // 9. Amenities
+      if (selectedAmenity && selectedAmenity !== 'all') {
+        if (selectedAmenity === 'ac' && !venue.features.some((f: string) => /ac/i.test(f))) return false;
+        if (selectedAmenity === 'outdoor' && !venue.features.some((f: string) => /outdoor|roof/i.test(f)) && venue.mood !== 'ROOFTOP') return false;
+        if (selectedAmenity === 'live' && !venue.features.some((f: string) => /live|music/i.test(f))) return false;
+      }
+
+      return true;
+    });
+
+    if (sortBy === 'rating') {
+      list = [...list].sort((a, b) => b.rating - a.rating);
+    } else if (sortBy === 'cost_asc') {
+      const getCost = (v: any) => parseInt(String(v.costForTwo).replace(/\D/g, '')) || 800;
+      list = [...list].sort((a, b) => getCost(a) - getCost(b));
+    } else if (sortBy === 'cost_desc') {
+      const getCost = (v: any) => parseInt(String(v.costForTwo).replace(/\D/g, '')) || 800;
+      list = [...list].sort((a, b) => getCost(b) - getCost(a));
+    } else if (sortBy === 'distance') {
+      const getDist = (v: any) => parseFloat(String(v.distance).replace(/[^\d.]/g, '')) || 999;
+      list = [...list].sort((a, b) => getDist(a) - getDist(b));
+    }
+
+    return list;
+  }, [
+    dineoutVenues,
+    selectedMood,
+    isVegOnly,
+    minRatingFilter,
+    availabilityFilter,
+    distanceFilter,
+    discountFilter,
+    costRangeFilter,
+    selectedCuisine,
+    selectedAmenity,
+    sortBy,
+  ]);
 
   // If a booking is selected for confirmation review -> Render BookingConfirmationScreen!
   if (selectedBookingForConfirmation) {
@@ -903,27 +998,148 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
               contentContainerStyle={styles.figmaFiltersScrollContainer}
             >
               {/* Filter */}
-              <TouchableOpacity style={styles.figmaFilterPill} activeOpacity={0.8}>
-                <Text style={styles.figmaFilterPillText}>Filter</Text>
-                <Sliders size={13 * SCALE} color="#DEA430" style={{ marginLeft: 6 }} />
+              <TouchableOpacity
+                style={[
+                  styles.figmaFilterPill,
+                  (isVegOnly || minRatingFilter !== null || (selectedMood !== 'ALL') || (availabilityFilter !== 'all') || (sortBy !== 'relevance')) && styles.figmaFilterPillActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setIsFilterModalOpen(true)}
+              >
+                <Text
+                  style={[
+                    styles.figmaFilterPillText,
+                    (isVegOnly || minRatingFilter !== null || (selectedMood !== 'ALL') || (availabilityFilter !== 'all') || (sortBy !== 'relevance')) && styles.figmaFilterPillTextActive,
+                  ]}
+                >
+                  Filter
+                </Text>
+                <Sliders
+                  size={13 * SCALE}
+                  color={(isVegOnly || minRatingFilter !== null || (selectedMood !== 'ALL') || (availabilityFilter !== 'all') || (sortBy !== 'relevance')) ? '#000000' : '#DEA430'}
+                  style={{ marginLeft: 6 }}
+                />
               </TouchableOpacity>
 
               {/* Sort By */}
-              <TouchableOpacity style={styles.figmaFilterPill} activeOpacity={0.8}>
-                <Text style={styles.figmaFilterPillText}>Sort By</Text>
-                <ChevronDown size={13 * SCALE} color="#DEA430" style={{ marginLeft: 6 }} />
+              <TouchableOpacity
+                style={[
+                  styles.figmaFilterPill,
+                  sortBy !== 'relevance' && styles.figmaFilterPillActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setIsSortModalOpen(true)}
+              >
+                <Text
+                  style={[
+                    styles.figmaFilterPillText,
+                    sortBy !== 'relevance' && styles.figmaFilterPillTextActive,
+                  ]}
+                >
+                  {sortBy === 'rating' ? 'Rating: High' : sortBy === 'cost_asc' ? 'Cost: Low-High' : sortBy === 'cost_desc' ? 'Cost: High-Low' : sortBy === 'distance' ? 'Nearest' : 'Sort By'}
+                </Text>
+                <ChevronDown
+                  size={13 * SCALE}
+                  color={sortBy !== 'relevance' ? '#000000' : '#DEA430'}
+                  style={{ marginLeft: 6 }}
+                />
               </TouchableOpacity>
 
               {/* Available Today */}
-              <TouchableOpacity style={styles.figmaFilterPill} activeOpacity={0.8}>
-                <Calendar size={13 * SCALE} color="#DEA430" style={{ marginRight: 6 }} />
-                <Text style={styles.figmaFilterPillText}>Available Today</Text>
+              <TouchableOpacity
+                style={[
+                  styles.figmaFilterPill,
+                  availabilityFilter === 'today' && styles.figmaFilterPillActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setAvailabilityFilter(availabilityFilter === 'today' ? 'all' : 'today')}
+              >
+                <Calendar
+                  size={13 * SCALE}
+                  color={availabilityFilter === 'today' ? '#000000' : '#DEA430'}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.figmaFilterPillText,
+                    availabilityFilter === 'today' && styles.figmaFilterPillTextActive,
+                  ]}
+                >
+                  Available Today
+                </Text>
               </TouchableOpacity>
 
               {/* Available Tomorrow */}
-              <TouchableOpacity style={styles.figmaFilterPill} activeOpacity={0.8}>
-                <Calendar size={13 * SCALE} color="#DEA430" style={{ marginRight: 6 }} />
-                <Text style={styles.figmaFilterPillText}>Available Tomorrow</Text>
+              <TouchableOpacity
+                style={[
+                  styles.figmaFilterPill,
+                  availabilityFilter === 'tomorrow' && styles.figmaFilterPillActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setAvailabilityFilter(availabilityFilter === 'tomorrow' ? 'all' : 'tomorrow')}
+              >
+                <Calendar
+                  size={13 * SCALE}
+                  color={availabilityFilter === 'tomorrow' ? '#000000' : '#DEA430'}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.figmaFilterPillText,
+                    availabilityFilter === 'tomorrow' && styles.figmaFilterPillTextActive,
+                  ]}
+                >
+                  Available Tomorrow
+                </Text>
+              </TouchableOpacity>
+
+              {/* Pure Veg */}
+              <TouchableOpacity
+                style={[
+                  styles.figmaFilterPill,
+                  isVegOnly && styles.figmaFilterPillActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setIsVegOnly(!isVegOnly)}
+              >
+                <Leaf
+                  size={12 * SCALE}
+                  color={isVegOnly ? '#000000' : '#4CAF50'}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.figmaFilterPillText,
+                    isVegOnly && styles.figmaFilterPillTextActive,
+                  ]}
+                >
+                  Pure Veg
+                </Text>
+              </TouchableOpacity>
+
+              {/* Rating 4.0+ */}
+              <TouchableOpacity
+                style={[
+                  styles.figmaFilterPill,
+                  minRatingFilter === 4.0 && styles.figmaFilterPillActive,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => setMinRatingFilter(minRatingFilter === 4.0 ? null : 4.0)}
+              >
+                <Star
+                  size={12 * SCALE}
+                  color={minRatingFilter === 4.0 ? '#000000' : '#DEA430'}
+                  fill={minRatingFilter === 4.0 ? '#000000' : '#DEA430'}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.figmaFilterPillText,
+                    minRatingFilter === 4.0 && styles.figmaFilterPillTextActive,
+                  ]}
+                >
+                  Rating 4.0+
+                </Text>
               </TouchableOpacity>
             </ScrollView>
 
@@ -1352,6 +1568,644 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
             >
               <Text style={styles.doneSuccessBtnText}>Done</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── SORT BY POPUP DROPDOWN (PIXEL-PERFECT FROM SCREENSHOT 1) ─── */}
+      <Modal
+        visible={isSortModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsSortModalOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.sortModalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsSortModalOpen(false)}
+        >
+          <View style={styles.sortDropdownCard}>
+            {[
+              { key: 'relevance', label: 'Relevance' },
+              { key: 'distance', label: 'Distance: Nearby To Far' },
+              { key: 'rating', label: 'Popularity: High to Low' },
+              { key: 'cost_asc', label: 'Cost for two: Low to High' },
+              { key: 'cost_desc', label: 'Cost for two: High to Low' },
+            ].map((opt, idx, arr) => {
+              const isSelected = sortBy === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[
+                    styles.sortDropdownItem,
+                    idx < arr.length - 1 && styles.sortDropdownItemBorder,
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    setSortBy(opt.key as any);
+                    setIsSortModalOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.sortDropdownText,
+                      isSelected && styles.sortDropdownTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+
+                  {/* Radio button on the Right */}
+                  <View
+                    style={[
+                      styles.goldRadioOuter,
+                      isSelected && styles.goldRadioOuterActive,
+                    ]}
+                  >
+                    {isSelected && <View style={styles.goldRadioInner} />}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ─── 2-COLUMN LUXURY FILTER MODAL SHEET (PIXEL-PERFECT FROM SCREENSHOT 2) ─── */}
+      <Modal
+        visible={isFilterModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIsFilterModalOpen(false)}
+      >
+        <View style={styles.filterModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFillObject}
+            activeOpacity={1}
+            onPress={() => setIsFilterModalOpen(false)}
+          />
+          <View style={styles.twoColFilterSheet}>
+            {/* 1. Modal Top Bar Header */}
+            <View style={styles.twoColFilterHeader}>
+              <Text style={styles.twoColFilterTitle}>Filter</Text>
+              <TouchableOpacity
+                style={styles.twoColCloseBtn}
+                activeOpacity={0.8}
+                onPress={() => setIsFilterModalOpen(false)}
+              >
+                <X size={18 * SCALE} color="#FFFFFF" strokeWidth={2.5} />
+              </TouchableOpacity>
+            </View>
+
+            {/* 2. Main 2-Column Body */}
+            <View style={styles.twoColBody}>
+              {/* Left Column: Vertical Category Tabs Sidebar */}
+              <ScrollView
+                style={styles.leftFilterTabsCol}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 30 * SCALE }}
+              >
+                {[
+                  { key: 'sort', label: 'Sort', hasDot: sortBy !== 'relevance' },
+                  { key: 'today', label: 'Available Today', hasDot: availabilityFilter === 'today' },
+                  { key: 'tomorrow', label: 'Available Tomorrow', hasDot: availabilityFilter === 'tomorrow' },
+                  { key: 'distance', label: 'Distance', hasDot: distanceFilter !== null },
+                  { key: 'ratings', label: 'Ratings', hasDot: minRatingFilter !== null },
+                  { key: 'category', label: 'Restaurant Category', hasDot: selectedMood !== 'ALL' },
+                  { key: 'diet', label: 'Dietary Preferences', hasDot: isVegOnly },
+                  { key: 'discount', label: 'Discount', hasDot: discountFilter !== null },
+                  { key: 'amenities', label: 'Amenities', hasDot: selectedAmenity !== null },
+                  { key: 'cost', label: 'Cost for two', hasDot: costRangeFilter !== 'all' },
+                  { key: 'more', label: 'More filters', hasDot: false },
+                  { key: 'cuisines', label: 'Cuisines', hasDot: selectedCuisine !== null },
+                ].map((tab) => {
+                  const isActive = activeFilterTab === tab.key;
+                  return (
+                    <TouchableOpacity
+                      key={tab.key}
+                      style={[
+                        styles.leftTabItem,
+                        isActive && styles.leftTabItemActive,
+                      ]}
+                      activeOpacity={0.8}
+                      onPress={() => setActiveFilterTab(tab.key as any)}
+                    >
+                      {isActive && <View style={styles.leftTabIndicator} />}
+                      <Text
+                        style={[
+                          styles.leftTabText,
+                          isActive && styles.leftTabTextActive,
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {tab.label}
+                      </Text>
+                      {tab.hasDot && !isActive && <View style={styles.tabBadgeDot} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Right Column: Selected Tab's Options List */}
+              <ScrollView
+                style={styles.rightFilterOptionsCol}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ padding: 18 * SCALE, paddingBottom: 40 * SCALE }}
+              >
+                {/* ── 1. SORT BY ── */}
+                {activeFilterTab === 'sort' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>SORT BY</Text>
+                    {[
+                      { key: 'relevance', label: 'Relevance' },
+                      { key: 'distance', label: 'Distance: Nearby To Far' },
+                      { key: 'rating', label: 'Popularity: High to Low' },
+                      { key: 'cost_asc', label: 'Cost for two: Low to High' },
+                      { key: 'cost_desc', label: 'Cost for two: High to Low' },
+                    ].map((opt) => {
+                      const isSelected = sortBy === opt.key;
+                      return (
+                        <TouchableOpacity
+                          key={opt.key}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setSortBy(opt.key as any)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 2. AVAILABLE TODAY ── */}
+                {activeFilterTab === 'today' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>AVAILABLE TODAY</Text>
+                    {[
+                      { key: 'all', label: 'Show all restaurants' },
+                      { key: 'today', label: 'Available for booking today' },
+                    ].map((opt) => {
+                      const isSelected = availabilityFilter === opt.key;
+                      return (
+                        <TouchableOpacity
+                          key={opt.key}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setAvailabilityFilter(opt.key as any)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 3. AVAILABLE TOMORROW ── */}
+                {activeFilterTab === 'tomorrow' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>AVAILABLE TOMORROW</Text>
+                    {[
+                      { key: 'all', label: 'Show all restaurants' },
+                      { key: 'tomorrow', label: 'Available for booking tomorrow' },
+                    ].map((opt) => {
+                      const isSelected = availabilityFilter === opt.key;
+                      return (
+                        <TouchableOpacity
+                          key={opt.key}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setAvailabilityFilter(opt.key as any)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 4. DISTANCE ── */}
+                {activeFilterTab === 'distance' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>DISTANCE</Text>
+                    {[
+                      { val: null, label: 'Any distance' },
+                      { val: 2, label: 'Within 2 km' },
+                      { val: 5, label: 'Within 5 km' },
+                      { val: 10, label: 'Within 10 km' },
+                    ].map((opt) => {
+                      const isSelected = distanceFilter === opt.val;
+                      return (
+                        <TouchableOpacity
+                          key={opt.label}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setDistanceFilter(opt.val)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 5. RATINGS ── */}
+                {activeFilterTab === 'ratings' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>RATINGS</Text>
+                    {[
+                      { val: null, label: 'Any rating' },
+                      { val: 4.5, label: 'Ratings 4.5+ (Top Rated)' },
+                      { val: 4.0, label: 'Ratings 4.0+ (Popular)' },
+                      { val: 3.5, label: 'Ratings 3.5+' },
+                    ].map((opt) => {
+                      const isSelected = minRatingFilter === opt.val;
+                      return (
+                        <TouchableOpacity
+                          key={opt.label}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setMinRatingFilter(opt.val)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 6. RESTAURANT CATEGORY ── */}
+                {activeFilterTab === 'category' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>RESTAURANT CATEGORY</Text>
+                    {[
+                      { key: 'ALL', label: 'All Categories' },
+                      { key: 'LUXURY', label: 'Luxury Dining' },
+                      { key: 'BUFFET', label: 'Buffet & Brunch' },
+                      { key: 'CAFE', label: 'Café & Desserts' },
+                      { key: 'ROOFTOP', label: 'Rooftop & Lounge' },
+                    ].map((opt) => {
+                      const isSelected = selectedMood === opt.key;
+                      return (
+                        <TouchableOpacity
+                          key={opt.key}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setSelectedMood(opt.key as any)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 7. DIETARY PREFERENCES ── */}
+                {activeFilterTab === 'diet' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>DIETARY PREFERENCES</Text>
+                    {[
+                      { veg: false, label: 'All (Veg & Non-Veg)' },
+                      { veg: true, label: 'Pure Veg Only' },
+                    ].map((opt) => {
+                      const isSelected = isVegOnly === opt.veg;
+                      return (
+                        <TouchableOpacity
+                          key={opt.label}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setIsVegOnly(opt.veg)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 8. DISCOUNT ── */}
+                {activeFilterTab === 'discount' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>DISCOUNTS & OFFERS</Text>
+                    {[
+                      { val: null, label: 'All Offers' },
+                      { val: 20, label: 'Flat 20% OFF or more' },
+                      { val: 10, label: 'Flat 10% OFF or more' },
+                    ].map((opt) => {
+                      const isSelected = discountFilter === opt.val;
+                      return (
+                        <TouchableOpacity
+                          key={opt.label}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setDiscountFilter(opt.val)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 9. AMENITIES ── */}
+                {activeFilterTab === 'amenities' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>AMENITIES</Text>
+                    {[
+                      { key: null, label: 'All Amenities' },
+                      { key: 'ac', label: 'AC Dining Area' },
+                      { key: 'outdoor', label: 'Outdoor / Rooftop Seating' },
+                      { key: 'live', label: 'Live Kitchen / Music' },
+                    ].map((opt) => {
+                      const isSelected = selectedAmenity === opt.key;
+                      return (
+                        <TouchableOpacity
+                          key={opt.label}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setSelectedAmenity(opt.key)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 10. COST FOR TWO ── */}
+                {activeFilterTab === 'cost' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>COST FOR TWO</Text>
+                    {[
+                      { key: 'all', label: 'Any budget' },
+                      { key: 'under500', label: 'Under ₹500' },
+                      { key: '500_1000', label: '₹500 - ₹1,000' },
+                      { key: '1000_2000', label: '₹1,000 - ₹2,000' },
+                      { key: 'above2000', label: 'Above ₹2,000' },
+                    ].map((opt) => {
+                      const isSelected = costRangeFilter === opt.key;
+                      return (
+                        <TouchableOpacity
+                          key={opt.key}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setCostRangeFilter(opt.key as any)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* ── 11. MORE FILTERS ── */}
+                {activeFilterTab === 'more' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>MORE FILTERS</Text>
+                    {[
+                      { label: 'Instant Table Confirmation' },
+                      { label: 'Pre-booking Discounts' },
+                      { label: 'Family Friendly' },
+                      { label: 'Live Sports Screening' },
+                    ].map((opt, idx) => (
+                      <View key={opt.label} style={styles.rightOptionRow}>
+                        <View style={[styles.goldRadioOuter, idx < 2 && styles.goldRadioOuterActive]}>
+                          {idx < 2 && <View style={styles.goldRadioInner} />}
+                        </View>
+                        <Text style={[styles.rightOptionText, idx < 2 && styles.rightOptionTextActive]}>
+                          {opt.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* ── 12. CUISINES ── */}
+                {activeFilterTab === 'cuisines' && (
+                  <View>
+                    <Text style={styles.rightSectionHeader}>CUISINES</Text>
+                    {[
+                      { key: null, label: 'All Cuisines' },
+                      { key: 'North Indian', label: 'North Indian' },
+                      { key: 'South Indian', label: 'South Indian' },
+                      { key: 'Chinese', label: 'Chinese & Pan-Asian' },
+                      { key: 'Italian', label: 'Italian & Continental' },
+                      { key: 'Biryani', label: 'Biryani & Mughlai' },
+                      { key: 'Lebanese', label: 'Lebanese & Mediterranean' },
+                    ].map((opt) => {
+                      const isSelected = selectedCuisine === opt.key;
+                      return (
+                        <TouchableOpacity
+                          key={opt.label}
+                          style={styles.rightOptionRow}
+                          activeOpacity={0.7}
+                          onPress={() => setSelectedCuisine(opt.key)}
+                        >
+                          <View
+                            style={[
+                              styles.goldRadioOuter,
+                              isSelected && styles.goldRadioOuterActive,
+                            ]}
+                          >
+                            {isSelected && <View style={styles.goldRadioInner} />}
+                          </View>
+                          <Text
+                            style={[
+                              styles.rightOptionText,
+                              isSelected && styles.rightOptionTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+
+            {/* 3. Sticky Bottom Action Bar */}
+            <View style={styles.twoColBottomBar}>
+              <TouchableOpacity
+                style={styles.twoColClearBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setSelectedMood('ALL');
+                  setIsVegOnly(false);
+                  setMinRatingFilter(null);
+                  setAvailabilityFilter('all');
+                  setDistanceFilter(null);
+                  setDiscountFilter(null);
+                  setSelectedAmenity(null);
+                  setCostRangeFilter('all');
+                  setSelectedCuisine(null);
+                  setSortBy('relevance');
+                }}
+              >
+                <Text style={styles.twoColClearText}>Clear All</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.twoColApplyBtn}
+                activeOpacity={0.85}
+                onPress={() => setIsFilterModalOpen(false)}
+              >
+                <Text style={styles.twoColApplyText}>
+                  Apply ({filteredVenues.length} Results)
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -3089,10 +3943,245 @@ const styles = StyleSheet.create({
     paddingVertical: 8 * SCALE,
     marginRight: 8 * SCALE,
   },
+  figmaFilterPillActive: {
+    backgroundColor: '#DEA430',
+    borderColor: '#DEA430',
+  },
   figmaFilterPillText: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 12 * SCALE,
     color: '#D4D4D8',
+  },
+  figmaFilterPillTextActive: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12 * SCALE,
+    color: '#000000',
+  },
+
+  // ─── Sort Dropdown Popup Styles (Screenshot 1) ─────────────────
+  sortModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20 * SCALE,
+  },
+  sortDropdownCard: {
+    width: '80%',
+    maxWidth: 320 * SCALE,
+    backgroundColor: '#16171B',
+    borderRadius: 18 * SCALE,
+    borderWidth: 1.2,
+    borderColor: 'rgba(222, 164, 48, 0.35)',
+    paddingVertical: 8 * SCALE,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    elevation: 15,
+  },
+  sortDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14 * SCALE,
+    paddingHorizontal: 16 * SCALE,
+  },
+  sortDropdownItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  sortDropdownText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 14.5 * SCALE,
+    color: '#D4D4D8',
+    flex: 1,
+    marginRight: 12 * SCALE,
+  },
+  sortDropdownTextActive: {
+    fontFamily: 'Urbanist-Bold',
+    color: '#FFFFFF',
+  },
+
+  // ─── Radio Button Component Styles ───────────────────────────
+  goldRadioOuter: {
+    width: 20 * SCALE,
+    height: 20 * SCALE,
+    borderRadius: 10 * SCALE,
+    borderWidth: 2,
+    borderColor: '#52525B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  goldRadioOuterActive: {
+    borderColor: '#DEA430',
+    backgroundColor: 'rgba(222, 164, 48, 0.12)',
+  },
+  goldRadioInner: {
+    width: 10 * SCALE,
+    height: 10 * SCALE,
+    borderRadius: 5 * SCALE,
+    backgroundColor: '#DEA430',
+  },
+
+  // ─── 2-Column Luxury Filter Modal Styles (Screenshot 2) ───────
+  filterModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'flex-end',
+  },
+  twoColFilterSheet: {
+    height: '86%',
+    backgroundColor: '#121316',
+    borderTopLeftRadius: 24 * SCALE,
+    borderTopRightRadius: 24 * SCALE,
+    borderWidth: 1,
+    borderColor: 'rgba(222, 164, 48, 0.25)',
+    overflow: 'hidden',
+  },
+  twoColFilterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20 * SCALE,
+    paddingTop: 18 * SCALE,
+    paddingBottom: 14 * SCALE,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: '#121316',
+  },
+  twoColFilterTitle: {
+    fontFamily: 'Urbanist-ExtraBold',
+    fontSize: 20 * SCALE,
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+  },
+  twoColCloseBtn: {
+    width: 32 * SCALE,
+    height: 32 * SCALE,
+    borderRadius: 16 * SCALE,
+    backgroundColor: '#24252B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  twoColBody: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  leftFilterTabsCol: {
+    width: '38%',
+    backgroundColor: '#0C0D10',
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  leftTabItem: {
+    paddingVertical: 14 * SCALE,
+    paddingHorizontal: 14 * SCALE,
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  leftTabItemActive: {
+    backgroundColor: 'rgba(222, 164, 48, 0.09)',
+  },
+  leftTabIndicator: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3.5 * SCALE,
+    backgroundColor: '#DEA430',
+    borderTopRightRadius: 2,
+    borderBottomRightRadius: 2,
+  },
+  leftTabText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 13.5 * SCALE,
+    color: '#8E8E93',
+    lineHeight: 18 * SCALE,
+  },
+  leftTabTextActive: {
+    fontFamily: 'Urbanist-Bold',
+    color: '#DEA430',
+  },
+  tabBadgeDot: {
+    position: 'absolute',
+    right: 10 * SCALE,
+    top: 18 * SCALE,
+    width: 6 * SCALE,
+    height: 6 * SCALE,
+    borderRadius: 3 * SCALE,
+    backgroundColor: '#DEA430',
+  },
+  rightFilterOptionsCol: {
+    flex: 1,
+    backgroundColor: '#121316',
+  },
+  rightSectionHeader: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11.5 * SCALE,
+    color: '#71717A',
+    letterSpacing: 1.2,
+    marginBottom: 16 * SCALE,
+  },
+  rightOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13 * SCALE,
+  },
+  rightOptionText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 14.5 * SCALE,
+    color: '#D4D4D8',
+    marginLeft: 14 * SCALE,
+    flex: 1,
+  },
+  rightOptionTextActive: {
+    fontFamily: 'Urbanist-Bold',
+    color: '#FFFFFF',
+  },
+  twoColBottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20 * SCALE,
+    paddingTop: 12 * SCALE,
+    paddingBottom: Platform.OS === 'ios' ? 32 * SCALE : 16 * SCALE,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: '#121316',
+    gap: 12 * SCALE,
+  },
+  twoColClearBtn: {
+    paddingVertical: 13 * SCALE,
+    paddingHorizontal: 20 * SCALE,
+    borderRadius: 14 * SCALE,
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  twoColClearText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14 * SCALE,
+    color: '#A1A1AA',
+  },
+  twoColApplyBtn: {
+    flex: 1,
+    backgroundColor: '#DEA430',
+    paddingVertical: 13 * SCALE,
+    borderRadius: 14 * SCALE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#DEA430',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  twoColApplyText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14.5 * SCALE,
+    color: '#000000',
   },
 
   // ─── 8. Explore Heading Styles ───────────────────────────────────

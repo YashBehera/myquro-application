@@ -22,6 +22,8 @@ export interface OlaMapViewProps {
   onRegionChangeComplete?: (coords: { latitude: number; longitude: number }) => void;
   onMoveStart?: () => void;
   showCenterMarker?: boolean;
+  fixedMarker?: boolean;
+  interactive?: boolean;
   showLocateMeButton?: boolean;
   onLocateMePress?: () => void;
   userLocation?: { latitude: number; longitude: number } | null;
@@ -47,7 +49,14 @@ const GoldMapPinIcon = ({ size = 38 }: { size?: number }) => (
   </Svg>
 );
 
-const getOlaMapHtml = (apiKey: string, centerLng: number, centerLat: number, zoom: number = 15.5) => `
+const getOlaMapHtml = (
+  apiKey: string,
+  centerLng: number,
+  centerLat: number,
+  zoom: number = 15.5,
+  hasFixedMarker: boolean = false,
+  isInteractive: boolean = true
+) => `
 <!DOCTYPE html>
 <html>
 <head>
@@ -55,7 +64,6 @@ const getOlaMapHtml = (apiKey: string, centerLng: number, centerLat: number, zoo
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=no" />
   <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
-  <script src="https://www.unpkg.com/olamaps-web-sdk@latest/dist/olamaps-web-sdk.umd.js"></script>
   <style>
     html, body {
       margin: 0;
@@ -75,6 +83,15 @@ const getOlaMapHtml = (apiKey: string, centerLng: number, centerLat: number, zoo
       bottom: 0;
       width: 100%;
       height: 100%;
+    }
+    .fixed-pin-marker {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: default;
+      filter: drop-shadow(0 3px 6px rgba(0,0,0,0.6));
     }
     .user-marker {
       width: 24px;
@@ -100,10 +117,17 @@ const getOlaMapHtml = (apiKey: string, centerLng: number, centerLat: number, zoo
 <body>
   <div id="map"></div>
   <script>
-    const API_KEY = "${apiKey}";
+    const API_KEY = "${apiKey || 'gT2nLyGoqOPTHq8wZxw3JyGg7ah81MQbCdEPyx6S'}";
     let map = null;
     let userMarker = null;
+    let restaurantMarker = null;
     let isProgrammatic = false;
+
+    function post(type, payload) {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ type: type }, payload || {})));
+      }
+    }
 
     try {
       map = new maplibregl.Map({
@@ -112,42 +136,61 @@ const getOlaMapHtml = (apiKey: string, centerLng: number, centerLat: number, zoo
         center: [${centerLng}, ${centerLat}],
         zoom: ${zoom},
         attributionControl: false,
-        dragPan: true,
+        dragPan: ${isInteractive ? 'true' : 'false'},
         dragRotate: false,
-        touchZoomRotate: true,
+        touchZoomRotate: ${isInteractive ? 'true' : 'false'},
         touchPitch: false,
-        scrollZoom: true,
-        doubleClickZoom: true,
-        transformRequest: (url) => ({
-          url: url + (url.includes('?') ? '&' : '?') + 'api_key=' + API_KEY
-        })
-      });
-
-      map.on('load', () => {
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'MAP_LOADED' }));
+        scrollZoom: ${isInteractive ? 'true' : 'false'},
+        doubleClickZoom: ${isInteractive ? 'true' : 'false'},
+        transformRequest: function(url) {
+          if (!url) return { url: '' };
+          if (url.indexOf('api_key=') !== -1) {
+            return { url: url };
+          }
+          const sep = url.indexOf('?') !== -1 ? '&' : '?';
+          return { url: url + sep + 'api_key=' + API_KEY };
         }
       });
 
-      map.on('movestart', () => {
-        if (!isProgrammatic && window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'MOVE_START' }));
+      map.on('load', function() {
+        post('MAP_LOADED');
+
+        ${
+          hasFixedMarker
+            ? `
+        // Create immovable fixed marker anchored to coordinates
+        const markerEl = document.createElement('div');
+        markerEl.className = 'fixed-pin-marker';
+        markerEl.innerHTML = '<svg width="36" height="36" viewBox="0 0 24 24" fill="#DEA430" stroke="#1A1A1A" stroke-width="1.2"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
+        restaurantMarker = new maplibregl.Marker({ element: markerEl, anchor: 'bottom' })
+          .setLngLat([${centerLng}, ${centerLat}])
+          .addTo(map);
+        `
+            : ''
         }
       });
 
-      map.on('moveend', () => {
+      map.on('movestart', function() {
+        if (!isProgrammatic) {
+          post('MOVE_START');
+        }
+      });
+
+      map.on('moveend', function() {
         if (isProgrammatic) {
           isProgrammatic = false;
         }
+        if (!map) return;
         const center = map.getCenter();
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'REGION_CHANGED',
-            latitude: center.lat,
-            longitude: center.lng,
-            zoom: map.getZoom()
-          }));
-        }
+        post('REGION_CHANGED', {
+          latitude: center.lat,
+          longitude: center.lng,
+          zoom: map.getZoom()
+        });
+      });
+
+      map.on('error', function(err) {
+        console.warn('Map error:', err);
       });
 
       window.recenterMap = function(lng, lat, targetZoom) {
@@ -157,8 +200,11 @@ const getOlaMapHtml = (apiKey: string, centerLng: number, centerLat: number, zoo
           center: [lng, lat],
           zoom: targetZoom || 16,
           essential: true,
-          duration: 900
+          duration: 700
         });
+        if (restaurantMarker) {
+          restaurantMarker.setLngLat([lng, lat]);
+        }
       };
 
       window.setUserLocation = function(lng, lat) {
@@ -187,6 +233,8 @@ export const OlaMapView = forwardRef<OlaMapViewRef, OlaMapViewProps>(({
   onRegionChangeComplete,
   onMoveStart,
   showCenterMarker = true,
+  fixedMarker = false,
+  interactive = true,
   showLocateMeButton = true,
   onLocateMePress,
   userLocation,
@@ -195,6 +243,8 @@ export const OlaMapView = forwardRef<OlaMapViewRef, OlaMapViewProps>(({
   const webViewRef = useRef<any>(null);
   const [isMapReady, setIsMapReady] = useState(false);
   const pinLiftAnim = useRef(new Animated.Value(0)).current;
+  const pendingRecenterRef = useRef<{ lat: number; lng: number; zoom?: number } | null>(null);
+  const pendingUserLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
   // Preserve initial coordinates across re-renders so HTML doesn't reload on drag
   const initialCoordsRef = useRef({
@@ -206,16 +256,33 @@ export const OlaMapView = forwardRef<OlaMapViewRef, OlaMapViewProps>(({
   useImperativeHandle(ref, () => ({
     recenter: (latitude: number, longitude: number, zoom?: number) => {
       const targetZoom = zoom || 16;
-      webViewRef.current?.injectJavaScript(
-        `if (window.recenterMap) { window.recenterMap(${longitude}, ${latitude}, ${targetZoom}); } true;`
-      );
+      if (isMapReady && webViewRef.current) {
+        webViewRef.current.injectJavaScript(
+          `if (window.recenterMap) { window.recenterMap(${longitude}, ${latitude}, ${targetZoom}); } true;`
+        );
+      } else {
+        pendingRecenterRef.current = { lat: latitude, lng: longitude, zoom: targetZoom };
+      }
     },
     setUserLocation: (latitude: number, longitude: number) => {
-      webViewRef.current?.injectJavaScript(
-        `if (window.setUserLocation) { window.setUserLocation(${longitude}, ${latitude}); } true;`
-      );
+      if (isMapReady && webViewRef.current) {
+        webViewRef.current.injectJavaScript(
+          `if (window.setUserLocation) { window.setUserLocation(${longitude}, ${latitude}); } true;`
+        );
+      } else {
+        pendingUserLocationRef.current = { lat: latitude, lng: longitude };
+      }
     },
   }));
+
+  // Update map center only if fixedMarker is used (static screens like restaurant detail)
+  useEffect(() => {
+    if (fixedMarker && isMapReady && initialLatitude && initialLongitude) {
+      webViewRef.current?.injectJavaScript(
+        `if (window.recenterMap) { window.recenterMap(${initialLongitude}, ${initialLatitude}, ${initialZoom}); } true;`
+      );
+    }
+  }, [initialLatitude, initialLongitude, initialZoom, isMapReady, fixedMarker]);
 
   useEffect(() => {
     if (isMapReady && userLocation?.latitude && userLocation?.longitude) {
@@ -230,7 +297,20 @@ export const OlaMapView = forwardRef<OlaMapViewRef, OlaMapViewProps>(({
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'MAP_LOADED') {
         setIsMapReady(true);
-        if (userLocation?.latitude && userLocation?.longitude) {
+        if (pendingRecenterRef.current) {
+          const { lat, lng, zoom } = pendingRecenterRef.current;
+          webViewRef.current?.injectJavaScript(
+            `if (window.recenterMap) { window.recenterMap(${lng}, ${lat}, ${zoom || 16}); } true;`
+          );
+          pendingRecenterRef.current = null;
+        }
+        if (pendingUserLocationRef.current) {
+          const { lat, lng } = pendingUserLocationRef.current;
+          webViewRef.current?.injectJavaScript(
+            `if (window.setUserLocation) { window.setUserLocation(${lng}, ${lat}); } true;`
+          );
+          pendingUserLocationRef.current = null;
+        } else if (userLocation?.latitude && userLocation?.longitude) {
           webViewRef.current?.injectJavaScript(
             `if (window.setUserLocation) { window.setUserLocation(${userLocation.longitude}, ${userLocation.latitude}); } true;`
           );
@@ -264,9 +344,11 @@ export const OlaMapView = forwardRef<OlaMapViewRef, OlaMapViewProps>(({
       OLA_MAPS_API_KEY,
       initialCoordsRef.current.lng,
       initialCoordsRef.current.lat,
-      initialCoordsRef.current.zoom
+      initialCoordsRef.current.zoom,
+      fixedMarker,
+      interactive
     );
-  }, []);
+  }, [fixedMarker, interactive]);
 
   const webViewSource = useMemo(() => ({ html: htmlContent }), [htmlContent]);
 
@@ -293,7 +375,7 @@ export const OlaMapView = forwardRef<OlaMapViewRef, OlaMapViewProps>(({
         )}
       />
 
-      {/* Center Pin Indicator for Drop-Pin Address Selection (No horizontal bar below) */}
+      {/* Center Pin Indicator for Drop-Pin Address Selection (Only if showCenterMarker is enabled) */}
       {showCenterMarker && (
         <View style={styles.centerMarkerWrapper} pointerEvents="none">
           <Animated.View

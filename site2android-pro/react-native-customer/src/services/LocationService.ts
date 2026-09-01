@@ -115,54 +115,86 @@ export const detectCurrentLocationWithOla = async (): Promise<{
   address: string;
   latitude: number;
   longitude: number;
-} | null> => {
+}> => {
+  let latitude = 20.2520;
+  let longitude = 85.7820;
+
   try {
     const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      console.warn('Foreground location permission not granted');
-      return null;
-    }
-
-    const loc = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
-
-    if (loc?.coords) {
-      let { latitude, longitude } = loc.coords;
-      
-      // If outside India (e.g. simulator default in US), default to Bhubaneswar center
-      const isOutsideIndia = latitude < 6.0 || latitude > 38.0 || longitude < 68.0 || longitude > 98.0;
-      if (isOutsideIndia) {
-        latitude = 20.2520;
-        longitude = 85.7820;
+    if (status === 'granted') {
+      let loc: Location.LocationObject | null = null;
+      try {
+        loc = await Location.getLastKnownPositionAsync({});
+      } catch (e) {
+        console.warn('getLastKnownPositionAsync error:', e);
       }
 
-      // Reverse geocode via Ola Maps
-      const olaInfo = await reverseGeocode(latitude, longitude);
-      if (olaInfo) {
-        return {
-          label: olaInfo.label,
-          address: olaInfo.address,
-          latitude,
-          longitude,
-        };
+      if (!loc) {
+        try {
+          const gpsPromise = Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          const timeoutPromise = new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), 3500)
+          );
+          loc = await Promise.race([gpsPromise, timeoutPromise]);
+        } catch (e) {
+          console.warn('getCurrentPositionAsync error:', e);
+        }
       }
 
-      // Fallback reverse geocode via expo-location if network endpoint is unreachable
-      const [expoGeo] = await Location.reverseGeocodeAsync({ latitude, longitude });
-      if (expoGeo) {
-        const label = expoGeo.name || expoGeo.subregion || expoGeo.street || 'Current Location';
-        const address = `${expoGeo.name ? expoGeo.name + ', ' : ''}${expoGeo.street ? expoGeo.street + ', ' : ''}${expoGeo.subregion || expoGeo.city || ''}, ${expoGeo.region || ''} ${expoGeo.postalCode || ''}`.trim();
-        return {
-          label,
-          address: address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-          latitude,
-          longitude,
-        };
+      if (loc?.coords) {
+        latitude = loc.coords.latitude;
+        longitude = loc.coords.longitude;
       }
     }
   } catch (err) {
-    console.error('Error detecting current location via Ola Maps:', err);
+    console.warn('Error fetching GPS hardware position:', err);
   }
-  return null;
+
+  // If outside India (e.g. simulator default in US), default to Bhubaneswar center
+  const isOutsideIndia = latitude < 6.0 || latitude > 38.0 || longitude < 68.0 || longitude > 98.0;
+  if (isOutsideIndia) {
+    latitude = 20.2520;
+    longitude = 85.7820;
+  }
+
+  // Reverse geocode via Ola Maps
+  try {
+    const olaInfo = await reverseGeocode(latitude, longitude);
+    if (olaInfo && olaInfo.label && olaInfo.address) {
+      return {
+        label: olaInfo.label,
+        address: olaInfo.address,
+        latitude,
+        longitude,
+      };
+    }
+  } catch (err) {
+    console.warn('Ola reverseGeocode error in detectCurrentLocationWithOla:', err);
+  }
+
+  // Fallback reverse geocode via expo-location if network endpoint is unreachable
+  try {
+    const [expoGeo] = await Location.reverseGeocodeAsync({ latitude, longitude });
+    if (expoGeo) {
+      const label = expoGeo.name || expoGeo.subregion || expoGeo.street || 'Current Location';
+      const address = `${expoGeo.name ? expoGeo.name + ', ' : ''}${expoGeo.street ? expoGeo.street + ', ' : ''}${expoGeo.subregion || expoGeo.city || 'Bhubaneswar'}, ${expoGeo.region || 'Odisha'} ${expoGeo.postalCode || ''}`.trim();
+      return {
+        label,
+        address: address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+        latitude,
+        longitude,
+      };
+    }
+  } catch (err) {
+    console.warn('Expo reverseGeocodeAsync error in detectCurrentLocationWithOla:', err);
+  }
+
+  return {
+    label: 'Current Location',
+    address: 'Near Infocity Avenue, Patia, Bhubaneswar, Odisha 751024',
+    latitude,
+    longitude,
+  };
 };

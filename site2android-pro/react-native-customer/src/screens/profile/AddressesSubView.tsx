@@ -7,12 +7,15 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
-  Alert,
-  SafeAreaView,
-  KeyboardAvoidingView,
   Platform,
   PermissionsAndroid,
   Image,
+  Share,
+  Alert,
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Dimensions,
+  Modal,
 } from 'react-native';
 import { OlaMapView, OlaMapViewRef } from '../../components/OlaMapView';
 import Svg, { Path } from 'react-native-svg';
@@ -29,6 +32,8 @@ import {
   Camera,
   ChevronLeft,
   User,
+  MoreVertical,
+  Share2,
 } from 'lucide-react-native';
 import { COLORS } from '../../theme/Theme';
 import {
@@ -78,6 +83,35 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
   const [customSaveAs, setCustomSaveAs] = useState('');
   const [addressPhotos, setAddressPhotos] = useState<string[]>([]);
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
+  const [errors, setErrors] = useState<{
+    receiverName?: string;
+    receiverPhone?: string;
+    houseNo?: string;
+    customSaveAs?: string;
+  }>({});
+  const [menuAnchor, setMenuAnchor] = useState<{
+    item: any;
+    top: number;
+    right: number;
+  } | null>(null);
+
+  const openAddressMenu = (item: any, e: any) => {
+    const pageY = e?.nativeEvent?.pageY;
+    const pageX = e?.nativeEvent?.pageX;
+    if (pageY !== undefined && pageX !== undefined) {
+      setMenuAnchor({
+        item,
+        top: Math.min(pageY + 12, Dimensions.get('window').height - 150),
+        right: Math.max(16, Dimensions.get('window').width - pageX - 10),
+      });
+    } else {
+      setMenuAnchor({
+        item,
+        top: 250,
+        right: 20,
+      });
+    }
+  };
 
   const [mapRegion, setMapRegion] = useState({
     latitude: 20.2508,
@@ -270,22 +304,38 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
     setReceiverPhone('');
     setUseAccountDetails(false);
     setAddressPhotos([]);
+    setErrors({});
     setAddressStep('list');
   };
 
   const handleSaveAddress = () => {
+    const newErrors: {
+      receiverName?: string;
+      receiverPhone?: string;
+      houseNo?: string;
+      customSaveAs?: string;
+    } = {};
+
     if (!receiverName.trim()) {
-      Alert.alert('Error', 'Please fill in Receiver Name');
-      return;
+      newErrors.receiverName = 'Please fill in Receiver Name';
     }
     if (!receiverPhone.trim()) {
-      Alert.alert('Error', 'Please fill in Receiver Number');
-      return;
+      newErrors.receiverPhone = 'Please fill in Receiver Number';
+    } else if (receiverPhone.replace(/\D/g, '').length < 10) {
+      newErrors.receiverPhone = 'Please enter a valid 10-digit phone number';
     }
     if (!houseNo.trim()) {
-      Alert.alert('Error', 'Please fill in Building / Floor');
+      newErrors.houseNo = 'Please fill in Building / Floor';
+    }
+    if (addressType === 'Other' && !customSaveAs.trim()) {
+      newErrors.customSaveAs = 'Please fill in address label';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
       return;
     }
+    setErrors({});
 
     const finalArea = area.trim() || selectedLocationInfo.label;
     const finalCity = city.trim() || selectedLocationInfo.address.split(',').slice(-3, -2)[0]?.trim() || selectedLocationInfo.address.split(',')[1]?.trim() || '';
@@ -425,14 +475,13 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                   <View style={styles.favAddressTypeBadge}>
                     <Text style={styles.favAddressTypeBadgeText}>{item.type.toUpperCase()}</Text>
                   </View>
-                  <View style={styles.favAddressActions}>
-                    <TouchableOpacity onPress={() => startEditAddress(item)} style={styles.favAddressActionBtn}>
-                      <Edit2 size={16} color="#deb853" />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => deleteAddress(item.id)} style={styles.favAddressActionBtn}>
-                      <Trash2 size={16} color="#ff6b6b" />
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    onPress={(e) => openAddressMenu(item, e)}
+                    style={styles.favAddressActionBtn}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <MoreVertical size={18} color="#deb853" />
+                  </TouchableOpacity>
                 </View>
                 <Text style={styles.favAddressHouse}>{item.houseNo}{item.landmark ? `, ${item.landmark}` : ''}</Text>
                 <Text style={styles.favAddressDetail}>{item.area}, {item.city}</Text>
@@ -619,33 +668,53 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                 <Text style={styles.profileFigmaCheckboxLabel}>Use my account details</Text>
               </TouchableOpacity>
 
-              <View style={styles.profileFigmaFormInputBox}>
+              <View
+                style={[
+                  styles.profileFigmaFormInputBox,
+                  errors.receiverName && styles.profileFigmaFormInputBoxError,
+                  errors.receiverName && { marginBottom: 4 },
+                ]}
+              >
                 <TextInput
                   value={receiverName}
                   onChangeText={(val) => {
                     setReceiverName(val);
                     setUseAccountDetails(false);
+                    if (errors.receiverName) setErrors((prev) => ({ ...prev, receiverName: undefined }));
                   }}
                   placeholder="Receiver name *"
-                  placeholderTextColor="#c3c3c3"
+                  placeholderTextColor={errors.receiverName ? '#EF4444' : '#c3c3c3'}
                   style={styles.profileFigmaFormInputField}
                 />
               </View>
+              {errors.receiverName && (
+                <Text style={styles.inputErrorSubText}>{errors.receiverName}</Text>
+              )}
 
-              <View style={styles.profileFigmaFormInputBox}>
+              <View
+                style={[
+                  styles.profileFigmaFormInputBox,
+                  errors.receiverPhone && styles.profileFigmaFormInputBoxError,
+                  errors.receiverPhone && { marginBottom: 4 },
+                ]}
+              >
                 <TextInput
                   value={receiverPhone}
                   onChangeText={(val) => {
                     setReceiverPhone(val);
                     setUseAccountDetails(false);
+                    if (errors.receiverPhone) setErrors((prev) => ({ ...prev, receiverPhone: undefined }));
                   }}
                   placeholder="Receiver number *"
-                  placeholderTextColor="#c3c3c3"
+                  placeholderTextColor={errors.receiverPhone ? '#EF4444' : '#c3c3c3'}
                   style={styles.profileFigmaFormInputField}
                   keyboardType="phone-pad"
                 />
-                <User size={20} color="#c3c3c3" style={{ marginLeft: 8 }} />
+                <User size={20} color={errors.receiverPhone ? '#EF4444' : '#c3c3c3'} style={{ marginLeft: 8 }} />
               </View>
+              {errors.receiverPhone && (
+                <Text style={styles.inputErrorSubText}>{errors.receiverPhone}</Text>
+              )}
             </View>
 
             <View style={styles.profileFigmaFormSection}>
@@ -683,15 +752,27 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.profileFigmaFormInputBox}>
+              <View
+                style={[
+                  styles.profileFigmaFormInputBox,
+                  errors.houseNo && styles.profileFigmaFormInputBoxError,
+                  errors.houseNo && { marginBottom: 4 },
+                ]}
+              >
                 <TextInput
                   value={houseNo}
-                  onChangeText={setHouseNo}
+                  onChangeText={(val) => {
+                    setHouseNo(val);
+                    if (errors.houseNo) setErrors((prev) => ({ ...prev, houseNo: undefined }));
+                  }}
                   placeholder="Building / Floor *"
-                  placeholderTextColor="#9d9d9d"
+                  placeholderTextColor={errors.houseNo ? '#EF4444' : '#9d9d9d'}
                   style={styles.profileFigmaFormInputField}
                 />
               </View>
+              {errors.houseNo && (
+                <Text style={styles.inputErrorSubText}>{errors.houseNo}</Text>
+              )}
 
               <View style={styles.profileFigmaFormInputBox}>
                 <TextInput
@@ -723,15 +804,27 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.profileFigmaFormInputBox}>
+              <View
+                style={[
+                  styles.profileFigmaFormInputBox,
+                  errors.customSaveAs && styles.profileFigmaFormInputBoxError,
+                  errors.customSaveAs && { marginBottom: 4 },
+                ]}
+              >
                 <TextInput
                   value={customSaveAs}
-                  onChangeText={setCustomSaveAs}
-                  placeholder="Save address as *"
-                  placeholderTextColor="#9d9d9d"
+                  onChangeText={(val) => {
+                    setCustomSaveAs(val);
+                    if (errors.customSaveAs) setErrors((prev) => ({ ...prev, customSaveAs: undefined }));
+                  }}
+                  placeholder={addressType === 'Other' ? 'Save address as *' : 'Save address as (Optional)'}
+                  placeholderTextColor={errors.customSaveAs ? '#EF4444' : '#9d9d9d'}
                   style={styles.profileFigmaFormInputField}
                 />
               </View>
+              {errors.customSaveAs && (
+                <Text style={styles.inputErrorSubText}>{errors.customSaveAs}</Text>
+              )}
             </View>
 
             <View style={styles.profileFigmaFormSection}>
@@ -808,6 +901,83 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
           </ScrollView>
         </View>
       )}
+      {/* ── ANCHORED MINI ADDRESS DROPDOWN MODAL ── */}
+      <Modal
+        visible={!!menuAnchor}
+        transparent
+        animationType="none"
+        onRequestClose={() => setMenuAnchor(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdropTransparent}
+          activeOpacity={1}
+          onPress={() => setMenuAnchor(null)}
+        >
+          {menuAnchor && (
+            <View
+              style={[
+                styles.miniAddressDropdownCard,
+                {
+                  top: menuAnchor.top,
+                  right: menuAnchor.right,
+                },
+              ]}
+            >
+              {/* Option 1: Edit Address */}
+              <TouchableOpacity
+                style={styles.miniAddressDropdownItem}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const item = menuAnchor.item;
+                  setMenuAnchor(null);
+                  startEditAddress(item);
+                }}
+              >
+                <Edit2 size={13 * scale} color="#DEA430" style={{ marginRight: 8 * scale }} />
+                <Text style={styles.miniAddressDropdownText} numberOfLines={1}>
+                  Edit
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 2: Share Address */}
+              <TouchableOpacity
+                style={styles.miniAddressDropdownItem}
+                activeOpacity={0.7}
+                onPress={async () => {
+                  const item = menuAnchor.item;
+                  setMenuAnchor(null);
+                  try {
+                    await Share.share({
+                      message: `My saved address: ${item.type} - ${item.houseNo ? item.houseNo + ', ' : ''}${item.area || item.address}`,
+                    });
+                  } catch (e) {}
+                }}
+              >
+                <Share2 size={13 * scale} color="#DEA430" style={{ marginRight: 8 * scale }} />
+                <Text style={styles.miniAddressDropdownText} numberOfLines={1}>
+                  Share
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 3: Delete Address */}
+              <TouchableOpacity
+                style={[styles.miniAddressDropdownItem, { borderBottomWidth: 0 }]}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const item = menuAnchor.item;
+                  setMenuAnchor(null);
+                  deleteAddress(item.id);
+                }}
+              >
+                <Trash2 size={13 * scale} color="#EF4444" style={{ marginRight: 8 * scale }} />
+                <Text style={[styles.miniAddressDropdownText, { color: '#EF4444' }]} numberOfLines={1}>
+                  Delete
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -916,13 +1086,42 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 0.5,
   },
-  favAddressActions: {
+  favAddressActionBtn: {
+    padding: 6,
+  },
+  modalBackdropTransparent: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+    zIndex: 99999,
+  },
+  miniAddressDropdownCard: {
+    position: 'absolute',
+    width: 140 * scale,
+    backgroundColor: '#16171B',
+    borderRadius: 12 * scale,
+    borderWidth: 1.2,
+    borderColor: 'rgba(222, 164, 48, 0.4)',
+    paddingVertical: 3 * scale,
+    zIndex: 999999,
+    elevation: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.75,
+    shadowRadius: 12,
+  },
+  miniAddressDropdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    paddingHorizontal: 11 * scale,
+    paddingVertical: 10 * scale,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
-  favAddressActionBtn: {
-    padding: 4,
+  miniAddressDropdownText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 12.5 * scale,
+    color: '#E4E4E7',
+    flex: 1,
   },
   favAddressHouse: {
     fontSize: 15,
@@ -1360,6 +1559,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 17,
     marginBottom: 16,
+  },
+  profileFigmaFormInputBoxError: {
+    borderColor: '#EF4444',
+    borderWidth: 1.2,
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  inputErrorSubText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12,
+    color: '#EF4444',
+    marginTop: 0,
+    marginBottom: 14,
+    marginLeft: 6,
   },
   profileFigmaFormInputField: {
     flex: 1,
