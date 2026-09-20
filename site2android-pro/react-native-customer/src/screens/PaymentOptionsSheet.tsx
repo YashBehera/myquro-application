@@ -851,7 +851,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     fontSize: 13.5 * SCALE,
     color: '#FFFFFF',
-    maxWidth: '45%',
+    flexShrink: 1,
+    maxWidth: '55%',
   },
   summaryDivider: {
     color: '#52525B',
@@ -862,6 +863,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Regular',
     fontSize: 12.5 * SCALE,
     color: '#D4D4D8',
+    flexShrink: 0,
   },
   summaryDeliveryTime: {
     fontFamily: 'Urbanist-Bold',
@@ -871,12 +873,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-SemiBold',
     fontSize: 13 * SCALE,
     color: '#FFFFFF',
+    flexShrink: 0,
   },
   summaryAddressText: {
     fontFamily: 'Urbanist-Regular',
     fontSize: 12 * SCALE,
     color: '#A1A1AA',
     flex: 1,
+    flexShrink: 1,
   },
 
   // ── Offers Row Card ──

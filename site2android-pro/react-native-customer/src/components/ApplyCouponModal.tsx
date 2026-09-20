@@ -30,7 +30,6 @@ import {
   Modal,
   Dimensions,
   Platform,
-  Alert,
   ToastAndroid,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -240,8 +239,6 @@ export const ApplyCouponModal: React.FC<ApplyCouponModalProps> = ({
   const showToast = (msg: string) => {
     if (Platform.OS === 'android') {
       ToastAndroid.show(msg, ToastAndroid.SHORT);
-    } else {
-      Alert.alert('Coupon Update', msg);
     }
   };
 
@@ -249,7 +246,6 @@ export const ApplyCouponModal: React.FC<ApplyCouponModalProps> = ({
     const isAlreadyApplied = appliedCoupon?.code === coupon.code;
     if (isAlreadyApplied) {
       onApplyCoupon(null);
-      showToast(`Coupon ${coupon.code} removed`);
       return;
     }
 

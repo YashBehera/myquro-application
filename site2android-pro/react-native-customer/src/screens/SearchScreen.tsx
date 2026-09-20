@@ -1464,7 +1464,7 @@ const styles = StyleSheet.create({
     left: 0,
   },
   promoBannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.38)',
   },
   promoBannerTopRow: {
@@ -1941,6 +1941,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     fontWeight: '800',
     color: '#FFFFFF',
+    flexShrink: 1,
+    marginRight: 6,
   },
   restaurantGroupRatingRow: {
     flexDirection: 'row',
@@ -1987,7 +1989,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#26221A',
     justifyContent: 'space-between',
-    height: 190,
+    minHeight: 190,
   },
   dishCardTopRow: {
     flexDirection: 'row',

@@ -101,8 +101,9 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'FAVOURITES' | 'PRICE_149_300' | 'PRICE_ABOVE_300'>('ALL');
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
   const [itemQuantities, setItemQuantities] = useState<Record<string, number>>({});
-  const [orders, setOrders] = useState<any[]>(userOrders);
-  const [isLoading, setIsLoading] = useState(userOrders.length === 0);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const orders = userOrders || [];
 
   const showToast = (msg: string) => {
     if (Platform.OS === 'android') {
@@ -120,14 +121,6 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
     });
     setItemQuantities(qtyMap);
   }, [cartItems]);
-
-  // Synchronize orders instantly whenever userOrders updates in memory
-  useEffect(() => {
-    if (userOrders && userOrders.length > 0) {
-      setOrders(userOrders);
-      setIsLoading(false);
-    }
-  }, [userOrders]);
 
   // Background refresh on mount without blocking initial UI
   useEffect(() => {

@@ -1341,7 +1341,9 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                             )}
                           </View>
 
-                          <Text style={styles.foodItemTitle}>{item.name}</Text>
+                          <Text style={styles.foodItemTitle} numberOfLines={2} ellipsizeMode="tail">
+                            {item.name}
+                          </Text>
                           
                           <View style={styles.foodItemPriceRow}>
                             <Text style={styles.foodItemPrice}>₹{item.price}</Text>
@@ -2411,6 +2413,7 @@ const styles = StyleSheet.create({
     fontSize: 12.5 * SCALE,
     color: '#BABABA',
     lineHeight: 15 * SCALE,
+    flexShrink: 1,
   },
   pairPriceRatingRow: {
     flexDirection: 'row',
@@ -2541,6 +2544,8 @@ const styles = StyleSheet.create({
   },
   foodItemInfo: {
     flex: 1,
+    flexShrink: 1,
+    marginRight: 8 * SCALE,
   },
   foodItemDietRow: {
     flexDirection: 'row',
@@ -2571,6 +2576,7 @@ const styles = StyleSheet.create({
     fontSize: 14.5 * SCALE,
     color: '#DDDDDD',
     marginBottom: 4,
+    flexShrink: 1,
   },
   foodItemPriceRow: {
     flexDirection: 'row',
@@ -2602,6 +2608,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#161616',
+    flexShrink: 0,
   },
   foodItemImg: {
     width: '100%',

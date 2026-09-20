@@ -24,7 +24,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Search, Heart, ChevronRight, ArrowRight, SlidersHorizontal, ChevronDown, MoreVertical } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
-import { SCREEN_WIDTH, isTablet } from '../utils/responsive';
+import { SCREEN_WIDTH, isTablet, isSmallDevice } from '../utils/responsive';
 
 // Hero Platter Local Asset (Transparent PNG without background)
 const heroRollImg = require('../assets/home/payday_hero_rolls.png');
@@ -192,8 +192,8 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
     }
   };
 
-  // Card dimensions for 3-column layout
-  const numColumns = isTablet ? 5 : 3;
+  // Card dimensions for responsive grid layout
+  const numColumns = isTablet ? 5 : (isSmallDevice ? 2 : 3);
   const horizontalPadding = 14;
   const cardGap = 10;
   const availableWidth = SCREEN_WIDTH - (horizontalPadding * 2) - (cardGap * (numColumns - 1));

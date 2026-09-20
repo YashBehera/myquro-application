@@ -41,7 +41,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { io } from 'socket.io-client';
 import {
@@ -525,6 +525,29 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
+
+  const heroVideoSource = require('../assets/tracking/hero_background.mp4');
+  const videoPlayer = useVideoPlayer(heroVideoSource, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+
+  useEffect(() => {
+    if (videoPlayer) {
+      videoPlayer.muted = isMuted;
+    }
+  }, [isMuted, videoPlayer]);
+
+  useEffect(() => {
+    if (videoPlayer) {
+      if (isPlaying) {
+        videoPlayer.play();
+      } else {
+        videoPlayer.pause();
+      }
+    }
+  }, [isPlaying, videoPlayer]);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showDeliveryInstructionsModal, setShowDeliveryInstructionsModal] = useState(false);
   const [selectedDeliveryInstructions, setSelectedDeliveryInstructions] = useState<string[]>([
@@ -1155,7 +1178,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         >
           {isMapExpanded ? (
             /* Live Interactive Full Ola MapView Mode (matching IncomingRequestModal UI) */
-            <View style={StyleSheet.absoluteFillObject}>
+            <View style={StyleSheet.absoluteFill}>
               <WebView
                 source={{
                   html: buildOlaMapHtml(
@@ -1170,7 +1193,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                     currentStatus,
                   ),
                 }}
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
                 scrollEnabled={false}
                 javaScriptEnabled
                 domStorageEnabled
@@ -1186,13 +1209,11 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             /* Delivery Scene with Full-Height Background Video */
             <View style={styles.heroSceneWrapper}>
               {/* Full-Height Looping Background Video */}
-              <Video
-                source={require('../assets/tracking/hero_background.mp4')}
+              <VideoView
+                player={videoPlayer}
                 style={styles.heroBgVideo}
-                resizeMode={ResizeMode.COVER}
-                isLooping
-                isMuted={isMuted}
-                shouldPlay={isPlaying}
+                contentFit="cover"
+                nativeControls={false}
               />
 
               {/* ── TOP SUBTLE STATUS BAR SHADING (Keeps top of video crystal clear) ── */}
@@ -1286,7 +1307,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                     currentStatus,
                   ),
                 }}
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
                 scrollEnabled={false}
                 javaScriptEnabled
                 domStorageEnabled
@@ -1457,7 +1478,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                     activeOpacity={0.8}
                     onPress={() => setShowDeliveryInstructionsModal(true)}
                   >
-                    <Text style={styles.addInstructionsText}>Add Delivery Instructions</Text>
+                    <Text style={styles.addInstructionsText} numberOfLines={1} ellipsizeMode="tail">Add Delivery Instructions</Text>
                     <ChevronRight size={15 * SCALE} color="#9A9AA2" />
                   </TouchableOpacity>
 
@@ -1962,7 +1983,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   heroBgVideo: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   heroTopFadeGradient: {
     position: 'absolute',
@@ -2174,7 +2195,7 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   miniMapGlassVignette: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.15)',
     borderRadius: 34 * SCALE,
     borderWidth: 1,
@@ -2419,22 +2440,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4 * SCALE,
+    flex: 1,
+    flexShrink: 1,
+    marginRight: 8 * SCALE,
   },
   addInstructionsText: {
     fontFamily: 'Urbanist-Medium',
     fontSize: 14 * SCALE,
     color: '#E0E0E0',
+    flexShrink: 1,
   },
   addInstructionsGoldText: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 13.5 * SCALE,
     color: '#CBB928',
+    flexShrink: 1,
   },
   addInstructionsGoldChevron: {
     fontSize: 18 * SCALE,
     color: '#CBB928',
     fontFamily: 'Urbanist-Bold',
     marginTop: -2,
+    flexShrink: 0,
   },
 
   // ── Unified Action Capsule (Call | Chat | Avatar) ───────────────
@@ -2448,6 +2475,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8 * SCALE,
     paddingVertical: 5 * SCALE,
     gap: 6 * SCALE,
+    flexShrink: 0,
   },
   capsuleIconBtn: {
     width: 30 * SCALE,

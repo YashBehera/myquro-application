@@ -7,11 +7,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0B0B0B"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.myquro.customer"
@@ -30,6 +25,14 @@
       ]
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0B0B0B"
+        }
+      ],
       [
         "expo-location",
         {

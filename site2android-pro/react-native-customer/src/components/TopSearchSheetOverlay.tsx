@@ -517,7 +517,7 @@ const styles = StyleSheet.create({
     elevation: 99999,
   },
   backdropScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.85)',
   },
   floatingTopCard: {

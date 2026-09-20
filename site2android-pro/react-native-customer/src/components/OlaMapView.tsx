@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0D0D0D',
   },
   loadingContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',

@@ -435,6 +435,7 @@ export const HomeScreen = ({
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        stickyHeaderIndices={[7]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1782,9 +1783,16 @@ const styles = StyleSheet.create({
   // ── 9. "WHAT'S ON YOUR MIND?" SECTION (NATIVELY STICKY) ────────
   whatsOnMindStickyContainer: {
     backgroundColor: '#000000',
-    paddingTop: 8,
-    paddingBottom: 6,
-    zIndex: 95,
+    paddingTop: 8 * SCALE,
+    paddingBottom: 4 * SCALE,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1813',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 99,
   },
   whatsOnMindHeader: {
     flexDirection: 'row',
@@ -1982,6 +1990,9 @@ const styles = StyleSheet.create({
     fontSize: 15 * SCALE,
     color: '#CACACA',
     marginBottom: 3,
+    flex: 1,
+    flexShrink: 1,
+    marginRight: 6 * SCALE,
   },
   vResRatingRow: {
     flexDirection: 'row',
@@ -2021,11 +2032,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8 * SCALE,
     paddingVertical: 5 * SCALE,
     justifyContent: 'space-between',
+    flexShrink: 1,
   },
   vResDeliveryLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4 * SCALE,
+    flexShrink: 1,
   },
   vResTruckIcon: {
     width: 14 * SCALE,
@@ -2037,6 +2050,7 @@ const styles = StyleSheet.create({
     fontSize: 9.5 * SCALE,
     color: '#AB883D',
     letterSpacing: 0.2,
+    flexShrink: 1,
   },
   vResPillDivider: {
     width: 1,
@@ -2088,7 +2102,7 @@ const styles = StyleSheet.create({
 
 
   modalBackdropTransparent: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.15)',
     zIndex: 99999,
   },

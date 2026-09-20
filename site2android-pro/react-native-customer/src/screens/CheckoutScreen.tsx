@@ -668,7 +668,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
                     <View style={styles.cartItemLeftInfo}>
                       <View style={styles.cartItemNameRow}>
                         <Image source={item.foodItem?.isVeg ? checkVegIcon : require('../assets/restaurant_detail/figma/imgImage12.png')} style={styles.cartVegIcon} />
-                        <Text style={styles.cartItemName} numberOfLines={1}>
+                        <Text style={styles.cartItemName} numberOfLines={2} ellipsizeMode="tail">
                           {item.foodItem?.name || 'Dish'}
                         </Text>
                       </View>
@@ -1264,7 +1264,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           <CelebrationPoppers active={!!appliedCelebrationCoupon} />
 
           <TouchableOpacity
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             activeOpacity={1}
             onPress={() => setAppliedCelebrationCoupon(null)}
           />
@@ -1669,12 +1669,15 @@ const styles = StyleSheet.create({
   },
   cartItemLeftInfo: {
     flex: 1,
+    flexShrink: 1,
+    marginRight: 10 * SCALE,
   },
   cartItemNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6 * SCALE,
     marginBottom: 4,
+    flex: 1,
   },
   cartVegIcon: {
     width: 14 * SCALE,
@@ -1685,6 +1688,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     fontSize: 15 * SCALE,
     color: '#C5C5C5',
+    flex: 1,
+    flexShrink: 1,
   },
   cartItemVariantRow: {
     flexDirection: 'row',
@@ -1715,7 +1720,8 @@ const styles = StyleSheet.create({
   cartItemRightControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12 * SCALE,
+    gap: 10 * SCALE,
+    flexShrink: 0,
   },
   cartStepperBox: {
     flexDirection: 'row',

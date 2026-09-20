@@ -262,8 +262,8 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     <View style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
       {/* Golden ambient background glows */}
-      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-        <Svg style={StyleSheet.absoluteFillObject} width={SCREEN_WIDTH} height={SCREEN_HEIGHT}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <Svg style={StyleSheet.absoluteFill} width={SCREEN_WIDTH} height={SCREEN_HEIGHT}>
           <Defs>
             <RadialGradient
               id="glowTopLeft"
@@ -786,8 +786,8 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   otpBox: {
-    width: 44 * scale,
-    height: 52 * scale,
+    width: Math.min(44 * scale, Math.floor((SCREEN_WIDTH - 64) / 6)),
+    height: Math.min(52 * scale, Math.floor(((SCREEN_WIDTH - 64) / 6) * 1.18)),
     borderWidth: 1,
     borderColor: "rgba(212, 175, 55, 0.2)",
     borderRadius: 8 * scale,

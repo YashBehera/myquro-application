@@ -1373,7 +1373,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
       >
         <View style={styles.modalOverlay}>
           <TouchableOpacity
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             onPress={() => setBookingModalVisible(false)}
           />
 
@@ -1640,7 +1640,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
       >
         <View style={styles.filterModalOverlay}>
           <TouchableOpacity
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             activeOpacity={1}
             onPress={() => setIsFilterModalOpen(false)}
           />
@@ -2707,7 +2707,7 @@ const styles = StyleSheet.create({
     resizeMode: 'cover',
   },
   venueOverlayGradient: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
   venueTopBadges: {
@@ -3508,7 +3508,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   figmaFlashDealBgImg: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     width: '100%',
     height: '100%',
   },

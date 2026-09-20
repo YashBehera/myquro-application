@@ -338,7 +338,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
                     </View>
 
                     <View style={styles.billItemContent}>
-                      <Text style={styles.billItemName} numberOfLines={1}>
+                      <Text style={styles.billItemName} numberOfLines={2} ellipsizeMode="tail">
                         {itName} x {itQty}
                       </Text>
                       {!!itNotes && (
@@ -733,23 +733,28 @@ const styles = StyleSheet.create({
   },
   billItemContent: {
     flex: 1,
+    flexShrink: 1,
+    marginRight: 8,
   },
   billItemName: {
     fontFamily: 'Urbanist-SemiBold',
     fontSize: 14.5,
     color: '#9C9C9C',
     marginBottom: 2,
+    flexShrink: 1,
   },
   billItemVariant: {
     fontFamily: 'Urbanist-Regular',
     fontSize: 12,
     color: '#6D6D6D',
+    flexShrink: 1,
   },
   billItemPriceText: {
     fontFamily: 'Urbanist-SemiBold',
     fontSize: 14.5,
     color: '#9F9F9F',
     marginLeft: 10,
+    flexShrink: 0,
   },
   billDivider: {
     height: 1,

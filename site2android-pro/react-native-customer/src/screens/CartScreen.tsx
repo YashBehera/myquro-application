@@ -367,7 +367,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
               {/* Item Details */}
               <View style={styles.itemDetails}>
                 <View style={styles.itemNameRow}>
-                  <Text style={[styles.itemNameText, isDarkMode && styles.textWhite]} numberOfLines={1}>
+                  <Text style={[styles.itemNameText, isDarkMode && styles.textWhite]} numberOfLines={2} ellipsizeMode="tail">
                     {item.name}
                   </Text>
                   <TouchableOpacity
@@ -969,6 +969,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 4,
+    flexShrink: 0,
   },
   qtyBtn: {
     width: 28,

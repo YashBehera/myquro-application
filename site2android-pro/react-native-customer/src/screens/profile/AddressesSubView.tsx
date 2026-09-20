@@ -514,7 +514,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
 
       {addressStep === 'map' && (
         <View style={styles.profileFigmaMapScreenContainer}>
-          <View style={StyleSheet.absoluteFillObject}>
+          <View style={StyleSheet.absoluteFill}>
             <OlaMapView
               ref={olaMapRef}
               initialLatitude={mapRegion.latitude}
@@ -523,7 +523,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
               userLocation={userLocation}
               showCenterMarker={true}
               showLocateMeButton={false}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
             />
           </View>
 
@@ -1090,7 +1090,7 @@ const styles = StyleSheet.create({
     padding: 6,
   },
   modalBackdropTransparent: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.15)',
     zIndex: 99999,
   },

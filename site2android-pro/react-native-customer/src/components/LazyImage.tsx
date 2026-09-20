@@ -26,12 +26,12 @@ export const LazyImage: React.FC<LazyImageProps> = ({
           width="100%"
           height="100%"
           borderRadius={finalBorderRadius}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
       )}
       <Image
         source={source}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         onLoadStart={() => setIsLoading(true)}
         onLoadEnd={() => setIsLoading(false)}
         {...props}

@@ -137,7 +137,7 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
   const sparkleRotateAnim = useRef(new Animated.Value(0)).current;
 
   // Reference handles for all timers to safely clear on error
-  const activeTimersRef = useRef<NodeJS.Timeout[]>([]);
+  const activeTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const clearAllFlowTimers = () => {
     activeTimersRef.current.forEach(t => clearTimeout(t));

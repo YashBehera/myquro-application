@@ -918,7 +918,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
                     userLocation={userLocation}
                     showCenterMarker={true}
                     showLocateMeButton={false}
-                    style={StyleSheet.absoluteFillObject}
+                    style={StyleSheet.absoluteFill}
                   />
 
                   {/* Floating Re-center GPS Button on Map */}
@@ -1303,7 +1303,7 @@ const styles = StyleSheet.create({
   figmaLocQuickActionsRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    gap: 10,
+    gap: 8 * SCALE,
     marginBottom: 24,
   },
   figmaLocQuickCard: {
@@ -1312,9 +1312,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#1F1E1E',
     borderRadius: 18,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    minHeight: 148,
+    paddingVertical: 12 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    minHeight: 140 * SCALE,
     justifyContent: 'space-between',
   },
   quickCircleBadge: {
@@ -1332,16 +1332,16 @@ const styles = StyleSheet.create({
   },
   figmaLocQuickTitle: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 13,
+    fontSize: 12.5 * SCALE,
     color: '#C4C4C4',
-    lineHeight: 17,
+    lineHeight: 16 * SCALE,
     marginBottom: 4,
   },
   figmaLocQuickSubtitle: {
     fontFamily: 'Urbanist-Regular',
-    fontSize: 10.5,
+    fontSize: 10 * SCALE,
     color: '#626262',
-    lineHeight: 14,
+    lineHeight: 13 * SCALE,
   },
 
   // ─── [5] SECTION HEADERS ───
@@ -1389,6 +1389,7 @@ const styles = StyleSheet.create({
   },
   figmaLocAddressMiddle: {
     flex: 1,
+    flexShrink: 1,
     paddingRight: 8,
   },
   figmaLocNameRow: {
@@ -1401,6 +1402,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Bold',
     fontSize: 15.5,
     color: '#C7C7C7',
+    flexShrink: 1,
   },
   figmaLocSelectedBadge: {
     backgroundColor: '#1B1711',
@@ -1421,6 +1423,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#727272',
     lineHeight: 17,
+    flexShrink: 1,
   },
   figmaLocAddressLine2: {
     fontFamily: 'Urbanist-Regular',
@@ -1428,11 +1431,13 @@ const styles = StyleSheet.create({
     color: '#707070',
     lineHeight: 16,
     marginTop: 1,
+    flexShrink: 1,
   },
   figmaLocRowMoreBtn: {
     padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   figmaLocAddressClickArea: {
     flex: 1,
@@ -1440,7 +1445,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalBackdropTransparent: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.15)',
     zIndex: 99999,
   },

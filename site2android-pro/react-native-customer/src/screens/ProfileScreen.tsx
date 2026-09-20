@@ -581,7 +581,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
       {showMenuOptions && (
         <View style={styles.menuDropdownOverlay}>
           <TouchableOpacity
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             onPress={() => setShowMenuOptions(false)}
           />
           <View style={styles.menuDropdownCard}>

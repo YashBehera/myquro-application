@@ -318,7 +318,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   const renderContent = () => {
     if (currentIndex === 0) {
       return (
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "#000000" }]}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000000" }]}>
           <Image
             source={require("../assets/images/background_onboarding.png")}
             style={{
@@ -333,10 +333,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
 
     // Combined screens case 1 & case 2 for active animated rotation transition
     return (
-      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: "#000000" }]}>
-        <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: "#000000" }]}>
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
           <Svg
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             width={SCREEN_WIDTH}
             height={SCREEN_HEIGHT}
           >
@@ -534,7 +534,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   return (
     <View style={styles.container}>
       <Animated.View
-        style={[StyleSheet.absoluteFillObject, { opacity: fadeAnim }]}
+        style={[StyleSheet.absoluteFill, { opacity: fadeAnim }]}
       >
         {renderContent()}
       </Animated.View>

@@ -142,30 +142,45 @@ const MainAppContent: React.FC = () => {
   const screenOpacity = useRef(new Animated.Value(1)).current;
   const screenTranslateY = useRef(new Animated.Value(0)).current;
   const screenScale = useRef(new Animated.Value(1)).current;
+  const prevScreenRef = useRef<ScreenId>(activeScreen);
 
   useEffect(() => {
-    // Whenever activeScreen or currentParams changes, run a buttery smooth 60fps entrance
-    screenOpacity.setValue(0.35);
-    screenTranslateY.setValue(10);
-    screenScale.setValue(0.985);
+    const prev = prevScreenRef.current;
+    prevScreenRef.current = activeScreen;
+
+    // Bottom tab switching (home <-> explore <-> reorder) should be instantaneous without screen flashing
+    const isTabSwitch = (prev === 'home' || prev === 'explore' || prev === 'reorder') &&
+                        (activeScreen === 'home' || activeScreen === 'explore' || activeScreen === 'reorder');
+
+    if (isTabSwitch) {
+      screenOpacity.setValue(1);
+      screenTranslateY.setValue(0);
+      screenScale.setValue(1);
+      return;
+    }
+
+    // For screen pushes, perform a smooth entrance without harsh opacity drops
+    screenOpacity.setValue(0.9);
+    screenTranslateY.setValue(4);
+    screenScale.setValue(0.995);
 
     Animated.parallel([
       Animated.timing(screenOpacity, {
         toValue: 1,
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
+        duration: 180,
+        easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
       Animated.timing(screenTranslateY, {
         toValue: 0,
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
+        duration: 180,
+        easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
       Animated.timing(screenScale, {
         toValue: 1,
-        duration: 220,
-        easing: Easing.out(Easing.cubic),
+        duration: 180,
+        easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
     ]).start();

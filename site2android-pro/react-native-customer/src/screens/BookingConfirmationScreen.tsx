@@ -648,16 +648,18 @@ const styles = StyleSheet.create({
   },
   infoColTitle: {
     color: '#FFFFFF',
-    fontSize: 17 * SCALE,
+    fontSize: 15 * SCALE,
     fontFamily: 'Urbanist-Bold',
     fontWeight: '800',
     letterSpacing: 0.2,
     marginBottom: 3 * SCALE,
+    flexShrink: 1,
   },
   infoColSubtitle: {
     color: '#8E8E8E',
-    fontSize: 12.5 * SCALE,
+    fontSize: 12 * SCALE,
     fontFamily: 'Urbanist-Medium',
+    flexShrink: 1,
   },
 
   // ─── Restaurant Row ───
