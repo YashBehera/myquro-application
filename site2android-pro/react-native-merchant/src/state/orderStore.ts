@@ -36,6 +36,9 @@ export interface Order {
   riderName?: string;
   riderPhone?: string;
   etaMinutes?: number;
+  acknowledged?: boolean;
+  prepTimeMinutes?: number;
+  extendedPrepMinutes?: number;
 }
 
 interface OrderStore {
@@ -48,6 +51,9 @@ interface OrderStore {
   markReady: (orderId: string) => Promise<void>;
   markPickedUp: (orderId: string) => Promise<void>;
   rejectOrder: (orderId: string, reason: string) => Promise<void>;
+  acknowledgeOrder: (orderId: string) => Promise<void>;
+  extendPrepTime: (orderId: string, extraMinutes: number) => Promise<void>;
+  merchantCancelOrder: (orderId: string, reason: string, details?: string) => Promise<void>;
   clearDatabase: () => Promise<void>;
 }
 
@@ -224,6 +230,9 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
               ? (bo.riderPhone || undefined)
               : undefined,
             etaMinutes: bo.etaMinutes || undefined,
+            acknowledged: bo.acknowledgedByMerchant ?? true,
+            prepTimeMinutes: bo.prepTimeMinutes || 20,
+            extendedPrepMinutes: bo.extendedPrepMinutes || 0,
           };
         });
 
@@ -343,6 +352,58 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
       await apiClient.patch(`/orders/${orderId}/status`, { status: 'cancelled' });
     } catch (e) {
       console.warn('Error rejecting order on backend:', e);
+    }
+  },
+
+  acknowledgeOrder: async (orderId: string) => {
+    set((state) => ({
+      orders: state.orders.map((o) =>
+        o.id === orderId ? { ...o, acknowledged: true } : o
+      ),
+    }));
+    try {
+      await apiClient.patch(`/orders/${orderId}/acknowledge`);
+    } catch (e) {
+      console.warn('Error acknowledging order on backend:', e);
+    }
+  },
+
+  extendPrepTime: async (orderId: string, extraMinutes: number) => {
+    set((state) => ({
+      orders: state.orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              extendedPrepMinutes: (o.extendedPrepMinutes || 0) + extraMinutes,
+            }
+          : o
+      ),
+    }));
+    try {
+      await apiClient.patch(`/orders/${orderId}/extend-prep`, { extraMinutes });
+    } catch (e) {
+      console.warn('Error extending prep time on backend:', e);
+    }
+  },
+
+  merchantCancelOrder: async (orderId: string, reason: string, details?: string) => {
+    pendingStatusUpdates.set(orderId, { status: 'Rejected', timestamp: Date.now() });
+    set((state) => ({
+      orders: state.orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'Rejected' as const,
+              rejectedTime: new Date().toISOString(),
+              rejectionReason: reason,
+            }
+          : o
+      ),
+    }));
+    try {
+      await apiClient.patch(`/orders/${orderId}/merchant-cancel`, { reason, details });
+    } catch (e) {
+      console.warn('Error cancelling order by merchant:', e);
     }
   },
 

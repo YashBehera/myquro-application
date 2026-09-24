@@ -7,11 +7,12 @@ import {
   isRestaurantOwnerOrManager,
   getRestaurantRole,
 } from "../lib/checkRoles.js";
-import { eq, and, gte, sql, ne } from "drizzle-orm";
+import { eq, and, gte, sql, ne, desc } from "drizzle-orm";
 import { reservations } from "../db/schema/reservations.js";
 import { tables } from "../db/schema/tables.js";
 import { tableSession } from "../db/schema/table-session.js";
 import { orders } from "../db/schema/orders.js";
+import { merchantPenalties } from "../db/schema/merchant-penalties.js";
 
 
 import { analyticsCache } from "../lib/analytics-cache.js";
@@ -535,6 +536,136 @@ router.get("/:id/dashboard/stats", requireAuth, async (req: any, res) => {
     });
   } catch (error) {
     console.error("FETCH DASHBOARD STATS ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /restaurants/:id/heartbeat (Device presence ping every 60s)
+router.post("/:id/heartbeat", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    await db
+      .update(restaurants)
+      .set({
+        lastHeartbeatAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(restaurants.id, id));
+
+    res.status(200).json({ success: true, timestamp: new Date() });
+  } catch (error) {
+    console.error("HEARTBEAT ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /restaurants/:id/auto-accept (Toggle Auto-Accept mode)
+router.patch("/:id/auto-accept", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const { autoAcceptOrders } = req.body;
+
+    if (typeof autoAcceptOrders !== "boolean") {
+      return res.status(400).json({ message: "autoAcceptOrders must be a boolean" });
+    }
+
+    const updated = await db
+      .update(restaurants)
+      .set({
+        autoAcceptOrders,
+        updatedAt: new Date(),
+      })
+      .where(eq(restaurants.id, id))
+      .returning();
+
+    res.status(200).json({
+      success: true,
+      autoAcceptOrders: updated[0]?.autoAcceptOrders,
+      message: `Auto-accept orders ${autoAcceptOrders ? 'enabled' : 'disabled'}`
+    });
+  } catch (error) {
+    console.error("AUTO-ACCEPT TOGGLE ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /restaurants/:id/busy-mode (Toggle Dining Rush Busy Mode)
+router.patch("/:id/busy-mode", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const { isBusyMode } = req.body;
+
+    if (typeof isBusyMode !== "boolean") {
+      return res.status(400).json({ message: "isBusyMode must be a boolean" });
+    }
+
+    const updated = await db
+      .update(restaurants)
+      .set({
+        isBusyMode,
+        updatedAt: new Date(),
+      })
+      .where(eq(restaurants.id, id))
+      .returning();
+
+    res.status(200).json({
+      success: true,
+      isBusyMode: updated[0]?.isBusyMode,
+      message: isBusyMode
+        ? "Busy Mode activated: +15 mins buffer added to new orders"
+        : "Busy Mode deactivated: standard prep time restored"
+    });
+  } catch (error) {
+    console.error("BUSY-MODE TOGGLE ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /restaurants/:id/unpause (Early unpause from dining rush pause)
+router.patch("/:id/unpause", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    await db
+      .update(restaurants)
+      .set({
+        autoPausedUntil: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(restaurants.id, id));
+
+    res.status(200).json({ success: true, message: "Restaurant unpaused and ready to accept orders" });
+  } catch (error) {
+    console.error("UNPAUSE ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /restaurants/:id/penalties (Fetch penalty history and strikes)
+router.get("/:id/penalties", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const penalties = await db
+      .select()
+      .from(merchantPenalties)
+      .where(eq(merchantPenalties.restaurantId, id))
+      .orderBy(desc(merchantPenalties.createdAt));
+
+    const restaurant = await db
+      .select({
+        strikeCount: restaurants.strikeCount,
+        autoPausedUntil: restaurants.autoPausedUntil,
+      })
+      .from(restaurants)
+      .where(eq(restaurants.id, id))
+      .limit(1);
+
+    res.status(200).json({
+      penalties,
+      strikeCount: restaurant[0]?.strikeCount || 0,
+      autoPausedUntil: restaurant[0]?.autoPausedUntil || null,
+    });
+  } catch (error) {
+    console.error("FETCH PENALTIES ERROR:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

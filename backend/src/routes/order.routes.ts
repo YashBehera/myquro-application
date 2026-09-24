@@ -16,6 +16,7 @@ import { authUsers } from "../db/schema/auth-users.js";
 import { authSessions } from "../db/schema/auth-sessions.js";
 import { orderDeliveries } from "../db/schema/order-deliveries.js";
 import { deliveryRiders } from "../db/schema/delivery-riders.js";
+import { merchantPenalties } from "../db/schema/merchant-penalties.js";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
 
 import { nanoid } from "nanoid";
@@ -378,7 +379,12 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
     console.log("MAKE ORDER - Fetching restaurant GST percentage for restaurant:", sessionRestaurantId);
     const restaurantData = await db
       .select({
-        defaultGstPercentage: restaurants.defaultGstPercentage
+        defaultGstPercentage: restaurants.defaultGstPercentage,
+        autoAcceptOrders: restaurants.autoAcceptOrders,
+        autoPausedUntil: restaurants.autoPausedUntil,
+        isBusyMode: restaurants.isBusyMode,
+        defaultPrepTimeMinutes: restaurants.defaultPrepTimeMinutes,
+        isOpen: restaurants.isOpen,
       })
       .from(restaurants)
       .where(eq(restaurants.id, sessionRestaurantId))
@@ -389,9 +395,25 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       return res.status(404).json({ message: "Restaurant not found" });
     }
 
+    // Check if restaurant is temporarily auto-paused due to heavy dining rush
+    if (restaurantData[0].autoPausedUntil && new Date(restaurantData[0].autoPausedUntil) > new Date()) {
+      const remainingMins = Math.ceil((new Date(restaurantData[0].autoPausedUntil).getTime() - Date.now()) / 60000);
+      return res.status(400).json({ 
+        message: `Restaurant is currently paused due to heavy dining rush. Resuming in ${remainingMins} minutes.`,
+        isPaused: true,
+        remainingMinutes: remainingMins
+      });
+    }
+
+    const isAutoAccept = restaurantData[0].autoAcceptOrders ?? true;
+    const basePrep = restaurantData[0].defaultPrepTimeMinutes || 20;
+    const busyBuffer = restaurantData[0].isBusyMode ? 15 : 0;
+    const computedPrepMinutes = basePrep + busyBuffer;
+    const initialStatus = (status as any) || (isAutoAccept ? "preparing" : "placed");
+
     const rawGst = Number(restaurantData[0].defaultGstPercentage);
     const gstPercentage = rawGst > 0 ? rawGst : 5;
-    console.log("MAKE ORDER - Using GST percentage:", gstPercentage);
+    console.log("MAKE ORDER - Using GST percentage:", gstPercentage, "| Auto-Accept:", isAutoAccept, "| Initial Status:", initialStatus);
 
     // Calculate totals - NEW LOGIC: (Subtotal + GST) - Discount
     const subtotal = calculateSubtotal(itemsWithPrices);
@@ -539,12 +561,15 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       restaurantId: sessionRestaurantId,
       tableSessionId: finalTableSessionId,
       tableId: sessionTableId,
-      status: (status as any) || "placed",
+      status: initialStatus,
       subtotal,
       discount: orderDiscount,
       gst: orderGst,
       grandTotal: orderGrandTotal,
       notes: dbNotes,
+      acknowledgedByMerchant: false,
+      prepTimeMinutes: computedPrepMinutes,
+      extendedPrepMinutes: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -819,10 +844,20 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       orderId,
       restaurantId: sessionRestaurantId,
       tableSessionId: finalTableSessionId,
-      status: 'placed',
+      status: initialStatus,
+      autoAccepted: isAutoAccept,
+      prepTimeMinutes: computedPrepMinutes,
       totalAmount: grandTotal,
       itemCount: items.length,
       createdAt: new Date().toISOString()
+    });
+
+    // Also emit to order room for customer live tracker
+    emitToOrder(orderId, 'order-status', {
+      orderId,
+      status: initialStatus,
+      prepTimeMinutes: computedPrepMinutes,
+      updatedAt: new Date().toISOString()
     });
 
     // Return success response
@@ -2016,6 +2051,183 @@ router.get("/:orderId/detail", optionalAuth, async (req: any, res) => {
   } catch (err) {
     console.error("Error fetching order details:", err);
     return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /orders/:orderId/acknowledge (Staff acknowledges order & stops alarm)
+router.patch("/:orderId/acknowledge", async (req: any, res) => {
+  try {
+    const { orderId } = req.params;
+    const existing = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+    if (!existing.length) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const updated = await db
+      .update(orders)
+      .set({
+        acknowledgedByMerchant: true,
+        acknowledgedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderId))
+      .returning();
+
+    // Notify restaurant and order rooms that alarm can stop
+    emitToRestaurant(existing[0].restaurantId, "order-acknowledged", {
+      orderId,
+      acknowledgedAt: updated[0].acknowledgedAt,
+    });
+    emitToOrder(orderId, "order-acknowledged", {
+      orderId,
+      acknowledgedAt: updated[0].acknowledgedAt,
+    });
+
+    res.status(200).json({ success: true, order: updated[0] });
+  } catch (error) {
+    console.error("ORDER ACKNOWLEDGE ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /orders/:orderId/extend-prep (Staff extends prep time during rush)
+router.patch("/:orderId/extend-prep", async (req: any, res) => {
+  try {
+    const { orderId } = req.params;
+    const { extraMinutes } = req.body;
+    const minutesToAdd = Number(extraMinutes) || 10;
+
+    const existing = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+    if (!existing.length) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const currentExtended = existing[0].extendedPrepMinutes || 0;
+    const newExtended = currentExtended + minutesToAdd;
+    const basePrep = existing[0].prepTimeMinutes || 20;
+    const totalPrepMinutes = basePrep + newExtended;
+
+    const updated = await db
+      .update(orders)
+      .set({
+        extendedPrepMinutes: newExtended,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderId))
+      .returning();
+
+    const payload = {
+      orderId,
+      extraMinutes: minutesToAdd,
+      totalExtendedMinutes: newExtended,
+      totalPrepMinutes,
+      message: `Kitchen requested ${minutesToAdd} extra minutes to prepare fresh food.`,
+      updatedAt: new Date().toISOString(),
+    };
+
+    emitToOrder(orderId, "order-prep-extended", payload);
+    emitToRestaurant(existing[0].restaurantId, "order-prep-extended", payload);
+
+    res.status(200).json({ success: true, ...payload, order: updated[0] });
+  } catch (error) {
+    console.error("EXTEND PREP ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /orders/:orderId/merchant-cancel (Emergency cancel by restaurant + penalty handling)
+router.patch("/:orderId/merchant-cancel", async (req: any, res) => {
+  try {
+    const { orderId } = req.params;
+    const { reason, details } = req.body;
+    const cancelReason = reason || "kitchen_overloaded";
+
+    const existing = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+    if (!existing.length) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const restaurantId = existing[0].restaurantId;
+
+    // 1. Update order status
+    const updated = await db
+      .update(orders)
+      .set({
+        status: "cancelled",
+        cancelledBy: "merchant",
+        cancellationReason: cancelReason,
+        notes: details ? `${existing[0].notes || ""} | Cancel Reason: ${details}` : existing[0].notes,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, orderId))
+      .returning();
+
+    // 2. If cancelled due to dining rush / kitchen overload, apply auto-pause & penalty
+    let isAutoPaused = false;
+    if (cancelReason === "kitchen_overloaded" || cancelReason === "dining_rush") {
+      const pauseDurationMs = 30 * 60 * 1000; // 30 minutes
+      const pauseUntil = new Date(Date.now() + pauseDurationMs);
+
+      // Increment strikes and pause restaurant
+      const [restro] = await db
+        .select({ strikeCount: restaurants.strikeCount })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+
+      const newStrikes = (restro?.strikeCount || 0) + 1;
+
+      await db
+        .update(restaurants)
+        .set({
+          autoPausedUntil: pauseUntil,
+          strikeCount: newStrikes,
+          updatedAt: new Date(),
+        })
+        .where(eq(restaurants.id, restaurantId));
+
+      isAutoPaused = true;
+
+      // 3. Log penalty record in ledger
+      await db.insert(merchantPenalties).values({
+        id: nanoid(),
+        restaurantId,
+        orderId,
+        penaltyType: "rush_cancellation",
+        amount: 5000, // ₹50.00 in paise
+        customerVoucherAmount: 5000,
+        riderCompensationAmount: 0,
+        status: "pending",
+        reason: `Late cancellation due to ${cancelReason}. Auto-paused for 30 minutes.`,
+        createdAt: new Date(),
+      });
+    }
+
+    // 4. Emit WebSocket events to Customer and Restaurant
+    const cancelPayload = {
+      orderId,
+      status: "cancelled",
+      cancelledBy: "merchant",
+      reason: cancelReason,
+      isAutoPaused,
+      refundInitiated: true,
+      refundMessage: "100% refund initiated to original payment method.",
+      updatedAt: new Date().toISOString(),
+    };
+
+    emitToOrder(orderId, "order-status", cancelPayload);
+    emitToOrder(orderId, "order-cancelled", cancelPayload);
+    emitToRestaurant(restaurantId, "order-cancelled", cancelPayload);
+
+    res.status(200).json({
+      success: true,
+      message: "Order cancelled successfully.",
+      ...cancelPayload,
+      order: updated[0],
+    });
+  } catch (error) {
+    console.error("MERCHANT CANCEL ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 

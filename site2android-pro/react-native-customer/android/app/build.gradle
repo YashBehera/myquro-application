@@ -123,7 +123,6 @@ dependencies {
     // subprojects to be built, but they MUST still be listed here to be on the
     // compile classpath for the auto-generated PackageList.java.
     implementation project(':react-native-async-storage_async-storage')
-    implementation project(':react-native-maps')
     implementation project(':react-native-safe-area-context')
     implementation project(':react-native-screens')
     implementation project(':react-native-svg')

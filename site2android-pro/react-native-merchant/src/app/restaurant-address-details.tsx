@@ -181,7 +181,7 @@ export default function RestaurantAddressDetailsScreen() {
             'rgba(7, 9, 14, 0.98)',
           ]}
           locations={[0, 0.4, 1]}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           pointerEvents="none"
         />
       </View>
@@ -227,7 +227,7 @@ export default function RestaurantAddressDetailsScreen() {
               />
               <LinearGradient
                 colors={['rgba(7, 9, 14, 0.2)', 'rgba(7, 9, 14, 0.65)']}
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
                 pointerEvents="none"
               />
 
@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0B0B0B',
   },
   backgroundTextureWrapper: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   backgroundTexture: {
     width: '100%',

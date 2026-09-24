@@ -1,4 +1,4 @@
-import { pgTable, integer, text, timestamp, index } from "drizzle-orm/pg-core";
+import { pgTable, integer, text, timestamp, index, boolean } from "drizzle-orm/pg-core";
 
 import { restaurants } from "./restaurants.js";
 import { tableSession } from "./table-session.js";
@@ -24,6 +24,12 @@ export const orders = pgTable("orders", {
   discount: integer("discount"),
   gst: integer("gst"),
   grandTotal: integer("grand_total"),
+  acknowledgedByMerchant: boolean("acknowledged_by_merchant").default(false).notNull(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  prepTimeMinutes: integer("prep_time_minutes").default(20).notNull(),
+  extendedPrepMinutes: integer("extended_prep_minutes").default(0).notNull(),
+  cancellationReason: text("cancellation_reason"),
+  cancelledBy: text("cancelled_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {

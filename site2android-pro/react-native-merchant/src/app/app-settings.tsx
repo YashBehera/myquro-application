@@ -15,13 +15,73 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { apiClient } from '../services/apiClient';
+import { soundService } from '../utils/soundService';
 
 export default function AppSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [kitchenAlarmEnabled, setKitchenAlarmEnabled] = useState(true);
-  const [autoAcceptRush, setAutoAcceptRush] = useState(false);
+  const [autoAcceptRush, setAutoAcceptRush] = useState(true);
+  const [isBusyMode, setIsBusyMode] = useState(false);
+  const [restaurantId, setRestaurantId] = useState<string | null>(null);
   const [isReloadingConfig, setIsReloadingConfig] = useState(false);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const alarmOn = await soundService.isAlarmEnabled();
+        setKitchenAlarmEnabled(alarmOn);
+
+        const res = await apiClient.get('/restaurants/my-restaurant');
+        const restro = res.data?.restaurant || res.data;
+        if (restro?.id) {
+          setRestaurantId(restro.id);
+          setAutoAcceptRush(restro.autoAcceptOrders ?? true);
+          setIsBusyMode(restro.isBusyMode ?? false);
+        }
+      } catch (e) {
+        console.warn('Error fetching restaurant settings:', e);
+      }
+    };
+    fetchSettings();
+  }, []);
+
+  const handleToggleKitchenAlarm = async (val: boolean) => {
+    setKitchenAlarmEnabled(val);
+    await soundService.setAlarmEnabled(val);
+    if (val) {
+      await soundService.playSingleChime();
+    }
+  };
+
+  const handleToggleAutoAccept = async (val: boolean) => {
+    setAutoAcceptRush(val);
+    try {
+      if (restaurantId) {
+        await apiClient.patch(`/restaurants/${restaurantId}/auto-accept`, { autoAcceptOrders: val });
+      }
+    } catch (e) {
+      console.warn('Error updating auto-accept:', e);
+    }
+  };
+
+  const handleToggleBusyMode = async (val: boolean) => {
+    setIsBusyMode(val);
+    try {
+      if (restaurantId) {
+        await apiClient.patch(`/restaurants/${restaurantId}/busy-mode`, { isBusyMode: val });
+        Alert.alert(
+          val ? 'Busy Mode Activated ⚡' : 'Standard Mode Restored',
+          val
+            ? '+15 mins buffer added to all incoming customer orders to prevent kitchen overload.'
+            : 'Standard kitchen preparation times restored.'
+        );
+      }
+    } catch (e) {
+      console.warn('Error updating busy mode:', e);
+    }
+  };
 
   const spinValue = useRef(new Animated.Value(0)).current;
 
@@ -92,10 +152,11 @@ export default function AppSettingsScreen() {
     );
   };
 
-  const handleSoundSettings = () => {
+  const handleSoundSettings = async () => {
+    await soundService.playSingleChime();
     Alert.alert(
-      'Kitchen Alert Alarm Tone',
-      'Current alarm tone: "High Pitch Kitchen Bell" (Loud, repeats every 5s until accepted).',
+      'Kitchen Alert Alarm Tone 🔔',
+      'Playing chime preview! Kitchen alert tone is configured at maximum volume with high-pitch chime and repeating pulses until accepted.',
       [{ text: 'OK' }]
     );
   };
@@ -139,7 +200,7 @@ export default function AppSettingsScreen() {
 
           <Switch
             value={kitchenAlarmEnabled}
-            onValueChange={setKitchenAlarmEnabled}
+            onValueChange={handleToggleKitchenAlarm}
             trackColor={{ false: '#3A352B', true: '#D97706' }}
             thumbColor={kitchenAlarmEnabled ? '#FFFFFF' : '#8E8E8E'}
           />
@@ -153,18 +214,41 @@ export default function AppSettingsScreen() {
             </View>
 
             <View style={styles.toggleTextCol}>
-              <Text style={styles.cardTitleText}>Auto-Accept Rush Orders</Text>
+              <Text style={styles.cardTitleText}>Auto-Accept Orders</Text>
               <Text style={styles.cardSubtitleText}>
-                Instantly accept incoming customer orders during rush hours
+                Instantly accept incoming customer orders to boost ranking
               </Text>
             </View>
           </View>
 
           <Switch
             value={autoAcceptRush}
-            onValueChange={setAutoAcceptRush}
+            onValueChange={handleToggleAutoAccept}
             trackColor={{ false: '#3A352B', true: '#D97706' }}
             thumbColor={autoAcceptRush ? '#FFFFFF' : '#8E8E8E'}
+          />
+        </View>
+
+        {/* 2B. DINING RUSH BUSY MODE TOGGLE CARD */}
+        <View style={[styles.toggleCard, { marginTop: 12 }]}>
+          <View style={styles.toggleLeftGroup}>
+            <View style={[styles.callIconBadge, { backgroundColor: '#451A03' }]}>
+              <Ionicons name="time" size={20} color="#F59E0B" />
+            </View>
+
+            <View style={styles.toggleTextCol}>
+              <Text style={styles.cardTitleText}>Dining Rush Mode (+15m)</Text>
+              <Text style={styles.cardSubtitleText}>
+                Adds +15m buffer to customer ETAs during heavy in-house dining
+              </Text>
+            </View>
+          </View>
+
+          <Switch
+            value={isBusyMode}
+            onValueChange={handleToggleBusyMode}
+            trackColor={{ false: '#3A352B', true: '#F59E0B' }}
+            thumbColor={isBusyMode ? '#FFFFFF' : '#8E8E8E'}
           />
         </View>
 
@@ -331,7 +415,7 @@ export default function AppSettingsScreen() {
       >
         <View style={styles.modalOverlay}>
           <TouchableOpacity
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             activeOpacity={1}
             onPress={() => setIsReloadingConfig(false)}
           />

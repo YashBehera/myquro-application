@@ -147,6 +147,8 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
   const {
     currentLocation,
     savedAddresses,
+    refreshSavedAddresses,
+    isAddressesLoading,
     addSavedAddress,
     deleteSavedAddress,
     updateSavedAddress,
@@ -165,6 +167,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
   const [recentSearches, setRecentSearches] = useState<any[]>([]);
   const [viewAllAddresses, setViewAllAddresses] = useState(false);
   const [isQuickLocationMode, setIsQuickLocationMode] = useState(false);
+  const [isSavingAddress, setIsSavingAddress] = useState(false);
 
   // Map selector states
   const [mapRegion, setMapRegion] = useState({
@@ -227,13 +230,14 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
   // User's saved addresses
   const effectiveAddresses = savedAddresses || [];
 
-  // Load recent searches and reset steps on open
+  // Load recent searches, refresh real database addresses, and reset steps on open
   useEffect(() => {
     if (visible) {
       setAddressStep('search');
       setQuery('');
       setSuggestions([]);
       loadRecentSearches();
+      refreshSavedAddresses?.();
       hasCenteredOnUserRef.current = false;
     }
   }, [visible]);
@@ -495,34 +499,55 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
 
     const finalFullAddressText = `${houseNo.trim()}, ${landmark.trim() ? landmark.trim() + ', ' : ''}${area.trim()}${city.trim() ? ', ' + city.trim() : ''}`;
 
-    const newAddr: SavedAddress = {
-      id: editingAddressId || Date.now().toString(),
-      type: addressType,
-      houseNo: houseNo.trim(),
-      landmark: landmark.trim(),
-      area: area.trim(),
-      city: city.trim() || area.trim() || '',
-      latitude: mapRegion.latitude,
-      longitude: mapRegion.longitude,
-      address: finalFullAddressText,
-      receiverName: !isOrderingForMyself ? receiverName.trim() : undefined,
-      receiverPhone: !isOrderingForMyself ? receiverPhone.trim() : undefined,
-    };
+    setIsSavingAddress(true);
+    try {
+      let savedResult: SavedAddress | null = null;
+      if (editingAddressId) {
+        const addrToUpdate: SavedAddress = {
+          id: editingAddressId,
+          type: addressType,
+          houseNo: houseNo.trim(),
+          landmark: landmark.trim(),
+          area: area.trim(),
+          city: city.trim() || area.trim() || '',
+          latitude: mapRegion.latitude,
+          longitude: mapRegion.longitude,
+          address: finalFullAddressText,
+          receiverName: !isOrderingForMyself ? receiverName.trim() : undefined,
+          receiverPhone: !isOrderingForMyself ? receiverPhone.trim() : undefined,
+        };
+        await updateSavedAddress(addrToUpdate);
+        savedResult = addrToUpdate;
+      } else {
+        const addrToCreate: Omit<SavedAddress, 'id'> = {
+          type: addressType,
+          houseNo: houseNo.trim(),
+          landmark: landmark.trim(),
+          area: area.trim(),
+          city: city.trim() || area.trim() || '',
+          latitude: mapRegion.latitude,
+          longitude: mapRegion.longitude,
+          address: finalFullAddressText,
+          receiverName: !isOrderingForMyself ? receiverName.trim() : undefined,
+          receiverPhone: !isOrderingForMyself ? receiverPhone.trim() : undefined,
+        };
+        savedResult = await addSavedAddress(addrToCreate);
+      }
 
-    if (editingAddressId) {
-      updateSavedAddress(newAddr);
-    } else {
-      addSavedAddress(newAddr);
+      onLocationSelected({
+        label: savedResult?.type || addressType,
+        address: savedResult?.address || finalFullAddressText,
+        latitude: savedResult?.latitude || mapRegion.latitude,
+        longitude: savedResult?.longitude || mapRegion.longitude,
+      });
+
+      onClose();
+    } catch (err: any) {
+      console.error("Error saving address to database:", err);
+      Alert.alert('Error', 'Unable to save address to server. Please try again.');
+    } finally {
+      setIsSavingAddress(false);
     }
-
-    onLocationSelected({
-      label: newAddr.type,
-      address: finalFullAddressText,
-      latitude: mapRegion.latitude,
-      longitude: mapRegion.longitude,
-    });
-
-    onClose();
   };
 
   const handleShareAddressRequest = async () => {
@@ -695,10 +720,18 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
                       </TouchableOpacity>
                     </View>
 
-                    {/* [5] SAVED ADDRESSES SECTION (ONLY IF USER HAS SAVED ADDRESSES) */}
-                    {effectiveAddresses.length > 0 && (
+                    {/* [5] SAVED ADDRESSES SECTION (FROM DATABASE) */}
+                    {isAddressesLoading && effectiveAddresses.length === 0 ? (
+                      <View style={{ paddingVertical: 18, alignItems: 'center', justifyContent: 'center' }}>
+                        <ActivityIndicator size="small" color="#D4AF37" />
+                        <Text style={{ color: '#888888', fontSize: 12, marginTop: 8 }}>Loading saved addresses from database...</Text>
+                      </View>
+                    ) : effectiveAddresses.length > 0 ? (
                       <>
-                        <Text style={styles.figmaLocSectionHeader}>SAVED ADDRESSES</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4 }}>
+                          <Text style={styles.figmaLocSectionHeader}>SAVED ADDRESSES</Text>
+                          {isAddressesLoading && <ActivityIndicator size="small" color="#D4AF37" style={{ marginRight: 8 }} />}
+                        </View>
 
                         {/* Saved Addresses Grouped Container */}
                         <View style={styles.figmaLocGroupedCard}>
@@ -798,7 +831,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
                           )}
                         </View>
                       </>
-                    )}
+                    ) : null}
 
                     {/* [6] RECENT SEARCHES (IF ANY REAL USER SEARCHES EXIST) */}
                     {recentSearches && recentSearches.length > 0 && (
@@ -1138,11 +1171,16 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
 
                 {/* Submit Save Button */}
                 <TouchableOpacity
-                  style={styles.formSaveBtn}
+                  style={[styles.formSaveBtn, isSavingAddress && { opacity: 0.7 }]}
                   activeOpacity={0.8}
+                  disabled={isSavingAddress}
                   onPress={handleSaveAddress}
                 >
-                  <Text style={styles.formSaveBtnText}>Save and Select Address</Text>
+                  {isSavingAddress ? (
+                    <ActivityIndicator size="small" color="#000000" />
+                  ) : (
+                    <Text style={styles.formSaveBtnText}>Save and Select Address</Text>
+                  )}
                 </TouchableOpacity>
               </ScrollView>
             )}
@@ -1210,10 +1248,12 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
               <TouchableOpacity
                 style={[styles.miniAddressDropdownItem, { borderBottomWidth: 0 }]}
                 activeOpacity={0.7}
-                onPress={() => {
+                onPress={async () => {
                   const item = menuAnchor.item;
                   setMenuAnchor(null);
-                  deleteSavedAddress(item.id);
+                  if (item?.id) {
+                    await deleteSavedAddress(item.id);
+                  }
                 }}
               >
                 <Trash2 size={13 * SCALE} color="#EF4444" style={{ marginRight: 8 * SCALE }} />

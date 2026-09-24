@@ -345,8 +345,66 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
   };
 
   useEffect(() => {
+    let spinLoop: Animated.CompositeAnimation | null = null;
+    let pulseLoop: Animated.CompositeAnimation | null = null;
+    let sparkleLoop: Animated.CompositeAnimation | null = null;
+
     if (visible) {
       idempotencyKeyRef.current = `mq_idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+      // 1. Root Fade In
+      rootFadeAnim.setValue(0);
+      Animated.timing(rootFadeAnim, {
+        toValue: 1,
+        duration: 250,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }).start();
+
+      // 2. Continuous 360 Arc Spin Loop
+      spinAnim.setValue(0);
+      spinLoop = Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1,
+          duration: 2200,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      spinLoop.start();
+
+      // 3. Continuous Pulse Loop
+      pulseAnim.setValue(1);
+      pulseLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.06,
+            duration: 850,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 850,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseLoop.start();
+
+      // 4. Sparkle Rotate Loop
+      sparkleRotateAnim.setValue(0);
+      sparkleLoop = Animated.loop(
+        Animated.timing(sparkleRotateAnim, {
+          toValue: 1,
+          duration: 3500,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      sparkleLoop.start();
+
       executeOrderFlow();
     } else {
       clearAllFlowTimers();
@@ -355,9 +413,13 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
       setActiveStep(1);
       setPaymentStatus('processing');
       setErrorMessage(null);
+      rootFadeAnim.setValue(0);
     }
     return () => {
       clearAllFlowTimers();
+      spinLoop?.stop();
+      pulseLoop?.stop();
+      sparkleLoop?.stop();
     };
   }, [visible]);
 
@@ -387,7 +449,8 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
     >
       <StatusBar barStyle="light-content" backgroundColor="#030305" translucent={false} />
 
-      <Animated.View style={[styles.root, { opacity: rootFadeAnim }]}>
+      <View style={{ flex: 1, backgroundColor: '#030305' }}>
+        <Animated.View style={[styles.root, { opacity: rootFadeAnim }]}>
         {/* Fixed Top Layout Spacer */}
         <View style={{ height: insets.top + 32 * SCALE }} />
 
@@ -800,6 +863,7 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
           </View>
         )}
       </Animated.View>
+      </View>
     </Modal>
   );
 };

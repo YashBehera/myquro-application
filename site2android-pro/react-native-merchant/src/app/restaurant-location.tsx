@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0B0B0B',
   },
   mapContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -392,7 +392,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   mapLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#0B0B0B',
     justifyContent: 'center',
     alignItems: 'center',

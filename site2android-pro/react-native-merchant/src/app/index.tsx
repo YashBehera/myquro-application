@@ -185,7 +185,7 @@ export default function RestaurantOnboardingScreen() {
             '#0B0D12',
           ]}
           locations={[0, 0.25, 0.65, 0.88, 1]}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           pointerEvents="none"
         />
       </View>

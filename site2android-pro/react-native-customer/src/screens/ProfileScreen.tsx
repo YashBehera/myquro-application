@@ -78,6 +78,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
     isDarkMode,
     authState,
     savedAddresses,
+    refreshSavedAddresses,
     addSavedAddress,
     updateSavedAddress,
     deleteSavedAddress,
@@ -404,6 +405,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
         isDarkMode={isDarkMode}
         authState={authState}
         savedAddresses={savedAddresses}
+        refreshSavedAddresses={refreshSavedAddresses}
         addSavedAddress={addSavedAddress}
         updateSavedAddress={updateSavedAddress}
         deleteSavedAddress={deleteSavedAddress}

@@ -19,6 +19,8 @@ const queryClient = new QueryClient({
   },
 });
 
+import KitchenAlarmAudio from '../components/KitchenAlarmAudio';
+
 export default function RootLayout() {
   useEffect(() => {
     const cleanup = initBackendKeepAlive(BACKEND_URL);
@@ -47,6 +49,7 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
         <StatusBar style="light" />
+        <KitchenAlarmAudio />
         <Stack
           screenOptions={{
             headerShown: false,

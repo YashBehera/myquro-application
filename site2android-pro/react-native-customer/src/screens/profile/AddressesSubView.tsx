@@ -48,9 +48,10 @@ interface AddressesSubViewProps {
   isDarkMode: boolean;
   authState: any;
   savedAddresses: any[];
-  addSavedAddress: (addr: any) => void;
-  updateSavedAddress: (addr: any) => void;
-  deleteSavedAddress: (id: string) => void;
+  refreshSavedAddresses?: () => Promise<void>;
+  addSavedAddress: (addr: any) => Promise<any> | void;
+  updateSavedAddress: (addr: any) => Promise<any> | void;
+  deleteSavedAddress: (id: string) => Promise<any> | void;
   onBack: () => void;
   editName: string;
   editPhone: string;
@@ -61,6 +62,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
   isDarkMode,
   authState,
   savedAddresses,
+  refreshSavedAddresses,
   addSavedAddress,
   updateSavedAddress,
   deleteSavedAddress,
@@ -70,6 +72,10 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
   showToast,
 }) => {
   const [addressStep, setAddressStep] = useState<'list' | 'map' | 'form'>('list');
+
+  useEffect(() => {
+    refreshSavedAddresses?.();
+  }, []);
   const favQuroImg = require('../../assets/favorite_quro.png');
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
   const [addressType, setAddressType] = useState<'Home' | 'Work' | 'Other'>('Home');
@@ -404,8 +410,8 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: () => {
-          deleteSavedAddress(id);
+        onPress: async () => {
+          await deleteSavedAddress(id);
         },
       },
     ]);

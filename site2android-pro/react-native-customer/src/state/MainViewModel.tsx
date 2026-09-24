@@ -71,9 +71,11 @@ interface ViewModelContextType {
   syncCartItems: (items: CartItem[]) => void;
   checkoutCart: (notes?: string, customItems?: any[]) => Promise<any>;
   savedAddresses: SavedAddress[];
-  addSavedAddress: (addr: Omit<SavedAddress, 'id'>) => void;
-  updateSavedAddress: (addr: SavedAddress) => void;
-  deleteSavedAddress: (id: string) => void;
+  isAddressesLoading: boolean;
+  refreshSavedAddresses: () => Promise<void>;
+  addSavedAddress: (addr: Omit<SavedAddress, 'id'>) => Promise<SavedAddress | null>;
+  updateSavedAddress: (addr: SavedAddress) => Promise<boolean>;
+  deleteSavedAddress: (id: string) => Promise<boolean>;
   isLoading: boolean;
   currentLocation: {
     label: string;
@@ -116,6 +118,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [foodItems, setFoodItems] = useState<any[]>([]);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
+  const [isAddressesLoading, setIsAddressesLoading] = useState(false);
   const [userOrders, setUserOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -276,10 +279,14 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   };
 
-  // Fetch addresses from PostgreSQL backend
-  const fetchServerAddresses = async (token?: string) => {
+  // Fetch addresses directly from PostgreSQL backend
+  const fetchServerAddresses = async (token?: string): Promise<void> => {
     const activeToken = token || (await getActiveToken());
-    if (!activeToken) return;
+    if (!activeToken) {
+      console.log(`ℹ️ [MainViewModel] No active token found, skipping server addresses fetch.`);
+      return;
+    }
+    setIsAddressesLoading(true);
     try {
       console.log(`🌐 [MainViewModel] Fetching addresses from server: ${BACKEND_URL}/api/delivery/addresses`);
       const res = await fetch(`${BACKEND_URL}/api/delivery/addresses`, {
@@ -291,61 +298,84 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) {
-          console.log(`✅ [MainViewModel] Synced ${data.length} addresses from server`);
+          console.log(`✅ [MainViewModel] Synced ${data.length} addresses from PostgreSQL database`);
           setSavedAddresses(data);
           await persistAddresses(data);
         }
+      } else {
+        console.warn(`⚠️ [MainViewModel] Server returned ${res.status} fetching addresses`);
       }
     } catch (err) {
       console.warn("⚠️ [MainViewModel] Failed to sync addresses from server:", err);
+    } finally {
+      setIsAddressesLoading(false);
     }
   };
 
-  const addSavedAddress = async (addr: Omit<SavedAddress, 'id'>) => {
-    const tempId = `addr_${Date.now()}`;
-    const newAddr: SavedAddress = { ...addr, id: tempId };
-    const updated = [...savedAddresses, newAddr];
-    setSavedAddresses(updated);
-    persistAddresses(updated);
+  const refreshSavedAddresses = fetchServerAddresses;
 
+  const addSavedAddress = async (addr: Omit<SavedAddress, 'id'>): Promise<SavedAddress | null> => {
     const token = await getActiveToken();
-    if (token) {
-      try {
-        console.log(`🌐 [MainViewModel] Saving new address to cloud database...`);
-        const res = await fetch(`${BACKEND_URL}/api/delivery/addresses`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(addr),
-        });
-        if (res.ok) {
-          const resData = await res.json();
-          if (resData.id) {
-            console.log(`✅ [MainViewModel] Address saved to DB with ID:`, resData.id);
-            const synced = updated.map(a => a.id === tempId ? { ...a, id: resData.id } : a);
-            setSavedAddresses(synced);
-            persistAddresses(synced);
-          }
-        }
-      } catch (e) {
-        console.warn("⚠️ [MainViewModel] Failed to save address to DB:", e);
-      }
-    } else {
-      console.warn("⚠️ [MainViewModel] No active user token found when saving address");
+    if (!token) {
+      console.warn("⚠️ [MainViewModel] No active user token found when saving address to DB");
+      const tempId = `addr_${Date.now()}`;
+      const localAddr: SavedAddress = { ...addr, id: tempId };
+      const updated = [...savedAddresses, localAddr];
+      setSavedAddresses(updated);
+      await persistAddresses(updated);
+      return localAddr;
     }
+
+    try {
+      console.log(`🌐 [MainViewModel] Saving new address directly to cloud database...`);
+      const res = await fetch(`${BACKEND_URL}/api/delivery/addresses`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(addr),
+      });
+
+      if (res.ok) {
+        const resData = await res.json();
+        const realId = resData.id || resData.address?.id;
+        const savedAddr: SavedAddress = {
+          ...addr,
+          id: realId || `addr_${Date.now()}`,
+          ...(resData.address || {}),
+        };
+        console.log(`✅ [MainViewModel] Address saved to DB with ID:`, savedAddr.id);
+        const updated = [...savedAddresses, savedAddr];
+        setSavedAddresses(updated);
+        await persistAddresses(updated);
+        return savedAddr;
+      } else {
+        const errText = await res.text();
+        console.warn("⚠️ [MainViewModel] Server error saving address:", res.status, errText);
+      }
+    } catch (e) {
+      console.warn("⚠️ [MainViewModel] Failed to save address to DB:", e);
+    }
+
+    const fallbackId = `addr_${Date.now()}`;
+    const fallbackAddr: SavedAddress = { ...addr, id: fallbackId };
+    const updated = [...savedAddresses, fallbackAddr];
+    setSavedAddresses(updated);
+    await persistAddresses(updated);
+    return fallbackAddr;
   };
 
-  const updateSavedAddress = async (addr: SavedAddress) => {
+  const updateSavedAddress = async (addr: SavedAddress): Promise<boolean> => {
     const updated = savedAddresses.map(a => a.id === addr.id ? addr : a);
     setSavedAddresses(updated);
-    persistAddresses(updated);
+    await persistAddresses(updated);
 
     const token = await getActiveToken();
     if (token) {
       try {
-        await fetch(`${BACKEND_URL}/api/delivery/addresses/${addr.id}`, {
+        console.log(`🌐 [MainViewModel] Updating address in DB (${addr.id})...`);
+        const res = await fetch(`${BACKEND_URL}/api/delivery/addresses/${addr.id}`, {
           method: 'PUT',
           headers: {
             Authorization: `Bearer ${token}`,
@@ -353,31 +383,50 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
           },
           body: JSON.stringify(addr),
         });
+        if (res.ok) {
+          console.log(`✅ [MainViewModel] Address updated in DB:`, addr.id);
+          return true;
+        } else {
+          console.warn("⚠️ [MainViewModel] Failed to update address in DB, status:", res.status);
+          return false;
+        }
       } catch (e) {
         console.warn("⚠️ [MainViewModel] Failed to update address in DB:", e);
+        return false;
       }
     }
+    return true;
   };
 
-  const deleteSavedAddress = async (id: string) => {
+  const deleteSavedAddress = async (id: string): Promise<boolean> => {
     const updated = savedAddresses.filter(a => a.id !== id);
     setSavedAddresses(updated);
-    persistAddresses(updated);
+    await persistAddresses(updated);
 
     const token = await getActiveToken();
     if (token) {
       try {
-        await fetch(`${BACKEND_URL}/api/delivery/addresses/${id}`, {
+        console.log(`🌐 [MainViewModel] Deleting address in DB (${id})...`);
+        const res = await fetch(`${BACKEND_URL}/api/delivery/addresses/${id}`, {
           method: 'DELETE',
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
         });
+        if (res.ok) {
+          console.log(`✅ [MainViewModel] Address deleted from DB:`, id);
+          return true;
+        } else {
+          console.warn("⚠️ [MainViewModel] Failed to delete address from DB, status:", res.status);
+          return false;
+        }
       } catch (e) {
         console.warn("⚠️ [MainViewModel] Failed to delete address from DB:", e);
+        return false;
       }
     }
+    return true;
   };
 
   // Sync server data when authenticated
@@ -691,10 +740,10 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
 
       if (token) {
         await SecureStorage.setSessionToken(token);
+        fetchServerAddresses(token);
       }
       setAuthState(authenticatedState);
-      const safeAuthState = { ...authenticatedState, sessionToken: '' };
-      await AsyncStorage.setItem('@auth_state', JSON.stringify(safeAuthState));
+      await AsyncStorage.setItem('@auth_state', JSON.stringify(authenticatedState));
     } catch (error: any) {
       setAuthState({ type: 'Unauthenticated' });
       throw error;
@@ -722,8 +771,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       fetchServerAddresses(state.sessionToken);
     }
     setAuthState(state);
-    const safeAuthState = state.type === 'Authenticated' ? { ...state, sessionToken: '' } : state;
-    await AsyncStorage.setItem('@auth_state', JSON.stringify(safeAuthState));
+    await AsyncStorage.setItem('@auth_state', JSON.stringify(state));
   };
 
   const verifyOtp = async (phone: string, otp: string): Promise<AuthState> => {
@@ -762,8 +810,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         fetchServerAddresses(token);
       }
       setAuthState(authenticatedState);
-      const safeAuthState = { ...authenticatedState, sessionToken: '' };
-      await AsyncStorage.setItem('@auth_state', JSON.stringify(safeAuthState));
+      await AsyncStorage.setItem('@auth_state', JSON.stringify(authenticatedState));
       return authenticatedState;
     } catch (error: any) {
       setAuthState({ type: 'Unauthenticated' });
@@ -773,9 +820,11 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
 
   const logout = async () => {
     setAuthState({ type: 'Unauthenticated' });
+    setSavedAddresses([]);
     try {
       await SecureStorage.purgeAllCredentials();
       await AsyncStorage.removeItem('@auth_state');
+      await AsyncStorage.removeItem('@saved_addresses');
     } catch (err) {
       console.warn("[MainViewModel] Error clearing persisted auth:", err);
     }
@@ -1099,6 +1148,8 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         syncCartItems,
         checkoutCart,
         savedAddresses,
+        isAddressesLoading,
+        refreshSavedAddresses,
         addSavedAddress,
         updateSavedAddress,
         deleteSavedAddress,

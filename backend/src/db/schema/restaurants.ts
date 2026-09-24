@@ -58,6 +58,12 @@ export const restaurants = pgTable(
       .default("inactive")
       .$type<"active" | "inactive" | "suspended">(),
     isOpen: boolean("is_open").default(false).notNull(),
+    autoAcceptOrders: boolean("auto_accept_orders").default(true).notNull(),
+    autoPausedUntil: timestamp("auto_paused_until"),
+    strikeCount: integer("strike_count").default(0).notNull(),
+    isBusyMode: boolean("is_busy_mode").default(false).notNull(),
+    lastHeartbeatAt: timestamp("last_heartbeat_at"),
+    defaultPrepTimeMinutes: integer("default_prep_time_minutes").default(20).notNull(),
     companyId: text("company_id"),
     latitude: real("latitude"),
     longitude: real("longitude"),

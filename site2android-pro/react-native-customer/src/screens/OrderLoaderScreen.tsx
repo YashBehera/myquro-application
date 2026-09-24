@@ -40,6 +40,23 @@ export const OrderLoaderScreen: React.FC<OrderLoaderScreenProps> = ({
     }
   }, [visible]);
 
+  if (!visible) return null;
+
+  if (phase === 'payment') {
+    return (
+      <OrderPaymentLoaderScreen
+        visible={visible}
+        amount={amount}
+        orderId={orderId}
+        restaurantName={restaurantName}
+        deliveryAddress={deliveryAddress}
+        paymentMethod={paymentMethod}
+        onComplete={() => onTrackDelivery ? onTrackDelivery() : onComplete()}
+        onCancel={onComplete}
+      />
+    );
+  }
+
   return (
     <Modal
       visible={visible}
@@ -47,16 +64,7 @@ export const OrderLoaderScreen: React.FC<OrderLoaderScreenProps> = ({
       animationType="fade"
       statusBarTranslucent
     >
-      <StatusBar barStyle="dark-content" backgroundColor="#FBFBFD" translucent={false} />
-      
-      {phase === 'payment' && (
-        <OrderPaymentLoaderScreen
-          visible={visible}
-          amount={amount}
-          orderId={orderId}
-          onComplete={() => setPhase('sending')}
-        />
-      )}
+      <StatusBar barStyle="light-content" backgroundColor="#030305" translucent={false} />
       {phase === 'sending' && (
         <OrderSendingLoaderScreen
           visible={visible}

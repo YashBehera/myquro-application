@@ -21,6 +21,7 @@ import { useRouter } from 'expo-router';
 import { useOrderStore, Order } from '../../state/orderStore';
 import { useComplaintStore } from '../../state/complaintStore';
 import { apiClient } from '../../services/apiClient';
+import { soundService } from '../../utils/soundService';
 
 const { width } = Dimensions.get('window');
 
@@ -145,8 +146,33 @@ export default function RestaurantDashboard() {
 
   const newOrders = orders.filter((o) => o.status === 'New');
 
+  // Auto-alert and sound alarm whenever a new order arrives or is pending review
+  const lastAlertedOrderId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (newOrders.length > 0) {
+      const latestOrder = newOrders[0];
+      if (lastAlertedOrderId.current !== latestOrder.id) {
+        lastAlertedOrderId.current = latestOrder.id;
+        setSelectedNewOrder(latestOrder);
+        setShowNewOrderModal(true);
+      }
+      soundService.playOrderAlarm();
+    } else {
+      soundService.stopOrderAlarm();
+      lastAlertedOrderId.current = null;
+    }
+  }, [newOrders.length]);
+
+  useEffect(() => {
+    return () => {
+      soundService.stopOrderAlarm();
+    };
+  }, []);
+
   // Handle transitioning order statuses
   const updateOrderStatus = (orderId: string, nextStatus: 'Preparing' | 'Ready' | 'Picked up' | 'Rejected') => {
+    soundService.stopOrderAlarm();
     if (nextStatus === 'Rejected') {
       rejectOrder(orderId, 'Kitchen busy');
     } else if (nextStatus === 'Preparing') {
@@ -326,6 +352,29 @@ export default function RestaurantDashboard() {
             </TouchableOpacity>
           </View>
         )}
+
+        {/* 1B. VOLUME & KITCHEN ALARM AUDIBILITY CARD (SWIGGY PARTNER STYLE) */}
+        <View style={styles.volumeAudibilityCard}>
+          <View style={styles.volumeAudibilityLeft}>
+            <View style={styles.volumeIconCircle}>
+              <Ionicons name="volume-high" size={16} color="#F2CA50" />
+            </View>
+            <View style={{ marginLeft: 10, flex: 1 }}>
+              <Text style={styles.volumeAudibilityTitle}>Kitchen Alarm Active 🔔</Text>
+              <Text style={styles.volumeAudibilitySubtitle}>
+                Keep phone volume at 80%–100% to hear high-pitch order sirens
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.testToneChip}
+            onPress={() => soundService.playSingleChime()}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="play" size={11} color="#1A1300" style={{ marginRight: 3 }} />
+            <Text style={styles.testToneChipText}>Test Bell</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* 2. TODAY'S PROGRESS CARD */}
         <View style={styles.progressCard}>
@@ -903,6 +952,7 @@ export default function RestaurantDashboard() {
             onPress={() => {
               setSelectedNewOrder(newOrders[0]);
               setShowNewOrderModal(true);
+              soundService.playOrderAlarm();
             }}
           >
             <Image
@@ -948,7 +998,10 @@ export default function RestaurantDashboard() {
               <View style={styles.incomingOrderHeader}>
                 <View style={styles.incomingHeaderLeft}>
                   <TouchableOpacity
-                    onPress={() => setShowNewOrderModal(false)}
+                    onPress={() => {
+                      setShowNewOrderModal(false);
+                      soundService.stopOrderAlarm();
+                    }}
                     style={styles.incomingBackBtn}
                     activeOpacity={0.8}
                   >
@@ -993,6 +1046,24 @@ export default function RestaurantDashboard() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 24 }}
               >
+                {/* SWIGGY-STYLE ALARM & VOLUME STATUS BANNER */}
+                <View style={styles.alarmStatusBanner}>
+                  <View style={styles.alarmStatusLeft}>
+                    <Ionicons name="volume-high" size={20} color="#F2CA50" />
+                    <View style={{ marginLeft: 10, flex: 1 }}>
+                      <Text style={styles.alarmStatusTitle}>Kitchen Alarm Ringing 🚨</Text>
+                      <Text style={styles.alarmStatusSub}>Keep phone volume above 70% to clearly hear incoming order alerts</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.alarmTestBtn}
+                    onPress={() => soundService.playSingleChime()}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.alarmTestBtnText}>Test Chime</Text>
+                  </TouchableOpacity>
+                </View>
+
                 {/* CARD 1: CUSTOMER DETAILS */}
                 <View style={styles.customerCardContainer}>
                   <Image
@@ -1132,6 +1203,7 @@ export default function RestaurantDashboard() {
                       activeOpacity={0.85}
                       style={styles.outOfStockBtn}
                       onPress={() => {
+                        soundService.stopOrderAlarm();
                         updateOrderStatus(selectedNewOrder.id, 'Rejected');
                         setShowNewOrderModal(false);
                         setSelectedNewOrder(null);
@@ -1144,6 +1216,7 @@ export default function RestaurantDashboard() {
                       activeOpacity={0.88}
                       style={styles.confirmNowBtn}
                       onPress={() => {
+                        soundService.stopOrderAlarm();
                         updateOrderStatus(selectedNewOrder.id, 'Preparing');
                         setShowNewOrderModal(false);
                         setSelectedNewOrder(null);
@@ -1159,7 +1232,7 @@ export default function RestaurantDashboard() {
 
           {/* 9. CHANGE PREPARATION TIME BOTTOM SHEET OVERLAY (FIGMA NODE 3061:266) */}
           {showPrepTimeModal && (
-            <View style={StyleSheet.absoluteFillObject}>
+            <View style={StyleSheet.absoluteFill}>
               <TouchableOpacity
                 style={styles.prepModalBackdropTouchable}
                 activeOpacity={1}
@@ -2640,7 +2713,7 @@ const styles = StyleSheet.create({
 
   /* CHANGE PREPARATION TIME MODAL (FIGMA NODE 3061:266) */
   prepModalBackdropTouchable: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.72)',
   },
   prepBottomSheetContainer: {
@@ -2771,5 +2844,105 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontFamily: 'Urbanist-Bold',
     letterSpacing: 0.5,
+  },
+  /* Swiggy-style Kitchen Alarm & Volume Audibility */
+  volumeAudibilityCard: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 6,
+    backgroundColor: '#16140D',
+    borderWidth: 1,
+    borderColor: '#4A3B18',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  volumeAudibilityLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  volumeIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#2A2210',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  volumeAudibilityTitle: {
+    color: '#F2CA50',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: 'Urbanist-Bold',
+  },
+  volumeAudibilitySubtitle: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 11,
+    fontWeight: '500',
+    fontFamily: 'Urbanist-Medium',
+    marginTop: 2,
+  },
+  testToneChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F2CA50',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  testToneChipText: {
+    color: '#1A1300',
+    fontSize: 11.5,
+    fontWeight: '700',
+    fontFamily: 'Urbanist-Bold',
+  },
+  alarmStatusBanner: {
+    backgroundColor: '#241B08',
+    borderWidth: 1,
+    borderColor: '#6E521B',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  alarmStatusLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  alarmStatusTitle: {
+    color: '#F2CA50',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: 'Urbanist-Bold',
+  },
+  alarmStatusSub: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 11,
+    fontFamily: 'Urbanist-Regular',
+    marginTop: 2,
+  },
+  alarmTestBtn: {
+    backgroundColor: '#443310',
+    borderWidth: 1,
+    borderColor: '#9E7724',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  alarmTestBtnText: {
+    color: '#F2CA50',
+    fontSize: 11.5,
+    fontWeight: '700',
+    fontFamily: 'Urbanist-Bold',
   },
 });

@@ -61,6 +61,8 @@ import {
   ShoppingBag,
   Home,
   Check,
+  Clock,
+  AlertCircle,
 } from 'lucide-react-native';
 import { DeliveredOrderView } from './DeliveredOrderView';
 import Svg, {
@@ -438,7 +440,7 @@ const DEFAULT_MOCK_ORDER = {
   deliveryAddress: 'Flat 402, Royal Palms, Infocity, Bhubaneswar',
   customerLatitude: 20.2505,
   customerLongitude: 85.7882,
-  status: 'out_for_delivery',
+  status: 'placed',
   etaMinutes: 18,
   createdAt: new Date().toISOString(),
   totalAmount: 589,
@@ -479,22 +481,10 @@ const DEFAULT_MOCK_ORDER = {
   ],
 };
 
-const DEFAULT_MOCK_RIDER = {
-  id: 'rider_live',
-  name: 'Delivery Partner',
-  fullName: 'Delivery Partner',
-  phone: '+91 90000 00000',
-  contactNumber: '+91 90000 00000',
-  rating: 4.9,
-  totalDeliveries: 100,
-  vehicleModel: 'Delivery Vehicle',
-  vaccinated: true,
-};
-
 const DEFAULT_MOCK_TRACKING = {
   orderId: 'ORD-98421',
-  status: 'out_for_delivery',
-  riderId: 'rider_901',
+  status: 'placed',
+  riderId: null,
   currentLat: 20.2750,
   currentLng: 85.8040,
   restaurantLat: 20.3009,
@@ -514,11 +504,26 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const { authState, currentLocation, savedAddresses, allRestaurants, cartItems } = useViewModel();
   const sessionToken = authState.type === 'Authenticated' ? authState.sessionToken : '';
 
+  const isRealOrder = Boolean(orderId && orderId !== 'ORD-98421');
+
   const [loading, setLoading] = useState(false);
-  const [orderDetail, setOrderDetail] = useState<any>(DEFAULT_MOCK_ORDER);
-  const [trackingData, setTrackingData] = useState<any>(DEFAULT_MOCK_TRACKING);
-  const [riderInfo, setRiderInfo] = useState<any>(DEFAULT_MOCK_RIDER);
+  const [orderDetail, setOrderDetail] = useState<any>(() => {
+    if (!isRealOrder) return DEFAULT_MOCK_ORDER;
+    return {
+      id: orderId,
+      orderId: orderId,
+      status: 'placed',
+      createdAt: new Date().toISOString(),
+      items: [],
+    };
+  });
+  const [trackingData, setTrackingData] = useState<any>(() => {
+    if (!isRealOrder) return DEFAULT_MOCK_TRACKING;
+    return null;
+  });
+  const [riderInfo, setRiderInfo] = useState<any>(null);
   const [olaEtaMins, setOlaEtaMins] = useState<number | null>(null);
+  const [prepExtensionNotice, setPrepExtensionNotice] = useState<string | null>(null);
   const socketRef = useRef<any>(null);
 
   // UI Interactive States
@@ -669,13 +674,14 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const riderStatus = trackingData?.status || null;
 
   // Active status check: has a rider accepted / been assigned to this order?
-  const currentStatus = riderStatus || kitchenStatus || 'placed';
+  const currentStatus = (isRealOrder && !trackingData?.riderId) ? kitchenStatus : (riderStatus || kitchenStatus || 'placed');
   const isRiderAccepted = Boolean(
-    trackingData?.riderId ||
-    (riderStatus && ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(riderStatus))
+    trackingData?.riderId &&
+    riderStatus &&
+    ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(riderStatus)
   );
 
-  const riderDisplayName = riderInfo?.name || riderInfo?.fullName || 'Delivery Partner';
+  const riderDisplayName = riderInfo?.name || riderInfo?.fullName || null;
 
   const getStatusDisplay = () => {
     // ── STAGE 6: CANCELLED / REJECTED ──
@@ -823,12 +829,12 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     if (phone) {
       Linking.openURL(`tel:${phone}`);
     } else if (Platform.OS === 'android') {
-      ToastAndroid.show('Connecting with delivery partner...', ToastAndroid.SHORT);
+      ToastAndroid.show('Delivery partner has not been assigned yet', ToastAndroid.SHORT);
     }
   };
 
   const fetchInitialData = async () => {
-    if (!orderId) {
+    if (!orderId || !isRealOrder) {
       setLoading(false);
       return;
     }
@@ -840,7 +846,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           const list = JSON.parse(localData);
           const found = list.find((o: any) => o.id === orderId || o.orderId === orderId);
           if (found) {
-            setOrderDetail((prev: any) => ({ ...found, ...prev }));
+            setOrderDetail((prev: any) => ({ ...prev, ...found }));
           }
         }
       } catch (e) {}
@@ -862,8 +868,12 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       });
       if (trackResp.ok) {
         const data = await trackResp.json();
-        setTrackingData(data.delivery);
-        setRiderInfo(data.rider);
+        setTrackingData(data.delivery || null);
+        setRiderInfo(data.rider || null);
+      } else if (trackResp.status === 404) {
+        // No delivery partner assigned yet
+        setTrackingData(null);
+        setRiderInfo(null);
       }
     } catch (err) {
       console.warn('Error fetching tracking data:', err);
@@ -906,6 +916,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           status: data.status,
           currentLat: data.currentLat ?? prev?.currentLat,
           currentLng: data.currentLng ?? prev?.currentLng,
+          riderId: data.riderId ?? data.rider?.id ?? prev?.riderId,
         }));
       }
       if (data.rider) setRiderInfo(data.rider);
@@ -934,6 +945,24 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       if (data.status) {
         setOrderDetail((prev: any) => ({ ...prev, status: data.status }));
       }
+    });
+
+    socket.on('order-prep-extended', (data: any) => {
+      console.log('📡 [TrackingScreen] Received order-prep-extended event:', data);
+      setPrepExtensionNotice(data.message || `Kitchen requested ${data.extraMinutes || 10} extra minutes to prepare fresh food.`);
+      if (data.totalPrepMinutes) {
+        setOrderDetail((prev: any) => ({ ...prev, prepTimeMinutes: data.totalPrepMinutes }));
+      }
+    });
+
+    socket.on('order-cancelled', (data: any) => {
+      console.log('📡 [TrackingScreen] Received order-cancelled event:', data);
+      setOrderDetail((prev: any) => ({
+        ...prev,
+        status: 'cancelled',
+        cancellationReason: data.reason,
+        refundMessage: data.refundMessage || '100% refund initiated to your payment method.'
+      }));
     });
 
     socket.on('chat-message', (message: any) => {
@@ -1004,50 +1033,56 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       setTrackingData(null);
       setRiderInfo(null);
     } else if (status === 'assigned') {
+      // DEV-ONLY inline mock rider — no DEFAULT_MOCK_RIDER constant
+      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
       setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'preparing' }));
       setTrackingData({
         orderId: orderId || 'ORD-98421',
         status: 'assigned',
-        riderId: 'rider_901',
+        riderId: 'dev_rider',
         currentLat: restLat + 0.005,
         currentLng: restLng - 0.004,
         etaMinutes: 22,
       });
-      setRiderInfo(DEFAULT_MOCK_RIDER);
+      setRiderInfo(devMockRider);
     } else if (status === 'arrived_at_store') {
+      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
       setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'ready' }));
       setTrackingData({
         orderId: orderId || 'ORD-98421',
         status: 'arrived_at_store',
-        riderId: 'rider_901',
+        riderId: 'dev_rider',
         currentLat: restLat,
         currentLng: restLng,
         etaMinutes: 18,
       });
-      setRiderInfo(DEFAULT_MOCK_RIDER);
+      setRiderInfo(devMockRider);
     } else if (status === 'picked_up') {
+      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
       setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'ready' }));
       setTrackingData({
         orderId: orderId || 'ORD-98421',
         status: 'picked_up',
-        riderId: 'rider_901',
+        riderId: 'dev_rider',
         currentLat: restLat * 0.8 + custLat * 0.2,
         currentLng: restLng * 0.8 + custLng * 0.2,
         etaMinutes: 14,
       });
-      setRiderInfo(DEFAULT_MOCK_RIDER);
+      setRiderInfo(devMockRider);
     } else if (status === 'out_for_delivery') {
+      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
       setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'out_for_delivery' }));
       setTrackingData({
         orderId: orderId || 'ORD-98421',
         status: 'out_for_delivery',
-        riderId: 'rider_901',
+        riderId: 'dev_rider',
         currentLat: restLat * 0.4 + custLat * 0.6,
         currentLng: restLng * 0.4 + custLng * 0.6,
         etaMinutes: 8,
       });
-      setRiderInfo(DEFAULT_MOCK_RIDER);
+      setRiderInfo(devMockRider);
     } else if (status === 'delivered') {
+      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
       setOrderDetail((prev: any) => ({
         ...(prev || DEFAULT_MOCK_ORDER),
         status: 'delivered',
@@ -1056,13 +1091,13 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       setTrackingData({
         orderId: orderId || 'ORD-98421',
         status: 'delivered',
-        riderId: 'rider_901',
+        riderId: 'dev_rider',
         currentLat: custLat,
         currentLng: custLng,
         etaMinutes: 0,
         updatedAt: new Date().toISOString(),
       });
-      setRiderInfo(DEFAULT_MOCK_RIDER);
+      setRiderInfo(devMockRider);
     }
 
     if (Platform.OS === 'android') {
@@ -1360,8 +1395,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                   >
                     <Text style={styles.orderReceivedHeading}>{statusInfo.title}</Text>
 
+                    {/* Description text (always shown when present) */}
                     {statusInfo.description ? (
-                      <Text style={{ color: '#A0A0A5', fontSize: 13 * SCALE, marginTop: 6, fontFamily: 'Outfit-Regular', lineHeight: 18 }}>
+                      <Text style={{ color: '#A0A0A5', fontSize: 13 * SCALE, marginTop: 4, fontFamily: 'Outfit-Regular', lineHeight: 18 }}>
                         {statusInfo.description}
                       </Text>
                     ) : (
@@ -1382,6 +1418,34 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                             @ To Home | {deliveryAddress}
                           </Text>
                         </View>
+                      </View>
+                    )}
+
+                    {/* Waiting for delivery partner badge — always shown when no rider accepted */}
+                    <View style={styles.waitingPartnerBadge}>
+                      <View style={styles.pulsingAmberDot} />
+                      <Text style={styles.waitingPartnerBadgeText}>
+                        Waiting for delivery partner to be assigned
+                      </Text>
+                    </View>
+
+                    {/* Extra prep time extension alert during dinner rush */}
+                    {prepExtensionNotice && (
+                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2E2005', borderColor: '#F59E0B', marginTop: 6 }]}>
+                        <Clock size={13} color="#F5B800" style={{ marginRight: 6 }} />
+                        <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', flex: 1 }]}>
+                          {prepExtensionNotice}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Restaurant rush cancellation banner if cancelled */}
+                    {orderDetail?.status === 'cancelled' && (
+                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2A0E0E', borderColor: '#EF4444', marginTop: 6 }]}>
+                        <AlertCircle size={14} color="#EF4444" style={{ marginRight: 6 }} />
+                        <Text style={[styles.waitingPartnerBadgeText, { color: '#FCA5A5', flex: 1 }]}>
+                          Order Cancelled by Kitchen • 100% Refund Initiated
+                        </Text>
                       </View>
                     )}
                   </Animated.View>
@@ -1698,7 +1762,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
             {/* List of Ordered Items */}
             <View style={styles.itemsListContainer}>
-              {(orderItemsList && orderItemsList.length > 0 ? orderItemsList : DEFAULT_MOCK_ORDER.items).map((item: any, idx: number) => {
+              {(orderItemsList && orderItemsList.length > 0 ? orderItemsList : (!isRealOrder ? DEFAULT_MOCK_ORDER.items : [])).map((item: any, idx: number) => {
                 const itemName = item.name || item.menuItemName || 'MuscleBlaze Micronised Creatine Monohydrate CreAMP Powder (Citrus Blast)';
                 const itemQty = item.quantity || 1;
                 const itemPrice = item.price ? item.price * itemQty : 999;
@@ -2333,7 +2397,35 @@ const styles = StyleSheet.create({
     fontSize: 21 * SCALE,
     color: '#FFFFFF',
     letterSpacing: -0.3,
-    marginBottom: 12 * SCALE,
+    marginBottom: 4 * SCALE,
+  },
+
+  // Waiting for delivery partner badge (amber pill shown when !isRiderAccepted)
+  waitingPartnerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 184, 0, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 184, 0, 0.35)',
+    borderRadius: 8 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    paddingVertical: 4 * SCALE,
+    marginTop: 10 * SCALE,
+    marginBottom: 4 * SCALE,
+    alignSelf: 'flex-start',
+  },
+  pulsingAmberDot: {
+    width: 6.5 * SCALE,
+    height: 6.5 * SCALE,
+    borderRadius: 4 * SCALE,
+    backgroundColor: '#F5B800',
+    marginRight: 6 * SCALE,
+  },
+  waitingPartnerBadgeText: {
+    color: '#F5B800',
+    fontSize: 11.5 * SCALE,
+    fontFamily: 'Outfit-Medium',
+    letterSpacing: 0.2,
   },
   timelineRowContainer: {
     flexDirection: 'row',

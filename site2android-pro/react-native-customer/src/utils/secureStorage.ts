@@ -21,13 +21,15 @@ export const SecureStorage = {
         await SecureStore.setItemAsync(SECURE_TOKEN_KEY, token, {
           keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
         });
-      } else {
-        await AsyncStorage.setItem(`@sec_${SECURE_TOKEN_KEY}`, token);
       }
     } catch (error) {
-      console.warn('[SecureStorage] Error saving session token securely:', error);
-      // Fallback for environments where SecureStore encounters temporary hardware lock
+      console.warn('[SecureStorage] Error saving session token to SecureStore:', error);
+    }
+    // Always persist in backup storage as well to prevent KeyStore drops on release APKs
+    try {
       await AsyncStorage.setItem(`@sec_${SECURE_TOKEN_KEY}`, token);
+    } catch (error) {
+      console.warn('[SecureStorage] Error saving session token backup:', error);
     }
   },
 

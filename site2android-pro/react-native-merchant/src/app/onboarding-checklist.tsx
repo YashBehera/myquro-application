@@ -67,7 +67,7 @@ export default function OnboardingChecklistScreen() {
           resizeMode="cover"
         />
         {/* Dark overlay layer for better text contrast */}
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0, 0, 0, 0.4)' }]} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0, 0, 0, 0.4)' }]} />
 
         {/* Seamless Dark Vignette & Fade Gradient */}
         <LinearGradient
@@ -79,7 +79,7 @@ export default function OnboardingChecklistScreen() {
             '#0B0D12',
           ]}
           locations={[0, 0.2, 0.5, 0.8, 1]}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           pointerEvents="none"
         />
       </View>
