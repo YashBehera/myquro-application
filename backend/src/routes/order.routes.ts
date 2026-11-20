@@ -1561,6 +1561,7 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
 
     const orderIds = userOrders.map(o => o.id);
     let allOrderItems: any[] = [];
+    let allDeliveries: any[] = [];
     if (orderIds.length > 0) {
       allOrderItems = await db
         .select({
@@ -1580,21 +1581,69 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
         .from(orderItems)
         .leftJoin(menuItems, eq(orderItems.menuItemId, menuItems.id))
         .where(inArray(orderItems.orderId, orderIds));
+
+      try {
+        allDeliveries = await db
+          .select({
+            id: orderDeliveries.id,
+            orderId: orderDeliveries.orderId,
+            status: orderDeliveries.status,
+            etaMinutes: orderDeliveries.etaMinutes,
+            riderId: orderDeliveries.riderId,
+            riderName: deliveryRiders.name,
+            riderPhone: deliveryRiders.phone,
+            currentLat: orderDeliveries.currentLat,
+            currentLng: orderDeliveries.currentLng,
+            updatedAt: orderDeliveries.updatedAt,
+          })
+          .from(orderDeliveries)
+          .leftJoin(deliveryRiders, eq(orderDeliveries.riderId, deliveryRiders.id))
+          .where(inArray(orderDeliveries.orderId, orderIds))
+          .orderBy(desc(orderDeliveries.updatedAt));
+      } catch (delErr) {
+        console.warn("Could not fetch deliveries for user orders:", delErr);
+      }
     }
 
-    const ordersWithItems = userOrders.map(order => ({
-      ...order,
-      items: allOrderItems.filter(item => item.orderId === order.id).map(item => ({
-        id: item.id,
-        name: item.menuItemName || 'Unknown Item',
-        quantity: item.quantity,
-        price: item.unitPrice,
-        totalPrice: item.totalPrice,
-        isVeg: item.isVeg,
-        imageURL: item.imageURL,
-        notes: item.notes,
-      })),
-    }));
+    const ordersWithItems = userOrders.map(order => {
+      let parsedDeliveryAddress = undefined;
+      let parsedCustomerLat = undefined;
+      let parsedCustomerLng = undefined;
+      if (order.notes && typeof order.notes === 'string') {
+        try {
+          if (order.notes.startsWith('{') && order.notes.endsWith('}')) {
+            const parsed = JSON.parse(order.notes);
+            if (parsed.address) parsedDeliveryAddress = parsed.address;
+            if (parsed.latitude) parsedCustomerLat = Number(parsed.latitude);
+            if (parsed.longitude) parsedCustomerLng = Number(parsed.longitude);
+          }
+        } catch (e) {}
+      }
+
+      const activeDelivery = allDeliveries.find(d => d.orderId === order.id);
+
+      return {
+        ...order,
+        deliveryStatus: activeDelivery?.status || null,
+        riderName: activeDelivery?.riderName || null,
+        riderPhone: activeDelivery?.riderPhone || null,
+        riderId: activeDelivery?.riderId || null,
+        delivery: activeDelivery || null,
+        deliveryAddress: parsedDeliveryAddress || (order as any).deliveryAddress || undefined,
+        customerLatitude: parsedCustomerLat,
+        customerLongitude: parsedCustomerLng,
+        items: allOrderItems.filter(item => item.orderId === order.id).map(item => ({
+          id: item.id,
+          name: item.menuItemName || 'Unknown Item',
+          quantity: item.quantity,
+          price: item.unitPrice,
+          totalPrice: item.totalPrice,
+          isVeg: item.isVeg,
+          imageURL: item.imageURL,
+          notes: item.notes,
+        })),
+      };
+    });
 
     return res.status(200).json({ orders: ordersWithItems });
   } catch (error) {

@@ -539,6 +539,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
         onReorder={(ord) => {
           handleReorder(ord);
         }}
+        onNavigateToTracking={onNavigateToTracking ? (ordId) => {
+          setSelectedOrderForDetails(null);
+          setCurrentView('main');
+          onNavigateToTracking(ordId);
+        } : undefined}
       />
     );
   }
@@ -820,8 +825,35 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                 : (order.restaurantBanner ? { uri: order.restaurantBanner } : orderResAsiaSeven);
 
               const statusStr = (order.status || 'placed').toLowerCase();
-              const isActive = ['placed', 'confirmed', 'preparing', 'ready', 'assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'active', 'pending'].includes(statusStr);
-              const isDelivered = statusStr === 'delivered' || statusStr === 'completed';
+              const delStatusStr = (order.deliveryStatus || order.delivery?.status || '').toLowerCase();
+              const isDelivery = Boolean(
+                order.deliveryAddress || 
+                order.address || 
+                delStatusStr || 
+                (order.notes && typeof order.notes === 'string' && order.notes.includes('address')) ||
+                (!order.tableId && !order.tableNumber)
+              );
+
+              const isCancelled = statusStr === 'cancelled' || statusStr === 'rejected' || delStatusStr === 'cancelled';
+              const isDelivered = delStatusStr === 'delivered' || statusStr === 'delivered' || (!isDelivery && (statusStr === 'served' || statusStr === 'completed'));
+              const isActive = !isCancelled && !isDelivered;
+
+              let displayStatusText = 'Ongoing';
+              if (isCancelled) {
+                displayStatusText = 'Cancelled';
+              } else if (isDelivered) {
+                displayStatusText = 'Delivered';
+              } else if (delStatusStr === 'out_for_delivery' || delStatusStr === 'picked_up' || (isDelivery && statusStr === 'served')) {
+                displayStatusText = 'Out for Delivery';
+              } else if (delStatusStr === 'assigned' || delStatusStr === 'arrived_at_store') {
+                displayStatusText = 'Partner Assigned';
+              } else if (statusStr === 'ready') {
+                displayStatusText = 'Food Ready';
+              } else if (statusStr === 'preparing') {
+                displayStatusText = 'Preparing';
+              } else if (statusStr === 'placed') {
+                displayStatusText = 'Order Placed';
+              }
 
               const handleCardPress = () => {
                 if (isActive && onNavigateToTracking) {
@@ -869,7 +901,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
                     <View style={[styles.statusBadge, isActive && styles.statusBadgeActive]}>
                       <Text style={[styles.statusText, isActive && styles.statusTextActive]}>
-                        {isActive ? 'Ongoing' : (isDelivered ? 'Delivered' : (order.status || 'Delivered'))}
+                        {displayStatusText}
                       </Text>
                       {isActive ? (
                         <Clock size={14} color="#D4AF37" style={{ marginLeft: 4 }} />
@@ -990,6 +1022,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                         <RotateCcw size={16} color="#A88733" />
                         <Text style={styles.reorderText}>Reorder</Text>
                       </TouchableOpacity>
+
+                      {onNavigateToTracking && (
+                        <TouchableOpacity
+                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, marginTop: 4 }}
+                          activeOpacity={0.8}
+                          onPress={() => onNavigateToTracking(orderId)}
+                        >
+                          <Navigation size={13} color="#D4AF37" style={{ marginRight: 6 }} />
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: '#D4AF37' }}>View Tracking Details</Text>
+                        </TouchableOpacity>
+                      )}
                     </>
                   )}
 

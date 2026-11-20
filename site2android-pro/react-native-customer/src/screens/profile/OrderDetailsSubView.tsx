@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   Clock,
   RotateCcw,
+  Navigation,
 } from 'lucide-react-native';
 
 interface OrderDetailsSubViewProps {
@@ -30,6 +31,7 @@ interface OrderDetailsSubViewProps {
   onBack: () => void;
   onHelp?: () => void;
   onReorder?: (order: any) => void;
+  onNavigateToTracking?: (orderId: string) => void;
 }
 
 export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
@@ -37,6 +39,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
   onBack,
   onHelp,
   onReorder,
+  onNavigateToTracking,
 }) => {
   if (!order) {
     return (
@@ -186,7 +189,37 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
   );
 
   // Status mapping
-  const statusStr = (order.status || 'delivered').toUpperCase();
+  const rawStatus = (order.status || 'placed').toLowerCase();
+  const rawDelStatus = (order.deliveryStatus || order.delivery?.status || '').toLowerCase();
+  const isDelivery = Boolean(
+    order.deliveryAddress || 
+    order.address || 
+    rawDelStatus || 
+    (order.notes && typeof order.notes === 'string' && order.notes.includes('address')) ||
+    (!order.tableId && !order.tableNumber)
+  );
+
+  const isCancelled = rawStatus === 'cancelled' || rawStatus === 'rejected' || rawDelStatus === 'cancelled';
+  const isDelivered = rawDelStatus === 'delivered' || rawStatus === 'delivered' || (!isDelivery && (rawStatus === 'served' || rawStatus === 'completed'));
+  const isActive = !isCancelled && !isDelivered;
+
+  let displayStatus = 'Ongoing';
+  if (isCancelled) {
+    displayStatus = 'Cancelled';
+  } else if (isDelivered) {
+    displayStatus = 'Delivered';
+  } else if (rawDelStatus === 'out_for_delivery' || rawDelStatus === 'picked_up' || (isDelivery && rawStatus === 'served')) {
+    displayStatus = 'Out for Delivery';
+  } else if (rawDelStatus === 'assigned' || rawDelStatus === 'arrived_at_store') {
+    displayStatus = 'Partner Assigned';
+  } else if (rawStatus === 'ready') {
+    displayStatus = 'Food Ready';
+  } else if (rawStatus === 'preparing') {
+    displayStatus = 'Preparing';
+  } else if (rawStatus === 'placed') {
+    displayStatus = 'Order Placed';
+  }
+
   const paymentMethodRaw = order.paymentMethod || 'UPI';
   const paymentMethodStr = paymentMethodRaw.toUpperCase().startsWith('PAID')
     ? paymentMethodRaw
@@ -228,13 +261,17 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
                 Order #{cleanOrderNum}
               </Text>
               <Text style={styles.orderSubtitle}>
-                {statusStr === 'DELIVERED' ? 'Delivered' : statusStr}, {itemsCount} {itemsCount === 1 ? 'Item' : 'Items'}, {totalBillFormatted}
+                {displayStatus}, {itemsCount} {itemsCount === 1 ? 'Item' : 'Items'}, {totalBillFormatted}
               </Text>
             </View>
 
-            <View style={styles.deliveredStatusBadge}>
-              <CheckCircle2 size={13} color="#D4AF37" style={{ marginRight: 4 }} />
-              <Text style={styles.deliveredStatusText}>{statusStr}</Text>
+            <View style={[styles.deliveredStatusBadge, isActive && { backgroundColor: '#1A180E', borderColor: '#4A3E14' }]}>
+              {isActive ? (
+                <Clock size={13} color="#D4AF37" style={{ marginRight: 4 }} />
+              ) : (
+                <CheckCircle2 size={13} color="#D4AF37" style={{ marginRight: 4 }} />
+              )}
+              <Text style={styles.deliveredStatusText}>{displayStatus.toUpperCase()}</Text>
             </View>
           </View>
 
@@ -443,15 +480,25 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
         </View>
       </ScrollView>
 
-      {/* ─── [4] BOTTOM STICKY REORDER BUTTON (Figma Node 3029:1558) ─── */}
+      {/* ─── [4] BOTTOM STICKY ACTION BUTTONS ─── */}
       <View style={styles.bottomActionBar}>
+        {isActive && onNavigateToTracking && (
+          <TouchableOpacity
+            style={styles.trackMainBtn}
+            activeOpacity={0.85}
+            onPress={() => onNavigateToTracking(order.id || order.orderId)}
+          >
+            <Navigation size={18} color="#000000" style={{ marginRight: 8 }} />
+            <Text style={styles.trackMainBtnText}>TRACK LIVE ORDER</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
-          style={styles.reorderMainBtn}
+          style={[styles.reorderMainBtn, isActive && styles.reorderSecondaryBtn]}
           activeOpacity={0.85}
           onPress={() => onReorder && onReorder(order)}
         >
-          <RotateCcw size={20} color="#BF9C42" style={{ marginRight: 8 }} />
-          <Text style={styles.reorderMainBtnText}>REORDER</Text>
+          <RotateCcw size={18} color={isActive ? '#D4AF37' : '#BF9C42'} style={{ marginRight: 8 }} />
+          <Text style={[styles.reorderMainBtnText, isActive && styles.reorderSecondaryBtnText]}>REORDER</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -847,6 +894,26 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#121212',
   },
+  trackMainBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5B800',
+    borderRadius: 16,
+    paddingVertical: 15,
+    marginBottom: 10,
+    shadowColor: '#F5B800',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  trackMainBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 15,
+    color: '#000000',
+    letterSpacing: 1,
+  },
   reorderMainBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -857,11 +924,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 15,
   },
+  reorderSecondaryBtn: {
+    paddingVertical: 12,
+    backgroundColor: 'transparent',
+    borderColor: '#2A2315',
+  },
   reorderMainBtnText: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 15,
     color: '#BF9C42',
     letterSpacing: 1.2,
+  },
+  reorderSecondaryBtnText: {
+    fontSize: 13,
+    color: '#8A753C',
   },
   emptyTitle: {
     fontFamily: 'Urbanist-Bold',
