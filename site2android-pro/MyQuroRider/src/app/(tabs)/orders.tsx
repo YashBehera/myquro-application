@@ -9,7 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CustomAlertModal, ModalType } from '../../components/CustomAlertModal';
@@ -27,6 +27,15 @@ interface ShiftItem {
 
 
 const INITIAL_SHIFTS: ShiftItem[] = [
+  {
+    id: 'm0',
+    category: 'Morning',
+    time: '01:00 AM – 07:00 AM',
+    duration: '6h',
+    payout: '₹750',
+    demand: 'HIGH',
+    status: 'OPEN',
+  },
   {
     id: 'm1',
     category: 'Morning',
@@ -156,19 +165,27 @@ export default function MyShiftsScreen() {
     setCustomAlert((prev) => ({ ...prev, visible: false }));
   };
 
-  // Load shifts on mount and make sure all non-booked are forced to OPEN for easy testing
+  // Load shifts on mount and make sure all non-booked are forced to OPEN for easy testing, merging any new shifts
   useEffect(() => {
     (async () => {
       try {
         const stored = await AsyncStorage.getItem('MYQURO_SHIFTS');
         if (stored) {
           const parsed = JSON.parse(stored);
-          const mapped = parsed.map((s: any) => ({
-            ...s,
-            status: s.status === 'BOOKED' ? 'BOOKED' : 'OPEN'
-          }));
-          setShifts(mapped);
-          await AsyncStorage.setItem('MYQURO_SHIFTS', JSON.stringify(mapped));
+          const storedMap = new Map((Array.isArray(parsed) ? parsed : []).map((s: any) => [s.id, s]));
+          const merged = INITIAL_SHIFTS.map((init) => {
+            const existing: any = storedMap.get(init.id);
+            if (existing) {
+              return {
+                ...init,
+                ...existing,
+                status: existing.status === 'BOOKED' ? 'BOOKED' : 'OPEN',
+              };
+            }
+            return init;
+          });
+          setShifts(merged);
+          await AsyncStorage.setItem('MYQURO_SHIFTS', JSON.stringify(merged));
         } else {
           // Initialize storage with initial state
           await AsyncStorage.setItem('MYQURO_SHIFTS', JSON.stringify(INITIAL_SHIFTS));

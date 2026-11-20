@@ -48,6 +48,7 @@ export default function MenuManagementScreen() {
     deleteDish,
     duplicateDish,
     toggleDishAvailability,
+    setDishStockStatus,
     reorderDishes,
     bulkUpdateDishStatus,
     bulkDeleteDishes,
@@ -63,6 +64,9 @@ export default function MenuManagementScreen() {
     getFilteredDishes,
     isDishAvailableNow,
   } = useMenuStore();
+
+  // Stock Out / Availability Modal State (Swiggy 1-Tap Inventory)
+  const [stockModalDish, setStockModalDish] = useState<Dish | null>(null);
 
   // Category Modal State
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
@@ -668,7 +672,7 @@ export default function MenuManagementScreen() {
 
                               {/* Quick Availability Toggle & Dish Actions */}
                               <View style={styles.dishActionsColumn}>
-                                {/* Quick Availability Switch */}
+                                {/* Quick Availability Switch (Tapping opens 1-Tap Stock Action Sheet) */}
                                 <TouchableOpacity
                                   style={[
                                     styles.quickAvailTrack,
@@ -676,7 +680,7 @@ export default function MenuManagementScreen() {
                                       ? styles.quickAvailTrackActive
                                       : styles.quickAvailTrackInactive,
                                   ]}
-                                  onPress={() => toggleDishAvailability(dish.id)}
+                                  onPress={() => setStockModalDish(dish)}
                                   activeOpacity={0.8}
                                 >
                                   <View
@@ -688,16 +692,24 @@ export default function MenuManagementScreen() {
                                     ]}
                                   />
                                 </TouchableOpacity>
-                                <Text
-                                  style={[
-                                    styles.quickAvailLabel,
-                                    dish.isAvailable
-                                      ? styles.quickAvailLabelActive
-                                      : styles.quickAvailLabelInactive,
-                                  ]}
-                                >
-                                  {dish.isAvailable ? 'In Stock' : 'Out'}
-                                </Text>
+                                <TouchableOpacity onPress={() => setStockModalDish(dish)}>
+                                  <Text
+                                    style={[
+                                      styles.quickAvailLabel,
+                                      dish.isAvailable
+                                        ? styles.quickAvailLabelActive
+                                        : styles.quickAvailLabelInactive,
+                                    ]}
+                                  >
+                                    {dish.isAvailable
+                                      ? 'In Stock'
+                                      : dish.pauseReason?.includes('2 hours')
+                                      ? 'Off 2h'
+                                      : dish.pauseReason?.includes('today')
+                                      ? 'Off Today'
+                                      : 'Out'}
+                                  </Text>
+                                </TouchableOpacity>
 
                                 {/* Tools: Edit, Duplicate, Delete, Reorder */}
                                 <View style={styles.dishToolsGrid}>
@@ -763,6 +775,122 @@ export default function MenuManagementScreen() {
             })
         )}
       </ScrollView>
+
+      {/* 1-Tap Swiggy Quick Stock & Availability Action Sheet */}
+      <Modal
+        visible={!!stockModalDish}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStockModalDish(null)}
+      >
+        <TouchableOpacity
+          style={styles.stockModalOverlay}
+          activeOpacity={1}
+          onPress={() => setStockModalDish(null)}
+        >
+          <View style={styles.stockModalContent}>
+            <View style={styles.stockModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.stockModalTitle}>Item Availability</Text>
+                <Text style={styles.stockModalDishName} numberOfLines={1}>
+                  {stockModalDish?.name}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setStockModalDish(null)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={24} color="#8E8E8E" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.stockOptionsList}>
+              {/* Option 1: In Stock */}
+              <TouchableOpacity
+                style={[
+                  styles.stockOptionBtn,
+                  stockModalDish?.isAvailable && styles.stockOptionBtnSelected,
+                ]}
+                activeOpacity={0.75}
+                onPress={async () => {
+                  if (stockModalDish) {
+                    await setDishStockStatus(stockModalDish.id, 'in_stock');
+                    setStockModalDish(null);
+                  }
+                }}
+              >
+                <View style={[styles.stockOptionIconBg, { backgroundColor: 'rgba(22, 163, 74, 0.15)' }]}>
+                  <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.stockOptionLabel, { color: '#16A34A' }]}>In Stock (Turn On)</Text>
+                  <Text style={styles.stockOptionSub}>Available for customers to order immediately</Text>
+                </View>
+                {stockModalDish?.isAvailable && (
+                  <Ionicons name="radio-button-on" size={20} color="#16A34A" />
+                )}
+              </TouchableOpacity>
+
+              {/* Option 2: Turn Off for 2 Hours */}
+              <TouchableOpacity
+                style={styles.stockOptionBtn}
+                activeOpacity={0.75}
+                onPress={async () => {
+                  if (stockModalDish) {
+                    await setDishStockStatus(stockModalDish.id, 'paused_2h');
+                    setStockModalDish(null);
+                  }
+                }}
+              >
+                <View style={[styles.stockOptionIconBg, { backgroundColor: 'rgba(234, 179, 8, 0.15)' }]}>
+                  <Ionicons name="time" size={20} color="#EAB308" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.stockOptionLabel}>Turn Off for 2 Hours</Text>
+                  <Text style={styles.stockOptionSub}>Cooking or prep in progress. Auto-resumes in 2h.</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Option 3: Turn Off for Today */}
+              <TouchableOpacity
+                style={styles.stockOptionBtn}
+                activeOpacity={0.75}
+                onPress={async () => {
+                  if (stockModalDish) {
+                    await setDishStockStatus(stockModalDish.id, 'paused_today');
+                    setStockModalDish(null);
+                  }
+                }}
+              >
+                <View style={[styles.stockOptionIconBg, { backgroundColor: 'rgba(56, 189, 248, 0.15)' }]}>
+                  <Ionicons name="moon" size={20} color="#38BDF8" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.stockOptionLabel}>Turn Off for Today</Text>
+                  <Text style={styles.stockOptionSub}>Sold out for today. Automatically resets at midnight.</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Option 4: Mark Out of Stock (Indefinite) */}
+              <TouchableOpacity
+                style={styles.stockOptionBtn}
+                activeOpacity={0.75}
+                onPress={async () => {
+                  if (stockModalDish) {
+                    await setDishStockStatus(stockModalDish.id, 'out_of_stock');
+                    setStockModalDish(null);
+                  }
+                }}
+              >
+                <View style={[styles.stockOptionIconBg, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                  <Ionicons name="close-circle" size={20} color="#EF4444" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.stockOptionLabel, { color: '#EF4444' }]}>Mark Out of Stock</Text>
+                  <Text style={styles.stockOptionSub}>Unavailable indefinitely until manually turned back on</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Category Create / Edit Modal */}
       <CategoryModal
@@ -1387,6 +1515,78 @@ const styles = StyleSheet.create({
     borderColor: '#2A2A2A',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  /* 1-TAP SWIGGY STOCK MODAL STYLES */
+  stockModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'flex-end',
+  },
+  stockModalContent: {
+    backgroundColor: '#161616',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 36,
+    borderTopWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  stockModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  stockModalTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  stockModalDishName: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 13,
+    fontWeight: '400',
+    color: '#E8C547',
+    marginTop: 2,
+  },
+  stockOptionsList: {
+    gap: 12,
+  },
+  stockOptionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E1E1E',
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    borderRadius: 16,
+    padding: 14,
+  },
+  stockOptionBtnSelected: {
+    borderColor: 'rgba(22, 163, 74, 0.6)',
+    backgroundColor: 'rgba(22, 163, 74, 0.08)',
+  },
+  stockOptionIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stockOptionLabel: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  stockOptionSub: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    fontWeight: '400',
+    color: '#8E8E8E',
+    marginTop: 2,
   },
 });
 

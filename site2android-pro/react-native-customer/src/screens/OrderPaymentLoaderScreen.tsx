@@ -214,7 +214,6 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
         deliveryAddress: resolvedAddress,
         latitude: currentLocation?.latitude || null,
         longitude: currentLocation?.longitude || null,
-        status: 'placed',
       };
 
       const controller = new AbortController();
@@ -245,17 +244,20 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
 
       setCreatedOrderId(confirmedOrderId);
 
-      // Cache confirmed order snapshot
+      // Cache confirmed order snapshot (read live status so auto-accepted orders start in 'preparing')
       try {
         const existingStr = await AsyncStorage.getItem('@placed_orders_history');
         const existingList = existingStr ? JSON.parse(existingStr) : [];
+        const confirmedStatus = data.order?.status || 'placed';
+        const confirmedPrepTime = data.order?.prepTimeMinutes || 20;
         const newOrderRecord = {
           id: confirmedOrderId,
           restaurantId,
           restaurantName,
           restaurantAddress: currentRestaurant?.address || resolvedAddress,
           deliveryAddress: resolvedAddress,
-          status: 'placed',
+          status: confirmedStatus,
+          prepTimeMinutes: confirmedPrepTime,
           items: cartItems.map(ci => ({
             id: ci.foodItem?.id || (ci as any).id || 'item',
             name: ci.foodItem?.name || (ci as any).name || 'Food Item',

@@ -138,8 +138,14 @@ router.post("/merchant-login-phone", async (req, res) => {
     const restList = await db
       .select()
       .from(restaurants)
-      .where(or(...phoneFormats.map((p) => eq(restaurants.phoneNumber, p))))
-      .limit(1);
+      .where(or(...phoneFormats.map((p) => eq(restaurants.phoneNumber, p))));
+
+    // Prioritize MyQuro if multiple restaurants match
+    restList.sort((a, b) => {
+      const aIs = (a.restaurantName || "").toLowerCase().includes("myquro") ? 1 : 0;
+      const bIs = (b.restaurantName || "").toLowerCase().includes("myquro") ? 1 : 0;
+      return bIs - aIs;
+    });
 
     if (restList.length > 0 && restList[0].ownerId) {
       const uList = await db

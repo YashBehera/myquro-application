@@ -512,6 +512,13 @@
       "when": 1773249039487,
       "tag": "0074_marvelous_yellow_claw",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790489589462,
+      "tag": "0075_brainy_legion",
+      "breakpoints": true
     }
   ]
 }

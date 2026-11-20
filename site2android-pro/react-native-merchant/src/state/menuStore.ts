@@ -29,6 +29,7 @@ export interface MenuStoreState {
   deleteDish: (id: string) => Promise<void>;
   duplicateDish: (id: string) => Promise<Dish | null>;
   toggleDishAvailability: (id: string) => Promise<void>;
+  setDishStockStatus: (id: string, status: 'in_stock' | 'paused_2h' | 'paused_today' | 'out_of_stock', reason?: string) => Promise<void>;
   reorderDishes: (categoryId: string, orderedIds: string[]) => Promise<void>;
   bulkUpdateDishStatus: (dishIds: string[], isAvailable: boolean) => Promise<void>;
   bulkDeleteDishes: (dishIds: string[]) => Promise<void>;
@@ -390,6 +391,43 @@ export const useMenuStore = create<MenuStoreState>((set, get) => ({
         });
       } catch (err) {
         console.warn('API error toggling dish availability:', err);
+      }
+    }
+  },
+
+  setDishStockStatus: async (id, status, reason) => {
+    const isAvail = status === 'in_stock';
+    let pausedUntil: string | null = null;
+    let pauseReason: string | null = null;
+
+    if (status === 'paused_2h') {
+      pausedUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+      pauseReason = reason || 'Paused for 2 hours';
+    } else if (status === 'paused_today') {
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+      pausedUntil = endOfDay.toISOString();
+      pauseReason = reason || 'Turned off for today';
+    } else if (status === 'out_of_stock') {
+      pauseReason = reason || 'Out of stock';
+    }
+
+    // Optimistic update
+    const updated = get().dishes.map((d) =>
+      d.id === id ? { ...d, isAvailable: isAvail, pausedUntil, pauseReason } : d
+    );
+    set({ dishes: updated });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ categories: get().categories, dishes: updated }));
+
+    const restaurantId = get().restaurantId || (await resolveRestaurantId());
+    if (restaurantId) {
+      try {
+        await apiClient.patch(`/restaurants/${restaurantId}/menu/items/${id}/availability`, {
+          status,
+          reason: pauseReason,
+        });
+      } catch (err) {
+        console.warn('API error setting dish stock status:', err);
       }
     }
   },

@@ -30,6 +30,7 @@ export const orders = pgTable("orders", {
   extendedPrepMinutes: integer("extended_prep_minutes").default(0).notNull(),
   cancellationReason: text("cancellation_reason"),
   cancelledBy: text("cancelled_by"),
+  handoverOtp: text("handover_otp"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {

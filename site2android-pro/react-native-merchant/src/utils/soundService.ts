@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import { Asset } from 'expo-asset';
 
 const KITCHEN_ALARM_KEY = '@myquro_kitchen_alarm_enabled';
@@ -134,7 +134,16 @@ class SoundService {
       this.bridgeCallback('START_ALARM');
     }
 
-    // 3. Repeating physical haptics
+    // 3. Android Standalone APK Native Alarm (STREAM_ALARM hardware buzzer override)
+    if (Platform.OS === 'android' && NativeModules.SoundModule?.startAlarmLoop) {
+      try {
+        NativeModules.SoundModule.startAlarmLoop();
+      } catch (e) {
+        console.warn('[SoundService] Native SoundModule error:', e);
+      }
+    }
+
+    // 4. Repeating physical haptics
     this.startHapticsLoop();
   }
 
@@ -158,6 +167,13 @@ class SoundService {
 
     if (this.bridgeCallback) {
       this.bridgeCallback('PLAY_ONCE');
+    }
+
+    // Android APK Native Chime
+    if (Platform.OS === 'android' && NativeModules.SoundModule?.playNotificationSound) {
+      try {
+        NativeModules.SoundModule.playNotificationSound();
+      } catch {}
     }
 
     if (Platform.OS !== 'web') {
@@ -192,6 +208,15 @@ class SoundService {
     // 3. Stop bridge
     if (this.bridgeCallback) {
       this.bridgeCallback('STOP_ALARM');
+    }
+
+    // 4. Android Standalone APK Native Alarm stop
+    if (Platform.OS === 'android' && NativeModules.SoundModule?.stopAlarmLoop) {
+      try {
+        NativeModules.SoundModule.stopAlarmLoop();
+      } catch (e) {
+        console.warn('[SoundService] Error stopping native SoundModule alarm loop:', e);
+      }
     }
   }
 

@@ -5,6 +5,7 @@ import {
   Text,
   ScrollView,
   TextInput,
+  type TextInputInstance,
   TouchableOpacity,
   Platform,
   StatusBar,
@@ -237,7 +238,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
   onPaymentSuccess,
 }) => {
   const insets = useSafeAreaInsets();
-  const textInputRef = useRef<TextInput>(null);
+  const textInputRef = useRef<TextInputInstance>(null);
   const { authState } = useViewModel();
 
   const userFirstName = authState?.type === 'Authenticated' && (authState as any).username ? (authState as any).username.split(' ')[0] : 'User';

@@ -6,12 +6,13 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  type ScrollViewInstance,
   KeyboardAvoidingView,
   Platform,
   StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useRider } from '../context/RiderContext';
 
@@ -20,7 +21,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { activeTrip, chatMessages, sendChatMessage } = useRider();
   const [text, setText] = useState('');
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<ScrollViewInstance>(null);
 
   const handleSend = () => {
     if (!text.trim()) return;

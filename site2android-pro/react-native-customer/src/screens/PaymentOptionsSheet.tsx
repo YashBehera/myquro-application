@@ -293,41 +293,6 @@ export const PaymentOptionsSheet: React.FC<PaymentOptionsSheetProps> = ({
                 <ChevronRight size={18 * SCALE} color="#DEA430" />
               </TouchableOpacity>
 
-              {/* [4] MYQURO UPI PROMOTIONAL BANNER */}
-              <View style={styles.upiBannerCard}>
-                <View style={styles.upiBannerLeft}>
-                  <Text style={styles.upiBannerTitle}>
-                    UPI payments, now <Text style={styles.upiBannerTitleGold}>3X Faster</Text>
-                  </Text>
-                  <Text style={styles.upiBannerSub}>
-                    Unlock faster in-app UPI for instant payments!
-                  </Text>
-
-                  <TouchableOpacity
-                    style={styles.upiActivateBtn}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      if (Platform.OS === 'android') {
-                        ToastAndroid.show('MyQuro 1-Click Fast UPI Activated!', ToastAndroid.SHORT);
-                      }
-                    }}
-                  >
-                    <Text style={styles.upiActivateBtnText}>Activate in 10s</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.upiLogoCol}>
-                  <Text style={styles.quroUpiBrandTitle}>MYQURO</Text>
-                  <View style={styles.quroUpiSymbolRow}>
-                    <Text style={styles.quroUpiSymbolText}>UPI</Text>
-                    <View style={styles.upiArrowsWrap}>
-                      <Text style={styles.upiArrowGreen}>▲</Text>
-                      <Text style={styles.upiArrowGold}>▼</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.upiSubtitleText}>UNIFIED PAYMENTS INTERFACE</Text>
-                </View>
-              </View>
 
               {/* [5] MYQURO MONEY SECTION (WITH TOGGLE) */}
               <View style={styles.sectionHeaderRow}>

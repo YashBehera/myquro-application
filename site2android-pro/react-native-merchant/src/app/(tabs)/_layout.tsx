@@ -43,7 +43,7 @@ export default function TabLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color} />
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color as string} />
           ),
         }}
       />
@@ -60,7 +60,7 @@ export default function TabLayout() {
                   <Text style={styles.badgePillText}>{activeOrdersCount}</Text>
                 </View>
               )}
-              <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={22} color={color} />
+              <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={22} color={color as string} />
             </View>
           ),
         }}
@@ -72,7 +72,7 @@ export default function TabLayout() {
         options={{
           title: 'Menu',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'restaurant' : 'restaurant-outline'} size={22} color={color} />
+            <Ionicons name={focused ? 'restaurant' : 'restaurant-outline'} size={22} color={color as string} />
           ),
         }}
       />
@@ -89,7 +89,7 @@ export default function TabLayout() {
                   <Text style={[styles.badgePillText, { color: '#FFFFFF' }]}>{activeComplaintsCount}</Text>
                 </View>
               )}
-              <Ionicons name={focused ? 'alert-circle' : 'alert-circle-outline'} size={22} color={color} />
+              <Ionicons name={focused ? 'alert-circle' : 'alert-circle-outline'} size={22} color={color as string} />
             </View>
           ),
         }}
@@ -101,7 +101,7 @@ export default function TabLayout() {
         options={{
           title: 'More',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'grid' : 'grid-outline'} size={22} color={color} />
+            <Ionicons name={focused ? 'grid' : 'grid-outline'} size={22} color={color as string} />
           ),
         }}
       />

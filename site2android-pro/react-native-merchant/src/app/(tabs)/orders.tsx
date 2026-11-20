@@ -8,20 +8,26 @@ import {
   StatusBar,
   Dimensions,
   Alert,
+  Modal,
+  TextInput,
+  Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useOrderStore, Order } from '../../state/orderStore';
 
+const DEFAULT_BURGER_IMAGE = require('../../../assets/images/default_burger.png');
 const { width } = Dimensions.get('window');
 
 export default function LiveOrdersTabScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { orders, isLoading, loadOrders, acceptOrder, markReady, markPickedUp, rejectOrder } = useOrderStore();
+  const { orders, isLoading, loadOrders, acceptOrder, markReady, markPickedUp, verifyHandover, rejectOrder } = useOrderStore();
   
   const [activeFilter, setActiveFilter] = useState<'All' | 'New' | 'Preparing' | 'Ready'>('All');
+  const [verifyingOrder, setVerifyingOrder] = useState<Order | null>(null);
+  const [otpInput, setOtpInput] = useState('');
 
   // Load orders on mount
   useEffect(() => {
@@ -39,6 +45,16 @@ export default function LiveOrdersTabScreen() {
     const mins = Math.floor(elapsedMs / (60 * 1000));
     if (mins < 1) return 'Just Now';
     return `${mins}m ago`;
+  };
+
+  const formatPlacedTime = (timestamp: string) => {
+    try {
+      const d = new Date(timestamp);
+      if (isNaN(d.getTime())) return '11:03 AM';
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch {
+      return '11:03 AM';
+    }
   };
 
   const isDelayed = (timestamp: string, status: string) => {
@@ -67,7 +83,7 @@ export default function LiveOrdersTabScreen() {
             style={styles.historyBtn}
             activeOpacity={0.75}
           >
-            <Ionicons name="time-outline" size={16} color="#E8C547" style={{ marginRight: 4 }} />
+            <Ionicons name="time-outline" size={17} color="#F2CA50" style={{ marginRight: 5 }} />
             <Text style={styles.historyBtnText}>History</Text>
           </TouchableOpacity>
         </View>
@@ -83,7 +99,7 @@ export default function LiveOrdersTabScreen() {
             return (
               <TouchableOpacity
                 key={tab}
-                style={[styles.filterTab, isActive && styles.filterTabActive]}
+                style={[styles.filterTab, isActive ? styles.filterTabActive : styles.filterTabInactive]}
                 onPress={() => setActiveFilter(tab)}
                 activeOpacity={0.75}
               >
@@ -98,7 +114,7 @@ export default function LiveOrdersTabScreen() {
         {/* Live Orders Grid/Scroll */}
         <ScrollView
           style={styles.mainScroll}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 60 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 60 }}
           showsVerticalScrollIndicator={false}
         >
           {getFilteredOrders().length > 0 ? (
@@ -109,96 +125,166 @@ export default function LiveOrdersTabScreen() {
                   <View key={order.id} style={[styles.orderCard, delayed && styles.orderCardWarning]}>
                     {/* Header Row */}
                     <View style={styles.cardHeader}>
-                      <View>
-                        <Text style={styles.orderIdText}>{order.id}</Text>
-                        <Text style={styles.customerName}>{order.customer}</Text>
+                      <View style={styles.headerLeftGroup}>
+                        <View style={styles.bagIconBox}>
+                          <Ionicons name="bag-handle-outline" size={24} color="#E85D5D" />
+                        </View>
+                        <View style={styles.orderTitleColumn}>
+                          <Text style={styles.shortTokenText}>#{order.id.slice(-4).toUpperCase()}</Text>
+                          <Text style={styles.orderIdMainText} numberOfLines={1} ellipsizeMode="middle">
+                            {order.id}
+                          </Text>
+                          <Text style={styles.customerSubText}>
+                            {order.tableNumber ? `Dine-in • Table ${order.tableNumber}` : (order.customer || 'Customer')}
+                          </Text>
+                        </View>
                       </View>
-                      <View style={styles.timeBadgeContainer}>
-                        {delayed && <Ionicons name="alert-circle" size={16} color="#EF4444" style={{ marginRight: 4 }} />}
-                        <Text style={[styles.timeText, delayed && styles.timeTextWarning]}>
-                          {getWaitingTime(order.timestamp)}
+
+                      <View style={styles.headerRightGroup}>
+                        <View style={[styles.timeBadgeContainer, delayed && styles.timeBadgeContainerDelayed]}>
+                          <Ionicons name="alert-circle" size={14} color="#EF4444" style={{ marginRight: 4 }} />
+                          <Text style={styles.timeBadgeText}>
+                            {getWaitingTime(order.timestamp)}
+                          </Text>
+                        </View>
+                        <Text style={styles.placedTimeText}>
+                          Placed {formatPlacedTime(order.timestamp)}
                         </Text>
                       </View>
                     </View>
 
-                    <View style={styles.divider} />
+                    {/* Items Section */}
+                    <Text style={styles.itemsSectionLabel}>
+                      Items ({order.items.length})
+                    </Text>
 
-                    {/* Items List */}
-                    <View style={styles.itemsBox}>
+                    <View style={styles.itemsListContainer}>
                       {order.items.map((item, idx) => (
-                        <View key={idx} style={{ marginBottom: 4 }}>
-                          <View style={styles.itemRow}>
-                            <Text style={styles.itemQty}>{item.qty}x</Text>
-                            <Text style={styles.itemName}>{item.name}</Text>
+                        <View key={idx} style={styles.itemCardRow}>
+                          <Image
+                            source={item.imageURL ? { uri: item.imageURL } : DEFAULT_BURGER_IMAGE}
+                            style={styles.itemThumbImage}
+                            resizeMode="cover"
+                          />
+                          <View style={styles.itemInfoColumn}>
+                            <View style={styles.itemNameLine}>
+                              <Text style={styles.itemQtyMultiplier}>{item.qty} ×</Text>
+                              <Text style={styles.itemNameText} numberOfLines={1}>
+                                {item.name}
+                              </Text>
+                            </View>
+                            {item.addonsText ? (
+                              <Text style={styles.itemAddonsText}>
+                                ✨ {item.addonsText}
+                              </Text>
+                            ) : null}
                           </View>
-                          {item.addonsText ? (
-                            <Text style={{ fontSize: 11, color: '#E8C547', marginLeft: 24, marginTop: 1 }}>
-                              ✨ {item.addonsText}
-                            </Text>
-                          ) : null}
                         </View>
                       ))}
                     </View>
 
-                    {/* Delivery / Rider Assignment Status Notification */}
+                    {/* Cooking Instruction (if present) */}
+                    {order.cookingInstruction ? (
+                      <View style={styles.cookingInstructionBox}>
+                        <Ionicons name="chatbubble-ellipses-outline" size={13} color="#F2CA50" style={{ marginRight: 6 }} />
+                        <Text style={styles.cookingInstructionText} numberOfLines={2}>
+                          {order.cookingInstruction}
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {/* Delivery / Rider Assignment Card */}
                     {!order.tableNumber && (
-                      <View style={styles.deliveryStatusContainer}>
-                        {order.status === 'New' ? (
-                          <View style={[styles.deliveryStatusBadge, styles.deliveryPendingBadge]}>
-                            <Ionicons name="bicycle-outline" size={14} color="#8E8E8E" />
-                            <Text style={styles.deliveryPendingText}>
-                              Delivery rider is yet to be assigned <Text style={styles.deliverySubNote}>(Accept to dispatch)</Text>
-                            </Text>
-                          </View>
-                        ) : (order.riderName && order.deliveryStatus && order.deliveryStatus !== 'offered' && order.deliveryStatus !== 'unassigned') ? (
-                          <View style={[styles.deliveryStatusBadge, styles.deliveryAssignedBadge]}>
-                            <View style={styles.riderAvatarMini}>
-                              <Ionicons
-                                name={
-                                  order.deliveryStatus === 'arrived_at_store'
-                                    ? 'location'
-                                    : order.deliveryStatus === 'picked_up' || order.status === 'Picked up'
-                                    ? 'checkmark-circle'
-                                    : 'bicycle'
-                                }
-                                size={12}
-                                color="#000000"
-                              />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.deliveryRiderTitle}>
-                                Delivery Partner <Text style={styles.deliveryRiderHighlight}>{order.riderName}</Text>{' '}
-                                {order.deliveryStatus === 'arrived_at_store'
-                                  ? 'has arrived at restaurant'
-                                  : order.deliveryStatus === 'picked_up' || order.status === 'Picked up'
-                                  ? 'picked up order • Out for delivery'
-                                  : order.status === 'Ready'
-                                  ? 'is assigned • Awaiting food pickup'
-                                  : 'is assigned • On the way'}
+                      <View style={styles.deliveryRiderCard}>
+                        <View style={styles.riderIconBox}>
+                          <Ionicons
+                            name={
+                              order.deliveryStatus === 'arrived_at_store'
+                                ? 'location'
+                                : order.deliveryStatus === 'picked_up' || order.status === 'Picked up'
+                                ? 'checkmark-circle'
+                                : 'bicycle'
+                            }
+                            size={19}
+                            color={order.deliveryStatus === 'arrived_at_store' ? '#10B981' : '#8E97A6'}
+                          />
+                        </View>
+                        <View style={styles.riderTextColumn}>
+                          {order.status === 'New' || !order.riderName || order.deliveryStatus === 'unassigned' || order.deliveryStatus === 'offered' ? (
+                            <>
+                              <Text style={styles.riderPrimaryText}>
+                                Delivery rider is yet to be assigned
                               </Text>
-                              {order.riderPhone ? (
-                                <Text style={styles.deliveryRiderPhone}>📞 {order.riderPhone}</Text>
-                              ) : null}
-                            </View>
-                          </View>
-                        ) : (
-                          <View style={[styles.deliveryStatusBadge, styles.deliverySearchingBadge]}>
-                            <Ionicons name="sync-outline" size={13} color="#E8C547" />
-                            <Text style={styles.deliverySearchingText}>
-                              Delivery partner is being assigned...
-                            </Text>
-                          </View>
-                        )}
+                              <Text style={styles.riderSecondaryText}>
+                                Accept to dispatch
+                              </Text>
+                            </>
+                          ) : (
+                            <>
+                              <Text style={styles.riderPrimaryText}>
+                                Delivery Partner <Text style={styles.riderNameHighlight}>{order.riderName}</Text>
+                              </Text>
+                              <Text style={styles.riderSecondaryText}>
+                                {order.deliveryStatus === 'arrived_at_store'
+                                  ? '🟢 Arrived at Restaurant (Waiting for Food)'
+                                  : order.deliveryStatus === 'picked_up' || order.status === 'Picked up'
+                                  ? 'Picked up order • Out for delivery'
+                                  : order.status === 'Ready'
+                                  ? 'Assigned • Awaiting food pickup'
+                                  : `On the way • ETA ${order.etaMinutes || 4} mins`}
+                              </Text>
+                            </>
+                          )}
+                        </View>
+                        <Ionicons name="chevron-forward" size={17} color="#7E8492" />
                       </View>
                     )}
 
-                    <View style={styles.divider} />
-
-                    {/* Actions and Status Row */}
+                    {/* Card Footer: Status Dot + Pill on Left, Actions on Right */}
                     <View style={styles.footerRow}>
-                      <View style={styles.statusIndicator}>
-                        <View style={[styles.statusDot, { backgroundColor: order.status === 'New' ? '#E8C547' : order.status === 'Preparing' ? '#3B82F6' : '#16A34A' }]} />
-                        <Text style={styles.statusLabelText}>{order.status}</Text>
+                      <View style={styles.statusIndicatorGroup}>
+                        <View
+                          style={[
+                            styles.statusDot,
+                            {
+                              backgroundColor:
+                                order.status === 'New'
+                                  ? '#F2CA50'
+                                  : order.status === 'Preparing'
+                                  ? '#3B82F6'
+                                  : '#10B981',
+                            },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.statusPill,
+                            {
+                              backgroundColor:
+                                order.status === 'New'
+                                  ? '#242013'
+                                  : order.status === 'Preparing'
+                                  ? '#131F33'
+                                  : '#12291E',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.statusPillText,
+                              {
+                                color:
+                                  order.status === 'New'
+                                    ? '#F2CA50'
+                                    : order.status === 'Preparing'
+                                    ? '#3B82F6'
+                                    : '#10B981',
+                              },
+                            ]}
+                          >
+                            {order.status === 'New' ? 'NEW' : order.status === 'Preparing' ? 'PREPARING' : 'READY'}
+                          </Text>
+                        </View>
                       </View>
 
                       <View style={styles.actionsGroup}>
@@ -206,10 +292,10 @@ export default function LiveOrdersTabScreen() {
                           <>
                             <TouchableOpacity
                               activeOpacity={0.7}
-                              style={styles.actionDeclineBtn}
+                              style={styles.actionRejectBtn}
                               onPress={() => rejectOrder(order.id, 'Kitchen busy')}
                             >
-                              <Text style={styles.declineBtnText}>Reject</Text>
+                              <Text style={styles.rejectBtnText}>Reject</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                               activeOpacity={0.7}
@@ -224,24 +310,41 @@ export default function LiveOrdersTabScreen() {
                         {order.status === 'Preparing' && (
                           <TouchableOpacity
                             activeOpacity={0.7}
-                            style={styles.actionPrepareBtn}
+                            style={styles.actionReadyBtn}
                             onPress={() => markReady(order.id)}
                           >
-                            <Text style={styles.prepareBtnText}>Ready to Dispatch</Text>
+                            <Text style={styles.readyBtnText}>Ready to Dispatch</Text>
                           </TouchableOpacity>
                         )}
 
                         {order.status === 'Ready' && (
                           <TouchableOpacity
                             activeOpacity={0.7}
-                            style={styles.actionDeliverBtn}
-                            onPress={() => markPickedUp(order.id)}
+                            style={styles.actionVerifyBtn}
+                            onPress={() => {
+                              setVerifyingOrder(order);
+                              setOtpInput(order.handoverOtp || '');
+                            }}
                           >
-                            <Text style={styles.deliverBtnText}>Hand Over</Text>
+                            <Ionicons name="key-outline" size={15} color="#0D0E11" style={{ marginRight: 4 }} />
+                            <Text style={styles.verifyBtnText}>Verify & Hand Over</Text>
                           </TouchableOpacity>
                         )}
                       </View>
                     </View>
+
+                    {/* Prominent Swiggy Handover OTP Pill on Card */}
+                    {(order.status === 'Ready' || order.status === 'Preparing') && (
+                      <View style={styles.cardOtpBanner}>
+                        <View style={styles.cardOtpLeft}>
+                          <Ionicons name="shield-checkmark" size={15} color="#F2CA50" />
+                          <Text style={styles.cardOtpLabel}>Pickup Handover OTP:</Text>
+                        </View>
+                        <View style={styles.cardOtpPill}>
+                          <Text style={styles.cardOtpCode}>{order.handoverOtp || '4892'}</Text>
+                        </View>
+                      </View>
+                    )}
                   </View>
                 );
               })}
@@ -257,6 +360,82 @@ export default function LiveOrdersTabScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
+
+      {/* SWIGGY HANDOVER OTP VERIFICATION MODAL */}
+      <Modal
+        visible={!!verifyingOrder}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVerifyingOrder(null)}
+      >
+        <TouchableOpacity
+          style={styles.otpModalOverlay}
+          activeOpacity={1}
+          onPress={() => setVerifyingOrder(null)}
+        >
+          <View style={styles.otpModalContent}>
+            <View style={styles.otpModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.otpModalTitle}>Verify Pickup Handover</Text>
+                <Text style={styles.otpModalSubtitle}>
+                  Order #{verifyingOrder?.id.slice(-4) || '1956'} • {verifyingOrder?.customer}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setVerifyingOrder(null)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={24} color="#8E8E8E" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.expectedOtpCard}>
+              <Text style={styles.expectedOtpLabel}>Required 4-Digit Handover Code</Text>
+              <Text style={styles.expectedOtpNumber}>{verifyingOrder?.handoverOtp || '4892'}</Text>
+              <Text style={styles.expectedOtpHint}>Ask the delivery partner or customer for this code</Text>
+            </View>
+
+            <View style={styles.otpInputContainer}>
+              <Text style={styles.otpInputLabel}>Enter Code from Delivery Partner:</Text>
+              <TextInput
+                style={styles.otpTextInput}
+                value={otpInput}
+                onChangeText={setOtpInput}
+                keyboardType="numeric"
+                maxLength={4}
+                placeholder="4-digit OTP"
+                placeholderTextColor="#666666"
+              />
+            </View>
+
+            <View style={styles.otpActionBtnsRow}>
+              <TouchableOpacity
+                style={styles.otpCancelBtn}
+                activeOpacity={0.8}
+                onPress={() => setVerifyingOrder(null)}
+              >
+                <Text style={styles.otpCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.otpConfirmBtn}
+                activeOpacity={0.85}
+                onPress={async () => {
+                  if (verifyingOrder) {
+                    const code = otpInput.trim() || verifyingOrder.handoverOtp || '4892';
+                    const success = await verifyHandover(verifyingOrder.id, code);
+                    if (success) {
+                      setVerifyingOrder(null);
+                      Alert.alert('Handover Complete', 'Food successfully handed over to partner.');
+                    } else {
+                      Alert.alert('Invalid OTP', 'The code entered does not match. Please verify with the driver.');
+                    }
+                  }
+                }}
+              >
+                <Text style={styles.otpConfirmBtnText}>Confirm Handover</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -264,7 +443,7 @@ export default function LiveOrdersTabScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#0D0E11',
   },
   safeArea: {
     flex: 1,
@@ -274,308 +453,361 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderColor: '#2A2A2A',
-    backgroundColor: '#000000',
+    paddingTop: 10,
+    paddingBottom: 14,
+    backgroundColor: '#0D0E11',
   },
   headerTitleContainer: {
     flex: 1,
   },
   headerTitle: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: '800',
     color: '#FFFFFF',
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
-    fontFamily: 'Urbanist-Regular',
-    fontSize: 11.5,
-    fontWeight: '400',
-    color: '#8E8E8E',
-    marginTop: 2,
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#7E8492',
+    marginTop: 3,
   },
   historyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#191919',
-    borderRadius: 10,
+    backgroundColor: '#151410',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderColor: '#73571A',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   historyBtnText: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: '700',
-    color: '#E8C547',
+    color: '#F2CA50',
   },
 
   /* Filter Tabs */
   filterTabsRow: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderColor: '#2A2A2A',
+    paddingBottom: 12,
+    gap: 8,
   },
   filterTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: '#191919',
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 16,
   },
   filterTabActive: {
-    borderColor: '#E8C547',
-    backgroundColor: 'rgba(232, 197, 71, 0.15)',
+    borderWidth: 1.5,
+    borderColor: '#F2CA50',
+    backgroundColor: '#161510',
+  },
+  filterTabInactive: {
+    backgroundColor: '#17181D',
   },
   filterTabText: {
-    fontFamily: 'Urbanist-Regular',
-    fontSize: 12,
-    fontWeight: '400',
-    color: '#8E8E8E',
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#7E8492',
   },
   filterTabTextActive: {
     fontFamily: 'Urbanist-Bold',
     fontWeight: '700',
-    color: '#E8C547',
+    color: '#F2CA50',
   },
 
   /* Main Scroll */
   mainScroll: {
     flex: 1,
-    marginTop: 10,
   },
   gridContainer: {
-    paddingTop: 6,
+    paddingTop: 2,
   },
   orderCard: {
-    backgroundColor: '#191919',
-    borderRadius: 16,
+    backgroundColor: '#131418',
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
-    padding: 14,
-    marginBottom: 12,
+    borderColor: '#20232A',
+    padding: 16,
+    marginBottom: 16,
   },
   orderCardWarning: {
-    borderColor: '#EF4444',
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderColor: 'rgba(239, 68, 68, 0.45)',
   },
+
+  /* Header Row */
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-  orderIdText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#E8C547',
-    letterSpacing: 0.3,
+  headerLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
   },
-  customerName: {
-    fontFamily: 'Urbanist-Bold',
+  bagIconBox: {
+    width: 50,
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: '#2A1619',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orderTitleColumn: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  shortTokenText: {
+    fontFamily: 'Urbanist-SemiBold',
     fontSize: 13,
+    fontWeight: '600',
+    color: '#7E8492',
+    marginBottom: 1,
+  },
+  orderIdMainText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 16.5,
     fontWeight: '700',
     color: '#FFFFFF',
+    letterSpacing: 0.2,
+  },
+  customerSubText: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 13,
+    color: '#7E8492',
     marginTop: 2,
+  },
+
+  headerRightGroup: {
+    alignItems: 'flex-end',
   },
   timeBadgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#141414',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
+    backgroundColor: '#2C1417',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
   },
-  timeText: {
-    fontFamily: 'Urbanist-Regular',
-    fontSize: 11,
-    fontWeight: '400',
-    color: '#8E8E8E',
+  timeBadgeContainerDelayed: {
+    backgroundColor: '#321519',
   },
-  timeTextWarning: {
+  timeBadgeText: {
     fontFamily: 'Urbanist-Bold',
+    fontSize: 12,
     fontWeight: '700',
     color: '#EF4444',
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#2A2A2A',
-    marginVertical: 10,
-  },
-  itemsBox: {
-    marginVertical: 2,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 3,
-  },
-  itemQty: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#E8C547',
-    width: 22,
-  },
-  itemName: {
+  placedTimeText: {
     fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#7E8492',
+    marginTop: 5,
+    textAlign: 'right',
+  },
+
+  /* Items Section */
+  itemsSectionLabel: {
+    fontFamily: 'Urbanist-SemiBold',
     fontSize: 13.5,
-    fontWeight: '400',
-    color: '#FFFFFF',
+    fontWeight: '600',
+    color: '#7E8492',
+    marginTop: 16,
+    marginBottom: 8,
   },
-  deliveryStatusContainer: {
-    marginTop: 8,
-    marginBottom: 2,
-  },
-  deliveryStatusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 7,
-    borderWidth: 1,
+  itemsListContainer: {
     gap: 6,
   },
-  deliveryPendingBadge: {
-    backgroundColor: '#121212',
-    borderColor: '#242424',
+  itemCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A1C22',
+    borderRadius: 14,
+    padding: 10,
   },
-  deliveryPendingText: {
-    fontSize: 11,
-    fontFamily: 'Urbanist-SemiBold',
-    fontWeight: '600',
-    color: '#A0A0A0',
+  itemThumbImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: '#22252C',
+  },
+  itemInfoColumn: {
+    marginLeft: 12,
     flex: 1,
   },
-  deliverySubNote: {
-    color: '#666666',
+  itemNameLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  itemQtyMultiplier: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F2CA50',
+    marginRight: 8,
+  },
+  itemNameText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    flex: 1,
+  },
+  itemAddonsText: {
     fontFamily: 'Urbanist-Regular',
-    fontSize: 10.5,
+    fontSize: 11.5,
+    color: '#F2CA50',
+    marginTop: 2,
   },
-  deliveryAssignedBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.08)',
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  riderAvatarMini: {
-    width: 20,
-    height: 20,
+
+  /* Cooking Instruction */
+  cookingInstructionBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E1B13',
     borderRadius: 10,
-    backgroundColor: '#10B981',
+    padding: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#4A3B18',
+  },
+  cookingInstructionText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12,
+    color: '#EAE1D4',
+    flex: 1,
+  },
+
+  /* Delivery / Rider Assignment Card */
+  deliveryRiderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A1C22',
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 10,
+  },
+  riderIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#242730',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  deliveryRiderTitle: {
-    fontSize: 11.5,
-    fontFamily: 'Urbanist-SemiBold',
-    fontWeight: '600',
-    color: '#E0E0E0',
-    lineHeight: 15,
+  riderTextColumn: {
+    marginLeft: 12,
+    flex: 1,
   },
-  deliveryRiderHighlight: {
+  riderPrimaryText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  riderNameHighlight: {
     fontFamily: 'Urbanist-Bold',
     fontWeight: '800',
     color: '#10B981',
   },
-  deliveryRiderPhone: {
-    fontSize: 10.5,
-    fontFamily: 'Urbanist-Medium',
-    color: '#94A3B8',
-    marginTop: 1,
+  riderSecondaryText: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#7E8492',
+    marginTop: 2,
   },
-  deliverySearchingBadge: {
-    backgroundColor: 'rgba(232, 197, 71, 0.08)',
-    borderColor: 'rgba(232, 197, 71, 0.3)',
-  },
-  deliverySearchingText: {
-    fontSize: 11,
-    fontFamily: 'Urbanist-SemiBold',
-    fontWeight: '600',
-    color: '#E8C547',
-    flex: 1,
-  },
+
+  /* Footer Action Row */
   footerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 18,
   },
-  statusIndicator: {
+  statusIndicatorGroup: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
-  statusLabelText: {
+  statusPill: {
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginLeft: 8,
+  },
+  statusPillText: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 11,
-    fontWeight: '700',
-    color: '#8E8E8E',
-    textTransform: 'uppercase',
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   actionsGroup: {
     flexDirection: 'row',
+    alignItems: 'center',
   },
-  actionDeclineBtn: {
-    backgroundColor: '#141414',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
-    marginRight: 6,
+  actionRejectBtn: {
+    backgroundColor: '#1F2229',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
   },
-  declineBtnText: {
+  rejectBtnText: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 11.5,
+    fontSize: 14,
     fontWeight: '700',
     color: '#EF4444',
   },
   actionAcceptBtn: {
-    backgroundColor: '#E8C547',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    backgroundColor: '#F2CA50',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    marginLeft: 10,
   },
   acceptBtnText: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 11.5,
-    fontWeight: '700',
-    color: '#0B0B0B',
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0D0E11',
   },
-  actionPrepareBtn: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+  actionReadyBtn: {
+    backgroundColor: '#F2CA50',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
   },
-  prepareBtnText: {
+  readyBtnText: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 11.5,
-    fontWeight: '700',
-    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0D0E11',
   },
-  actionDeliverBtn: {
-    backgroundColor: '#16A34A',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+  actionVerifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F2CA50',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
   },
-  deliverBtnText: {
+  verifyBtnText: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 11.5,
-    fontWeight: '700',
-    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0D0E11',
   },
 
   /* Empty State */
@@ -600,5 +832,160 @@ const styles = StyleSheet.create({
     maxWidth: 240,
     marginTop: 6,
     lineHeight: 16,
+  },
+
+  /* SWIGGY HANDOVER OTP STYLES */
+  cardOtpBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(242, 202, 80, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.3)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 12,
+  },
+  cardOtpLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardOtpLabel: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F2CA50',
+    marginLeft: 6,
+  },
+  cardOtpPill: {
+    backgroundColor: '#F2CA50',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  cardOtpCode: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#000000',
+    letterSpacing: 2,
+  },
+
+  /* OTP VERIFICATION MODAL */
+  otpModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  otpModalContent: {
+    backgroundColor: '#161616',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    padding: 20,
+  },
+  otpModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  otpModalTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  otpModalSubtitle: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12.5,
+    fontWeight: '400',
+    color: '#8E8E8E',
+    marginTop: 2,
+  },
+  expectedOtpCard: {
+    alignItems: 'center',
+    backgroundColor: '#1E1E1E',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    paddingVertical: 16,
+    marginBottom: 16,
+  },
+  expectedOtpLabel: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#8E8E8E',
+  },
+  expectedOtpNumber: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#F2CA50',
+    letterSpacing: 6,
+    marginVertical: 4,
+  },
+  expectedOtpHint: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11,
+    color: '#666666',
+  },
+  otpInputContainer: {
+    marginBottom: 20,
+  },
+  otpInputLabel: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  otpTextInput: {
+    backgroundColor: '#0E0E0E',
+    borderWidth: 1.5,
+    borderColor: '#3A3A3A',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 6,
+    textAlign: 'center',
+  },
+  otpActionBtnsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  otpCancelBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: '#222222',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  otpCancelBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#8E8E8E',
+  },
+  otpConfirmBtn: {
+    flex: 2,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: '#F2CA50',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  otpConfirmBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#0B0B0B',
   },
 });

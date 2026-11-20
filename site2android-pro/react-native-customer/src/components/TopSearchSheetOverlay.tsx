@@ -4,6 +4,7 @@ import {
   View,
   Text,
   TextInput,
+  type TextInputInstance,
   TouchableOpacity,
   ScrollView,
   Animated,
@@ -89,7 +90,7 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
 
   const [query, setQuery] = useState('');
   const [recentSearches, setRecentSearches] = useState<string[]>(DEFAULT_RECENT_SEARCHES);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   // Animation values
   const animY = useRef(new Animated.Value(-600)).current;

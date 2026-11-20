@@ -62,6 +62,8 @@ export const restaurants = pgTable(
     autoPausedUntil: timestamp("auto_paused_until"),
     strikeCount: integer("strike_count").default(0).notNull(),
     isBusyMode: boolean("is_busy_mode").default(false).notNull(),
+    snoozedUntil: timestamp("snoozed_until"),
+    snoozeReason: text("snooze_reason"),
     lastHeartbeatAt: timestamp("last_heartbeat_at"),
     defaultPrepTimeMinutes: integer("default_prep_time_minutes").default(20).notNull(),
     companyId: text("company_id"),

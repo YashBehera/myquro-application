@@ -292,7 +292,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
                   </Text>
                   <View style={styles.riderNameRow}>
                     <Text style={styles.riderByPrefix}>by </Text>
-                    <Text style={styles.riderNameText}>{riderName.toUpperCase()}</Text>
+                    <Text style={styles.riderNameText}>{(riderName || 'Quro Express Partner').toUpperCase()}</Text>
                   </View>
                 </View>
                 <View style={styles.onTimeBadge}>

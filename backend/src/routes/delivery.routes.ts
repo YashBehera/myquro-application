@@ -12,7 +12,7 @@ import { menuItemVariants } from "../db/schema/menu-item-variants.js";
 import { authSessions } from "../db/schema/auth-sessions.js";
 import { operatingCities, operatingZones } from "../db/schema/rider-onboarding.js";
 import { requireAuth } from "../auth/requireAuth.js";
-import { eq, and, or, sql, inArray } from "drizzle-orm";
+import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
 import { calculateSwiggyETA, seedRidersIfEmpty, startDeliverySimulation, haversineDistance } from "../lib/delivery-simulation.js";
@@ -116,7 +116,7 @@ router.post("/auth/verify-otp", async (req, res) => {
     } else {
       user = existingUsers[0];
     }
-    
+
     // Also fetch the rider details to see if onboarding is completed
     const riderList = await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, user.id));
     let riderDetails = riderList.length > 0 ? riderList[0] : null;
@@ -169,7 +169,7 @@ router.get("/addresses", requireAuth, async (req: any, res) => {
       .select()
       .from(deliveryAddresses)
       .where(eq(deliveryAddresses.userId, user.id));
-    
+
     // Map list to include parsed metadata if stored as JSON
     const formatted = list.map(item => {
       try {
@@ -192,7 +192,7 @@ router.get("/addresses", requireAuth, async (req: any, res) => {
             updatedAt: item.updatedAt,
           };
         }
-      } catch {}
+      } catch { }
       return {
         id: item.id,
         type: 'Home',
@@ -220,7 +220,7 @@ router.post("/addresses", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
     const { addressLine, city, latitude, longitude, type, houseNo, landmark, area, address, instructions, receiverName, receiverPhone } = req.body;
-    
+
     const resolvedCity = city || area || "City";
     const resolvedLat = Number(latitude) || 0;
     const resolvedLng = Number(longitude) || 0;
@@ -309,30 +309,52 @@ router.delete("/addresses/:id", requireAuth, async (req: any, res) => {
   }
 });
 
-// GET /api/delivery/track/:orderId
-router.get("/track/:orderId", requireAuth, async (req: any, res) => {
+// GET /api/delivery/track/:orderId (Public customer tracking endpoint)
+router.get("/track/:orderId", async (req: any, res) => {
   try {
     const { orderId } = req.params;
     const list = await db
-      .select()
+      .select({
+        id: orderDeliveries.id,
+        orderId: orderDeliveries.orderId,
+        riderId: orderDeliveries.riderId,
+        status: orderDeliveries.status,
+        etaMinutes: orderDeliveries.etaMinutes,
+        distanceKm: orderDeliveries.distanceKm,
+        deliveryFee: orderDeliveries.deliveryFee,
+        currentLat: orderDeliveries.currentLat,
+        currentLng: orderDeliveries.currentLng,
+        customerLat: orderDeliveries.customerLat,
+        customerLng: orderDeliveries.customerLng,
+        restaurantLat: orderDeliveries.restaurantLat,
+        restaurantLng: orderDeliveries.restaurantLng,
+        createdAt: orderDeliveries.createdAt,
+        updatedAt: orderDeliveries.updatedAt,
+        riderName: deliveryRiders.name,
+        riderPhone: deliveryRiders.phone,
+      })
       .from(orderDeliveries)
-      .where(eq(orderDeliveries.orderId, orderId));
+      .leftJoin(deliveryRiders, eq(orderDeliveries.riderId, deliveryRiders.id))
+      .where(eq(orderDeliveries.orderId, orderId))
+      .orderBy(desc(orderDeliveries.updatedAt));
 
     if (list.length === 0) {
       return res.status(404).json({ message: "No tracking details found for this order" });
     }
 
-    const delivery = list[0];
-    let rider = null;
+    // Pick active assigned delivery if any, or latest delivery
+    const delivery = list.find((d: any) => d.status && d.status !== 'offered' && d.status !== 'unassigned') || list[0];
+    let rider: any = null;
 
-    if (delivery.riderId) {
-      const riders = await db
-        .select()
-        .from(deliveryRiders)
-        .where(eq(deliveryRiders.id, delivery.riderId));
-      if (riders.length > 0) {
-        rider = riders[0];
-      }
+    const effectiveRiderName = delivery.riderName;
+    const effectiveRiderPhone = delivery.riderPhone;
+
+    if (delivery.riderId || effectiveRiderName) {
+      rider = {
+        id: delivery.riderId,
+        name: effectiveRiderName,
+        phone: effectiveRiderPhone,
+      };
     }
 
     return res.status(200).json({
@@ -377,12 +399,12 @@ router.post("/assign", requireAuth, async (req: any, res) => {
       .select()
       .from(deliveryAddresses)
       .where(eq(deliveryAddresses.id, addressId));
-      
+
     if (addressList.length === 0) {
       // Find a user ID to associate with the address to satisfy foreign key constraint
       const firstUser = await db.select().from(authUsers).limit(1);
       const userId = order.placedByUserId || (firstUser.length > 0 ? firstUser[0].id : null);
-      
+
       if (userId) {
         // Parse order notes to get coordinates passed by customer app
         let parsedNotes: any = {};
@@ -494,10 +516,10 @@ router.post("/assign", requireAuth, async (req: any, res) => {
       restaurantLng: restLng,
     });
 
-    // 6. Update order status to preparing
+    // 6. Update order timestamp (preserve placed status until restaurant explicitly accepts and sets prep time)
     await db
       .update(orders)
-      .set({ status: "preparing", updatedAt: new Date() })
+      .set({ updatedAt: new Date() })
       .where(eq(orders.id, orderId));
 
     // 7. No simulation — tracking is driven in real-time by the Rider App
@@ -710,11 +732,11 @@ router.get("/rider/active-task", requireAuth, async (req: any, res) => {
           sql`${orderDeliveries.status} != 'offered'`
         )
       );
-    
+
     if (list.length === 0) {
       return res.status(200).json({ success: true, task: null });
     }
-    
+
     let taskData = list[0];
     let customerAddress = "Address not provided";
     if (taskData.orderNotes) {
@@ -722,7 +744,7 @@ router.get("/rider/active-task", requireAuth, async (req: any, res) => {
         const parsed = JSON.parse(taskData.orderNotes);
         if (parsed.address) customerAddress = parsed.address;
         else if (parsed.mapAddress) customerAddress = parsed.mapAddress;
-      } catch(e) {}
+      } catch (e) { }
     }
 
     const orderItemsList = await db
@@ -737,13 +759,13 @@ router.get("/rider/active-task", requireAuth, async (req: any, res) => {
       .leftJoin(menuItemVariants, eq(orderItems.menuItemVariantId, menuItemVariants.id))
       .where(eq(orderItems.orderId, taskData.orderId));
 
-    return res.status(200).json({ 
-      success: true, 
+    return res.status(200).json({
+      success: true,
       task: {
         ...taskData,
         customerAddress,
         items: orderItemsList
-      } 
+      }
     });
   } catch (err) {
     console.error("❌ GET active task error:", err);
@@ -842,7 +864,7 @@ router.get("/offers", requireAuth, async (req: any, res) => {
               latitude = Number(parsedNotes.latitude);
               longitude = Number(parsedNotes.longitude);
             }
-          } catch (e) {}
+          } catch (e) { }
 
           // Fetch restaurant details
           const restList = await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1);
@@ -857,7 +879,7 @@ router.get("/offers", requireAuth, async (req: any, res) => {
           const deliveryId = `del_${nanoid(10)}`;
 
           console.log(`📡 [Offers Auto-Assign] Assigning Order ${order.id} to Rider ${user.id} (deliveryId: ${deliveryId})`);
-          
+
           await db.insert(orderDeliveries).values({
             id: deliveryId,
             orderId: order.id,
@@ -999,13 +1021,45 @@ router.post("/accept", requireAuth, async (req: any, res) => {
     emitToOrder(orderId, "delivery-update", {
       delivery: {
         orderId,
+        riderId: user.id,
         status: "assigned",
         currentLat: activeRider.latitude,
         currentLng: activeRider.longitude,
         updatedAt: new Date().toISOString(),
       },
+      status: "assigned",
+      deliveryStatus: "assigned",
+      riderId: user.id,
+      rider: activeRider,
       riderName: activeRider.name,
       riderPhone: activeRider.phone,
+    });
+
+    emitToOrder(orderId, "order-status-update", {
+      orderId,
+      status: orderRow?.status || "preparing",
+      deliveryStatus: "assigned",
+      riderName: activeRider.name,
+      riderPhone: activeRider.phone,
+      riderId: user.id,
+      updatedAt: new Date().toISOString(),
+    });
+
+    emitToOrder(orderId, "order-update", {
+      orderId,
+      status: orderRow?.status || "preparing",
+      deliveryStatus: "assigned",
+      riderName: activeRider.name,
+      riderPhone: activeRider.phone,
+      riderId: user.id,
+      order: {
+        id: orderId,
+        status: orderRow?.status || "preparing",
+        deliveryStatus: "assigned",
+        riderName: activeRider.name,
+        riderPhone: activeRider.phone,
+      },
+      updatedAt: new Date().toISOString(),
     });
 
     return res.status(200).json({ success: true, message: "Delivery offer accepted" });
@@ -1153,7 +1207,7 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
       // Rider picked up food — order is now picked up / served from restaurant perspective.
       // Update the order status in DB for restaurant tracking.
       await db.update(orders).set({ status: "served", updatedAt: new Date() }).where(eq(orders.id, orderId));
-      
+
       const orderRecord = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
       if (orderRecord) {
         emitToRestaurant(orderRecord.restaurantId, 'order-updated', {
@@ -1164,13 +1218,24 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
           updatedAt: new Date().toISOString()
         });
       }
-      // NOTE: Do NOT emit order-status 'served' to the customer order room here.
-      // That would incorrectly show the DeliveredOrderView before actual delivery.
+      // Emit to customer room that food is picked up and in transit (NOT delivered!)
+      emitToOrder(orderId, 'order-status-update', {
+        orderId,
+        status: 'picked_up',
+        deliveryStatus: 'picked_up',
+        updatedAt: new Date().toISOString()
+      });
     } else if (nextDeliveryStatus === "out_for_delivery") {
       // Rider has left the restaurant
+      emitToOrder(orderId, 'order-status-update', {
+        orderId,
+        status: 'out_for_delivery',
+        deliveryStatus: 'out_for_delivery',
+        updatedAt: new Date().toISOString()
+      });
     } else if (nextDeliveryStatus === "delivered") {
       await db.update(orders).set({ status: "served", updatedAt: new Date() }).where(eq(orders.id, orderId));
-      
+
       const orderRecord = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
       if (orderRecord) {
         emitToRestaurant(orderRecord.restaurantId, 'order-updated', {
@@ -1181,35 +1246,46 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
           updatedAt: new Date().toISOString()
         });
       }
-      
+
       const deliveryRecord = delList[0];
       const fee = deliveryRecord.deliveryFee || 0;
 
-      await db.update(deliveryRiders)
-        .set({ 
-          status: "available",
-          walletBalance: sql`${deliveryRiders.walletBalance} + ${fee}`,
-          totalEarnings: sql`${deliveryRiders.totalEarnings} + ${fee}`,
-          totalDeliveries: sql`${deliveryRiders.totalDeliveries} + 1`
-        })
-        .where(eq(deliveryRiders.id, user.id));
-        
-      emitToOrder(orderId, "order-status", { orderId, status: "served" });
-      emitToOrder(orderId, "order-status-update", { orderId, status: "served" });
+      const riderId = user?.id || delList[0].riderId;
+      if (riderId) {
+        await db.update(deliveryRiders)
+          .set({
+            status: "available",
+            walletBalance: sql`${deliveryRiders.walletBalance} + ${fee}`,
+            totalEarnings: sql`${deliveryRiders.totalEarnings} + ${fee}`,
+            totalDeliveries: sql`${deliveryRiders.totalDeliveries} + 1`
+          })
+          .where(eq(deliveryRiders.id, riderId));
+      }
+
+      emitToOrder(orderId, "order-status", { orderId, status: "delivered", deliveryStatus: "delivered" });
+      emitToOrder(orderId, "order-status-update", { orderId, status: "delivered", deliveryStatus: "delivered" });
     }
 
-    const activeRider = (await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, user.id)))[0];
+    const riderId = user?.id || delList[0].riderId;
+    let activeRider: any = null;
+    if (riderId) {
+      const riders = await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, riderId)).limit(1);
+      if (riders.length > 0) {
+        activeRider = riders[0];
+      }
+    }
 
     emitToOrder(orderId, "delivery-update", {
       delivery: {
         orderId,
         status: nextDeliveryStatus,
-        currentLat: activeRider.latitude,
-        currentLng: activeRider.longitude,
+        currentLat: activeRider?.latitude ?? delList[0].currentLat ?? delList[0].restaurantLat,
+        currentLng: activeRider?.longitude ?? delList[0].currentLng ?? delList[0].restaurantLng,
         updatedAt: new Date().toISOString(),
       },
-      riderName: activeRider.name,
-      riderPhone: activeRider.phone,
+      status: nextDeliveryStatus,
+      riderName: activeRider?.name,
+      riderPhone: activeRider?.phone,
     });
 
     return res.status(200).json({ success: true, message: `Status updated to ${nextDeliveryStatus}` });
@@ -1416,13 +1492,13 @@ router.get("/rider/dashboard", requireAuth, async (req: any, res) => {
       fee: orderDeliveries.deliveryFee,
       updatedAt: orderDeliveries.updatedAt,
     })
-    .from(orderDeliveries)
-    .where(
-      and(
-        eq(orderDeliveries.riderId, user.id),
-        eq(orderDeliveries.status, "delivered")
-      )
-    );
+      .from(orderDeliveries)
+      .where(
+        and(
+          eq(orderDeliveries.riderId, user.id),
+          eq(orderDeliveries.status, "delivered")
+        )
+      );
 
     let todayEarnings = 0;
     let weekEarnings = 0;
@@ -1496,7 +1572,7 @@ router.post("/rider/toggle-status", requireAuth, async (req: any, res) => {
       return res.status(404).json({ message: "Rider not found" });
     }
     const currentStatus = riderList[0].status;
-    
+
     // Cannot toggle if busy
     if (currentStatus === "busy") {
       return res.status(400).json({ message: "Cannot change status while on a delivery" });
@@ -1575,8 +1651,8 @@ router.get("/rider/login-history", requireAuth, async (req: any, res) => {
       createdAt: orderDeliveries.createdAt,
       updatedAt: orderDeliveries.updatedAt,
     })
-    .from(orderDeliveries)
-    .where(eq(orderDeliveries.riderId, user.id));
+      .from(orderDeliveries)
+      .where(eq(orderDeliveries.riderId, user.id));
 
     // 3. Helper to generate calendar weeks in local time
     const now = new Date();

@@ -24,6 +24,8 @@ export const menuItems = pgTable("menu_items", {
   imageURL: text("image_url"),
   isVeg: boolean("is_veg").default(true),
   isAvailable: boolean("is_available").notNull().default(true),
+  pausedUntil: timestamp("paused_until"),
+  pauseReason: text("pause_reason"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

@@ -4,6 +4,7 @@ import {
   View,
   Text,
   TextInput,
+  type TextInputInstance,
   TouchableOpacity,
   ScrollView,
   Image,
@@ -48,7 +49,7 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [verifiedState, setVerifiedState] = useState<any>(null);
   const [cooldown, setCooldown] = useState(0);
 
-  const otpInputRef = useRef<TextInput>(null);
+  const otpInputRef = useRef<TextInputInstance>(null);
 
   useEffect(() => {
     let timer: any;

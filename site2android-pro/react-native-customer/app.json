@@ -38,7 +38,10 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow MyQuro to access your location to discover nearby restaurants and deliver food to your address."
         }
-      ]
+      ],
+      "expo-font",
+      "expo-secure-store",
+      "expo-video"
     ]
   }
 }

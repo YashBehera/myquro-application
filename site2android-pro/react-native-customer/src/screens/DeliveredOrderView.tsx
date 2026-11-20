@@ -41,8 +41,8 @@ interface DeliveredOrderViewProps {
 
 export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
   orderId,
-  restaurantName = 'Hotel Mayfair',
-  riderName = 'HARAPRASAD S',
+  restaurantName: rawRestaurantName,
+  riderName: rawRiderName,
   riderPhone,
   itemsCount = 1,
   deliveredTime,
@@ -55,6 +55,14 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
   const insets = useSafeAreaInsets();
   const [selectedRating, setSelectedRating] = useState<number>(0);
 
+  const restaurantName = (rawRestaurantName && typeof rawRestaurantName === 'string' && rawRestaurantName.trim())
+    ? rawRestaurantName.trim()
+    : 'Hotel Mayfair';
+
+  const riderName = (rawRiderName && typeof rawRiderName === 'string' && rawRiderName.trim())
+    ? rawRiderName.trim()
+    : 'HARAPRASAD S';
+
   // Format delivered time (e.g., 05:56 PM)
   const formatTime = (timeStr?: string) => {
     if (!timeStr) {
@@ -63,10 +71,10 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
     }
     try {
       const date = new Date(timeStr);
-      if (isNaN(date.getTime())) return timeStr;
+      if (isNaN(date.getTime())) return String(timeStr || '').toUpperCase();
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
     } catch {
-      return timeStr;
+      return String(timeStr || '').toUpperCase();
     }
   };
 
@@ -119,7 +127,7 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
           activeOpacity={0.8}
           onPress={() => {
             Alert.alert('Order Options', `Order #${orderId || 'Recent'}`, [
-              { text: 'View Invoice', onPress: () => {} },
+              { text: 'View Invoice', onPress: () => { } },
               { text: 'Get Help', onPress: onContactSupport },
               { text: 'Close', style: 'cancel' },
             ]);
@@ -170,7 +178,7 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
           {/* Delivered by text */}
           <View style={styles.deliveredByRow}>
             <Text style={styles.deliveredByLabel}>Delivered by </Text>
-            <Text style={styles.deliveredByRiderName}>{riderName.toUpperCase()}</Text>
+            <Text style={styles.deliveredByRiderName}>{(riderName || 'HARAPRASAD S').toUpperCase()}</Text>
           </View>
 
           {/* Question */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Svg, { Rect, Line, Text as SvgText, G } from 'react-native-svg';
+import { apiClient } from '../services/apiClient';
 
 const { width } = Dimensions.get('window');
 const CHART_WIDTH = width - 64;
@@ -97,6 +98,34 @@ export default function AnalyticsScreen() {
 
   const [timeRange, setTimeRange] = useState<TimeRange>('7d');
   const [selectedBarIndex, setSelectedBarIndex] = useState<number>(5); // Default to Saturday (Peak)
+
+  // Swiggy Operational Scorecard State
+  const [scorecard, setScorecard] = useState({
+    acceptanceRate: 98.4,
+    onTimeRate: 95.8,
+    lostSales: 0,
+    cancelledCount: 0,
+    totalOrders: 64,
+    period: 'Last 7 Days',
+  });
+
+  useEffect(() => {
+    const fetchScorecard = async () => {
+      try {
+        const restRes = await apiClient.get('/restaurants/my-restaurant');
+        const restId = restRes.data?.restaurant?.id;
+        if (restId) {
+          const res = await apiClient.get(`/restaurants/${restId}/scorecard`);
+          if (res.data?.scorecard) {
+            setScorecard(res.data.scorecard);
+          }
+        }
+      } catch (e) {
+        console.warn('Error fetching scorecard in analytics:', e);
+      }
+    };
+    fetchScorecard();
+  }, []);
 
   const activeBar = WEEKLY_DATA[selectedBarIndex];
   const maxRevenue = Math.max(...WEEKLY_DATA.map(d => d.revenue));
@@ -244,7 +273,97 @@ export default function AnalyticsScreen() {
             </View>
           </View>
 
-          {/* 3. REVENUE TREND BAR CHART */}
+          {/* 3. SWIGGY OPERATIONAL SCORECARD & LOST SALES */}
+          <View style={styles.scorecardContainer}>
+            <View style={styles.scorecardHeaderRow}>
+              <View style={styles.scorecardTitleBadge}>
+                <Ionicons name="shield-checkmark" size={16} color="#E8C547" />
+                <Text style={styles.scorecardTitleText}>Operational Scorecard</Text>
+              </View>
+              <View style={styles.partnerTierPill}>
+                <Text style={styles.partnerTierText}>Gold Partner</Text>
+              </View>
+            </View>
+            <Text style={styles.scorecardSubtext}>
+              Platform health, order acceptance reliability & lost revenue analysis ({scorecard.period})
+            </Text>
+
+            <View style={styles.scorecardGrid}>
+              {/* Metric 1: Acceptance Rate */}
+              <View style={styles.scorecardItem}>
+                <View style={styles.scorecardItemTop}>
+                  <Text style={styles.scorecardMetricLabel}>Acceptance Rate</Text>
+                  <Ionicons
+                    name={scorecard.acceptanceRate >= 95 ? "checkmark-circle" : "alert-circle"}
+                    size={14}
+                    color={scorecard.acceptanceRate >= 95 ? "#22C55E" : "#EAB308"}
+                  />
+                </View>
+                <Text style={[
+                  styles.scorecardMetricVal,
+                  { color: scorecard.acceptanceRate >= 95 ? "#22C55E" : "#EAB308" }
+                ]}>
+                  {scorecard.acceptanceRate}%
+                </Text>
+                <Text style={styles.scorecardTargetHint}>Target: &gt;98%</Text>
+              </View>
+
+              {/* Metric 2: Food Prep On-Time */}
+              <View style={styles.scorecardItem}>
+                <View style={styles.scorecardItemTop}>
+                  <Text style={styles.scorecardMetricLabel}>Food Prep On-Time</Text>
+                  <Ionicons name="timer-outline" size={14} color="#38BDF8" />
+                </View>
+                <Text style={[styles.scorecardMetricVal, { color: '#38BDF8' }]}>
+                  {scorecard.onTimeRate}%
+                </Text>
+                <Text style={styles.scorecardTargetHint}>Target: &gt;95%</Text>
+              </View>
+
+              {/* Metric 3: Lost Sales */}
+              <View style={[styles.scorecardItem, scorecard.lostSales > 0 && styles.scorecardItemAlert]}>
+                <View style={styles.scorecardItemTop}>
+                  <Text style={styles.scorecardMetricLabel}>Lost Sales</Text>
+                  <Ionicons
+                    name={scorecard.lostSales > 0 ? "trending-down" : "checkmark-circle"}
+                    size={14}
+                    color={scorecard.lostSales > 0 ? "#EF4444" : "#22C55E"}
+                  />
+                </View>
+                <Text style={[
+                  styles.scorecardMetricVal,
+                  { color: scorecard.lostSales > 0 ? "#EF4444" : "#22C55E" }
+                ]}>
+                  ₹{scorecard.lostSales}
+                </Text>
+                <Text style={styles.scorecardTargetHint}>
+                  {scorecard.cancelledCount} rejected {scorecard.cancelledCount === 1 ? 'order' : 'orders'}
+                </Text>
+              </View>
+
+              {/* Metric 4: Total Volume */}
+              <View style={styles.scorecardItem}>
+                <View style={styles.scorecardItemTop}>
+                  <Text style={styles.scorecardMetricLabel}>Total Evaluated</Text>
+                  <Ionicons name="layers-outline" size={14} color="#E8C547" />
+                </View>
+                <Text style={[styles.scorecardMetricVal, { color: '#FFFFFF' }]}>
+                  {scorecard.totalOrders}
+                </Text>
+                <Text style={styles.scorecardTargetHint}>Orders tracked</Text>
+              </View>
+            </View>
+
+            {/* Swiggy Operational Advice Banner */}
+            <View style={styles.adviceBanner}>
+              <Ionicons name="bulb-outline" size={16} color="#E8C547" />
+              <Text style={styles.adviceBannerText}>
+                Tip: Use 1-Tap "2 Hours Stock Pause" when gravy is simmering instead of rejecting whole orders to keep Lost Sales at ₹0.
+              </Text>
+            </View>
+          </View>
+
+          {/* 4. REVENUE TREND BAR CHART */}
           <View style={styles.chartCard}>
             <View style={styles.chartHeaderRow}>
               <View>
@@ -967,5 +1086,110 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Regular',
     fontSize: 10.5,
     color: '#8E8E8E',
+  },
+
+  /* SWIGGY OPERATIONAL SCORECARD STYLES */
+  scorecardContainer: {
+    backgroundColor: '#161616',
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+  },
+  scorecardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  scorecardTitleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  scorecardTitleText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginLeft: 6,
+  },
+  partnerTierPill: {
+    backgroundColor: 'rgba(232, 197, 71, 0.15)',
+    borderWidth: 1,
+    borderColor: '#E8C547',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  partnerTierText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#E8C547',
+  },
+  scorecardSubtext: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#8E8E8E',
+    marginBottom: 14,
+  },
+  scorecardGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14,
+  },
+  scorecardItem: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#1E1E1E',
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    borderRadius: 14,
+    padding: 12,
+  },
+  scorecardItemAlert: {
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+  },
+  scorecardItemTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  scorecardMetricLabel: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11,
+    color: '#8E8E8E',
+  },
+  scorecardMetricVal: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  scorecardTargetHint: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 10.5,
+    color: '#666666',
+  },
+  adviceBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(232, 197, 71, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(232, 197, 71, 0.25)',
+    borderRadius: 12,
+    padding: 10,
+  },
+  adviceBannerText: {
+    flex: 1,
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#EAE1D4',
+    marginLeft: 8,
+    lineHeight: 16,
   },
 });

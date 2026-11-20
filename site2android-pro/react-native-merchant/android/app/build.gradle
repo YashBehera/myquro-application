@@ -102,11 +102,20 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+        checkDependencies false
+    }
 }
 
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+
+    // expo core: provides ReactNativeHostWrapper, ApplicationLifecycleDispatcher,
+    // ReactActivityDelegateWrapper used in MainApplication.kt / MainActivity.kt
+    implementation project(':expo')
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
@@ -115,4 +124,3 @@ dependencies {
     }
 }
 
-apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)

@@ -15,6 +15,7 @@ import {
   Text,
   TextInput,
   ScrollView,
+  type ScrollViewInstance,
   TouchableOpacity,
   Image,
   Dimensions,
@@ -317,7 +318,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
   const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
   const [modalQuantity, setModalQuantity] = useState<number>(1);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
 
   // Sync Cart from global ViewModel
   useEffect(() => {

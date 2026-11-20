@@ -41,6 +41,8 @@ export interface Dish {
   variants: Variant[];
   customizationGroups: CustomizationGroup[];
   isAvailable: boolean;
+  pausedUntil?: string | null;
+  pauseReason?: string | null;
   hasSchedule?: boolean;
   scheduleStartTime?: string; // e.g. "07:00"
   scheduleEndTime?: string; // e.g. "11:00"

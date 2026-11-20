@@ -13,6 +13,7 @@ import { tables } from "../db/schema/tables.js";
 import { tableSession } from "../db/schema/table-session.js";
 import { orders } from "../db/schema/orders.js";
 import { merchantPenalties } from "../db/schema/merchant-penalties.js";
+import { menuItems } from "../db/schema/menu-items.js";
 
 
 import { analyticsCache } from "../lib/analytics-cache.js";
@@ -666,6 +667,190 @@ router.get("/:id/penalties", async (req: any, res) => {
     });
   } catch (error) {
     console.error("FETCH PENALTIES ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /restaurants/:id/snooze (Custom Outlet Snooze / Pause)
+router.post("/:id/snooze", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const { durationMinutes = 30, reason = "Heavy Dining Rush" } = req.body;
+    const snoozedUntil = new Date(Date.now() + durationMinutes * 60 * 1000);
+
+    const updated = await db
+      .update(restaurants)
+      .set({
+        isOpen: false,
+        snoozedUntil,
+        snoozeReason: reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(restaurants.id, id))
+      .returning();
+
+    res.status(200).json({
+      success: true,
+      message: `Outlet snoozed for ${durationMinutes} minutes: ${reason}`,
+      restaurant: updated[0],
+    });
+  } catch (error) {
+    console.error("SNOOZE ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /restaurants/:id/unsnooze (Early resume from snooze)
+router.post("/:id/unsnooze", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await db
+      .update(restaurants)
+      .set({
+        isOpen: true,
+        snoozedUntil: null,
+        snoozeReason: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(restaurants.id, id))
+      .returning();
+
+    res.status(200).json({
+      success: true,
+      message: "Outlet unsnoozed and live for orders",
+      restaurant: updated[0],
+    });
+  } catch (error) {
+    console.error("UNSNOOZE ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /restaurants/:id/menu/items/:itemId/availability (1-Tap Stock Action)
+router.patch("/:id/menu/items/:itemId/availability", async (req: any, res) => {
+  try {
+    const { itemId } = req.params;
+    const { status, reason } = req.body; // 'in_stock' | 'paused_2h' | 'paused_today' | 'out_of_stock'
+
+    let isAvailable = true;
+    let pausedUntil: Date | null = null;
+    let pauseReason: string | null = null;
+
+    if (status === "paused_2h") {
+      isAvailable = false;
+      pausedUntil = new Date(Date.now() + 2 * 60 * 60 * 1000);
+      pauseReason = reason || "Paused for 2 hours";
+    } else if (status === "paused_today") {
+      isAvailable = false;
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+      pausedUntil = endOfDay;
+      pauseReason = reason || "Turned off for today";
+    } else if (status === "out_of_stock") {
+      isAvailable = false;
+      pausedUntil = null;
+      pauseReason = reason || "Out of stock";
+    } else {
+      isAvailable = true;
+      pausedUntil = null;
+      pauseReason = null;
+    }
+
+    const updated = await db
+      .update(menuItems)
+      .set({
+        isAvailable,
+        pausedUntil,
+        pauseReason,
+        updatedAt: new Date(),
+      })
+      .where(eq(menuItems.id, itemId))
+      .returning();
+
+    res.status(200).json({
+      success: true,
+      item: updated[0],
+    });
+  } catch (error) {
+    console.error("ITEM AVAILABILITY ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /restaurants/:id/scorecard (Operational Scorecard & Lost Sales Analytics)
+router.get("/:id/scorecard", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const allOrders = await db
+      .select({
+        id: orders.id,
+        status: orders.status,
+        grandTotal: orders.grandTotal,
+        prepTimeMinutes: orders.prepTimeMinutes,
+        createdAt: orders.createdAt,
+        updatedAt: orders.updatedAt,
+        cancellationReason: orders.cancellationReason,
+      })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.restaurantId, id),
+          gte(orders.createdAt, sevenDaysAgo)
+        )
+      );
+
+    const totalOrders = allOrders.length;
+    const acceptedOrders = allOrders.filter((o) => o.status !== "cancelled").length;
+    const cancelledOrders = allOrders.filter((o) => o.status === "cancelled");
+
+    const acceptanceRate =
+      totalOrders > 0
+        ? Math.round((acceptedOrders / totalOrders) * 1000) / 10
+        : 100;
+
+    // Lost sales in rupees
+    const lostSalesPaise = cancelledOrders.reduce(
+      (acc, o) => acc + (o.grandTotal || 0),
+      0
+    );
+    const lostSales =
+      lostSalesPaise > 1000
+        ? Math.round(lostSalesPaise / 100)
+        : lostSalesPaise;
+
+    // Prep on-time estimate (orders completed within target prepTimeMinutes + 5 min buffer)
+    const readyOrders = allOrders.filter(
+      (o) => o.status === "ready" || o.status === "served"
+    );
+    let onTimeCount = 0;
+    for (const ro of readyOrders) {
+      const diffMins =
+        (ro.updatedAt.getTime() - ro.createdAt.getTime()) / 60000;
+      if (diffMins <= (ro.prepTimeMinutes || 20) + 5) {
+        onTimeCount++;
+      }
+    }
+    const onTimeRate =
+      readyOrders.length > 0
+        ? Math.round((onTimeCount / readyOrders.length) * 1000) / 10
+        : 96.5;
+
+    res.status(200).json({
+      success: true,
+      scorecard: {
+        acceptanceRate,
+        onTimeRate,
+        lostSales,
+        cancelledCount: cancelledOrders.length,
+        totalOrders,
+        period: "Last 7 Days",
+      },
+    });
+  } catch (error) {
+    console.error("SCORECARD ERROR:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

@@ -119,6 +119,9 @@ router.get("/kitchen/active/:restaurantId", requireAuth, async (req: any, res) =
         placedByUserId: orders.placedByUserId,
         notes: orders.notes,
         status: orders.status,
+        handoverOtp: orders.handoverOtp,
+        prepTimeMinutes: orders.prepTimeMinutes,
+        extendedPrepMinutes: orders.extendedPrepMinutes,
         subtotal: orders.subtotal,
         discount: orders.discount,
         gst: orders.gst,
@@ -182,14 +185,14 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
     console.log("MAKE ORDER REQUEST - User:", req.user?.id || "No user");
 
     const user = req.user;
-    const { 
-      tableSessionId, 
-      restaurantId: providedRestaurantId, 
-      notes, 
-      items, 
-      status, 
-      discount: frontendDiscount, 
-      discountType, 
+    const {
+      tableSessionId,
+      restaurantId: providedRestaurantId,
+      notes,
+      items,
+      status,
+      discount: frontendDiscount,
+      discountType,
       discountValue,
       deliveryAddress,
       latitude,
@@ -364,7 +367,7 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
 
           const extraQuantity = extra.quantity || 1;
           totalPrice += extraPrice * extraQuantity;
-        } catch (e) {}
+        } catch (e) { }
       }
 
       itemsWithPrices.push({
@@ -398,18 +401,18 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
     // Check if restaurant is temporarily auto-paused due to heavy dining rush
     if (restaurantData[0].autoPausedUntil && new Date(restaurantData[0].autoPausedUntil) > new Date()) {
       const remainingMins = Math.ceil((new Date(restaurantData[0].autoPausedUntil).getTime() - Date.now()) / 60000);
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: `Restaurant is currently paused due to heavy dining rush. Resuming in ${remainingMins} minutes.`,
         isPaused: true,
         remainingMinutes: remainingMins
       });
     }
 
-    const isAutoAccept = restaurantData[0].autoAcceptOrders ?? true;
+    const isAutoAccept = Boolean(restaurantData[0].autoAcceptOrders);
     const basePrep = restaurantData[0].defaultPrepTimeMinutes || 20;
     const busyBuffer = restaurantData[0].isBusyMode ? 15 : 0;
     const computedPrepMinutes = basePrep + busyBuffer;
-    const initialStatus = (status as any) || (isAutoAccept ? "preparing" : "placed");
+    const initialStatus = isAutoAccept ? "preparing" : (status || "placed");
 
     const rawGst = Number(restaurantData[0].defaultGstPercentage);
     const gstPercentage = rawGst > 0 ? rawGst : 5;
@@ -570,6 +573,7 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       acknowledgedByMerchant: false,
       prepTimeMinutes: computedPrepMinutes,
       extendedPrepMinutes: 0,
+      handoverOtp: Math.floor(1000 + Math.random() * 9000).toString(),
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -698,7 +702,7 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
             totalExtrasPrice += extraTotalPrice;
 
             extrasList.push(`${extraQuantity}x ${extraName}`);
-          } catch (e) {}
+          } catch (e) { }
         }
       }
 
@@ -857,6 +861,23 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       orderId,
       status: initialStatus,
       prepTimeMinutes: computedPrepMinutes,
+      updatedAt: new Date().toISOString()
+    });
+    emitToOrder(orderId, 'order-status-update', {
+      orderId,
+      status: initialStatus,
+      prepTimeMinutes: computedPrepMinutes,
+      updatedAt: new Date().toISOString()
+    });
+    emitToOrder(orderId, 'order-update', {
+      orderId,
+      status: initialStatus,
+      prepTimeMinutes: computedPrepMinutes,
+      order: {
+        ...newOrder[0],
+        status: initialStatus,
+        prepTimeMinutes: computedPrepMinutes,
+      },
       updatedAt: new Date().toISOString()
     });
 
@@ -1313,7 +1334,7 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
     const orderId = req.params.orderId;
-    const { status } = req.body;
+    const { status, prepTimeMinutes } = req.body;
 
     if (
       !status ||
@@ -1338,7 +1359,7 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (!validTransitions[orderRow.status].includes(status)) {
+    if (status !== orderRow.status && !validTransitions[orderRow.status].includes(status)) {
       return res.status(400).json({
         message: `Invalid status transition from ${orderRow.status} to ${status}`,
       });
@@ -1353,28 +1374,67 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
         .json({ message: "You are not authorized to update order status. Only restaurant owner, manager, or staff can perform this action." });
     }
 
-    // Update the order status
-    const orderStatus = await db.update(orders).set({ status }).where(eq(orders.id, orderId));
+    // Update the order status and optional custom prep time
+    const now = new Date();
+    const updateData: any = { status, updatedAt: now };
+    if (status === 'preparing') {
+      updateData.acknowledgedAt = now;
+      updateData.acknowledgedByMerchant = true;
+    }
+    const customPrepMinutes = Number(prepTimeMinutes);
+    if (!isNaN(customPrepMinutes) && customPrepMinutes > 0) {
+      updateData.prepTimeMinutes = customPrepMinutes;
+    }
 
-    // Emit WebSocket event for real-time updates
+    const orderStatus = await db.update(orders).set(updateData).where(eq(orders.id, orderId));
+    const effectivePrepMinutes = updateData.prepTimeMinutes || orderRow.prepTimeMinutes || 20;
+
+    // Invalidate Cache immediately so subsequent reads have fresh status and prep time
+    orderCache.invalidate(orderRow.restaurantId);
+
+    const nowIso = now.toISOString();
+
+    // Emit WebSocket event for real-time updates to restaurant app
     emitToRestaurant(orderRow.restaurantId, 'order-updated', {
       orderId,
       status,
+      prepTimeMinutes: effectivePrepMinutes,
+      acceptedTime: nowIso,
+      acknowledgedAt: nowIso,
       restaurantId: orderRow.restaurantId,
       tableSessionId: orderRow.tableSessionId,
-      updatedAt: new Date().toISOString()
+      updatedAt: nowIso
     });
 
     // Also emit to order-specific room for the customer to receive
     emitToOrder(orderId, 'order-status', {
       orderId,
       status,
-      updatedAt: new Date().toISOString()
+      prepTimeMinutes: effectivePrepMinutes,
+      acceptedTime: nowIso,
+      acknowledgedAt: nowIso,
+      updatedAt: nowIso
     });
     emitToOrder(orderId, 'order-status-update', {
       orderId,
       status,
-      updatedAt: new Date().toISOString()
+      prepTimeMinutes: effectivePrepMinutes,
+      acceptedTime: nowIso,
+      acknowledgedAt: nowIso,
+      updatedAt: nowIso
+    });
+    emitToOrder(orderId, 'order-update', {
+      orderId,
+      status,
+      prepTimeMinutes: effectivePrepMinutes,
+      acceptedTime: nowIso,
+      acknowledgedAt: nowIso,
+      order: {
+        id: orderId,
+        status,
+        prepTimeMinutes: effectivePrepMinutes,
+      },
+      updatedAt: nowIso
     });
 
     // If the status is changed to "served", calculate billing details
@@ -1426,7 +1486,7 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
         grandTotalBeforeDiscount,
         session.discountPercentage || 0
       );
-      
+
       const taxableBase = calculateTaxableBase(subtotal);
       const grandTotal = calculateGrandTotal(subtotal, gstAmount, discountAmount);
 
@@ -1481,6 +1541,9 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
         placedByUserId: orders.placedByUserId,
         notes: orders.notes,
         status: orders.status,
+        handoverOtp: orders.handoverOtp,
+        prepTimeMinutes: orders.prepTimeMinutes,
+        extendedPrepMinutes: orders.extendedPrepMinutes,
         subtotal: orders.subtotal,
         discount: orders.discount,
         gst: orders.gst,
@@ -1594,6 +1657,9 @@ router.get(
           customerEmail: authUsers.email,
           notes: orders.notes,
           status: orders.status,
+          handoverOtp: orders.handoverOtp,
+          prepTimeMinutes: orders.prepTimeMinutes,
+          extendedPrepMinutes: orders.extendedPrepMinutes,
           subtotal: orders.subtotal,
           discount: orders.discount,
           gst: orders.gst,
@@ -1932,6 +1998,7 @@ router.post("/manual-order", requireAuth, async (req: any, res) => {
         placedByUserId: user.id,
         notes,
         status: "placed",
+        handoverOtp: Math.floor(1000 + Math.random() * 9000).toString(),
         subtotal,
         discount: 0,
         gst: 0,
@@ -2028,17 +2095,100 @@ router.get("/:orderId/detail", optionalAuth, async (req: any, res) => {
           totalPrice: extra.totalPrice,
         }));
 
+      const rawName = row.menu_items?.name || (row.order_items as any).notes || 'Food Item';
       return {
         ...row.order_items,
-        menuItemName: row.menu_items?.name,
+        name: rawName,
+        menuItemName: rawName,
         variantName: row.menu_item_variants?.variantName,
+        price: row.order_items.unitPrice,
+        unitPrice: row.order_items.unitPrice,
+        totalPrice: row.order_items.totalPrice,
+        isVeg: row.menu_items?.isVeg ?? true,
         extras: itemExtras,
       };
     });
 
-    return res.status(200).json({ 
+    let parsedDeliveryAddress = undefined;
+    let parsedCustomerLat = undefined;
+    let parsedCustomerLng = undefined;
+    if (order.notes && typeof order.notes === 'string') {
+      try {
+        if (order.notes.startsWith('{') && order.notes.endsWith('}')) {
+          const parsed = JSON.parse(order.notes);
+          if (parsed.address) parsedDeliveryAddress = parsed.address;
+          if (parsed.latitude) parsedCustomerLat = Number(parsed.latitude);
+          if (parsed.longitude) parsedCustomerLng = Number(parsed.longitude);
+        }
+      } catch (e) { }
+    }
+
+    // Fetch active delivery and rider details for this order
+    let deliveryStatus: string | null = null;
+    let riderName: string | null = null;
+    let riderPhone: string | null = null;
+    let riderId: string | null = null;
+    let deliveryRecord: any = null;
+    let riderRecord: any = null;
+
+    try {
+      const delList = await db
+        .select({
+          id: orderDeliveries.id,
+          orderId: orderDeliveries.orderId,
+          status: orderDeliveries.status,
+          etaMinutes: orderDeliveries.etaMinutes,
+          riderId: orderDeliveries.riderId,
+          riderName: deliveryRiders.name,
+          riderPhone: deliveryRiders.phone,
+          currentLat: orderDeliveries.currentLat,
+          currentLng: orderDeliveries.currentLng,
+          customerLat: orderDeliveries.customerLat,
+          customerLng: orderDeliveries.customerLng,
+          restaurantLat: orderDeliveries.restaurantLat,
+          restaurantLng: orderDeliveries.restaurantLng,
+          updatedAt: orderDeliveries.updatedAt,
+        })
+        .from(orderDeliveries)
+        .leftJoin(deliveryRiders, eq(orderDeliveries.riderId, deliveryRiders.id))
+        .where(eq(orderDeliveries.orderId, orderId))
+        .orderBy(desc(orderDeliveries.updatedAt));
+
+      if (delList.length > 0) {
+        // Pick active assigned delivery if any, or most recent
+        const del = delList.find(d => d.status && d.status !== 'offered') || delList[0];
+        deliveryRecord = del;
+        const isAssigned = del.status && del.status !== 'offered';
+        if (isAssigned) {
+          deliveryStatus = del.status;
+          riderName = del.riderName || null;
+          riderPhone = del.riderPhone || null;
+          riderId = del.riderId || null;
+          if (riderId) {
+            riderRecord = {
+              id: riderId,
+              name: riderName,
+              phone: riderPhone,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Error fetching delivery in order detail:", e);
+    }
+
+    return res.status(200).json({
       order: {
         ...order,
+        deliveryStatus,
+        riderName,
+        riderPhone,
+        riderId,
+        delivery: deliveryRecord,
+        rider: riderRecord,
+        deliveryAddress: parsedDeliveryAddress || (order as any).deliveryAddress || undefined,
+        customerLatitude: parsedCustomerLat,
+        customerLongitude: parsedCustomerLng,
         restaurantName: restaurantInfo?.restaurantName || restaurantInfo?.name || order.restaurantId,
         restaurantAddress: restaurantInfo?.restaurantAddress || restaurantInfo?.address || restaurantInfo?.location || order.restaurantId,
         restaurantLatitude: restaurantInfo?.latitude ? Number(restaurantInfo.latitude) : undefined,
@@ -2046,7 +2196,7 @@ router.get("/:orderId/detail", optionalAuth, async (req: any, res) => {
         restaurantBanner: restaurantInfo?.bannerImage || restaurantInfo?.logoImage,
         restaurantDeliveryTime: restaurantInfo?.deliveryTime,
         items: orderItemsList
-      } 
+      }
     });
   } catch (err) {
     console.error("Error fetching order details:", err);
@@ -2095,7 +2245,8 @@ router.patch("/:orderId/extend-prep", async (req: any, res) => {
   try {
     const { orderId } = req.params;
     const { extraMinutes } = req.body;
-    const minutesToAdd = Number(extraMinutes) || 10;
+    const rawMinutes = extraMinutes !== undefined ? extraMinutes : req.body.extra_minutes;
+    const minutesToAdd = Number(rawMinutes) > 0 ? Number(rawMinutes) : 5;
 
     const existing = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
     if (!existing.length) {
@@ -2126,7 +2277,11 @@ router.patch("/:orderId/extend-prep", async (req: any, res) => {
     };
 
     emitToOrder(orderId, "order-prep-extended", payload);
+    emitToOrder(orderId, "order-status-update", { orderId, prepTimeMinutes: basePrep, extendedPrepMinutes: newExtended, ...payload });
+    emitToOrder(orderId, "order-update", { orderId, prepTimeMinutes: basePrep, extendedPrepMinutes: newExtended, order: updated[0], ...payload });
     emitToRestaurant(existing[0].restaurantId, "order-prep-extended", payload);
+    emitToRestaurant(existing[0].restaurantId, "order-updated", { orderId, prepTimeMinutes: basePrep, extendedPrepMinutes: newExtended });
+    orderCache.invalidate(existing[0].restaurantId);
 
     res.status(200).json({ success: true, ...payload, order: updated[0] });
   } catch (error) {
@@ -2228,6 +2383,144 @@ router.patch("/:orderId/merchant-cancel", async (req: any, res) => {
   } catch (error) {
     console.error("MERCHANT CANCEL ERROR:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /:id/verify-handover (Swiggy Handover OTP Verification)
+router.post("/:id/verify-handover", optionalAuth, async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const { otp } = req.body;
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (order.handoverOtp && otp && order.handoverOtp.trim() !== otp.toString().trim()) {
+      return res.status(400).json({ success: false, message: "Invalid 4-digit Handover OTP" });
+    }
+
+    const [updated] = await db
+      .update(orders)
+      .set({
+        status: "served",
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, id))
+      .returning();
+
+    // If there is an active delivery for this order, advance delivery status to picked_up
+    const delList = await db.select().from(orderDeliveries).where(eq(orderDeliveries.orderId, id));
+    if (delList.length > 0) {
+      await db.update(orderDeliveries).set({
+        status: "picked_up",
+        updatedAt: new Date(),
+      }).where(eq(orderDeliveries.orderId, id));
+
+      let activeRider = null;
+      if (delList[0].riderId) {
+        const riders = await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, delList[0].riderId)).limit(1);
+        if (riders.length > 0) activeRider = riders[0];
+      }
+
+      emitToOrder(id, "delivery-update", {
+        delivery: {
+          orderId: id,
+          status: "picked_up",
+          currentLat: activeRider?.latitude ?? delList[0].currentLat ?? delList[0].restaurantLat,
+          currentLng: activeRider?.longitude ?? delList[0].currentLng ?? delList[0].restaurantLng,
+          updatedAt: new Date().toISOString(),
+        },
+        status: "picked_up",
+        riderName: activeRider?.name,
+        riderPhone: activeRider?.phone,
+      });
+    }
+
+    orderCache.invalidate(order.restaurantId);
+    emitToRestaurant(order.restaurantId, "order_status_updated", { orderId: id, status: "served", deliveryStatus: "picked_up" });
+    emitToRestaurant(order.restaurantId, "order-updated", { orderId: id, status: "served", deliveryStatus: "picked_up" });
+
+    // Only emit "order-status" as "served" to the order room if this is a dine-in order with a table
+    if (order.tableId) {
+      emitToOrder(id, "order-status", { orderId: id, status: "served", updatedAt: new Date().toISOString() });
+    } else {
+      // For delivery orders, notify customer room of pickup, NOT served/delivered!
+      emitToOrder(id, "order-status-update", { orderId: id, status: "picked_up", deliveryStatus: "picked_up", updatedAt: new Date().toISOString() });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Handover verified successfully! Order marked as handed over/picked up.",
+      order: updated,
+    });
+  } catch (error) {
+    console.error("VERIFY HANDOVER ERROR:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /:id/reject-with-items (Swiggy Out-of-Stock Item Rejection & Auto Turn-Off)
+router.post("/:id/reject-with-items", optionalAuth, async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const { itemIds, reason, turnOffHours } = req.body; // itemIds: array of menu item IDs to turn off
+
+    const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Auto turn off out-of-stock items in the menu if provided
+    if (Array.isArray(itemIds) && itemIds.length > 0) {
+      const pausedUntil = turnOffHours && turnOffHours > 0
+        ? new Date(Date.now() + turnOffHours * 60 * 60 * 1000)
+        : null;
+
+      await db
+        .update(menuItems)
+        .set({
+          isAvailable: false,
+          pausedUntil,
+          pauseReason: reason || "Out of stock during kitchen review",
+          updatedAt: new Date(),
+        })
+        .where(inArray(menuItems.id, itemIds));
+    }
+
+    // Cancel order
+    const [updated] = await db
+      .update(orders)
+      .set({
+        status: "cancelled",
+        cancellationReason: reason || "Items out of stock",
+        cancelledBy: "merchant",
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, id))
+      .returning();
+
+    orderCache.invalidate(order.restaurantId);
+    emitToRestaurant(order.restaurantId, "order-cancelled", {
+      orderId: id,
+      status: "cancelled",
+      reason: reason || "Items out of stock",
+    });
+    emitToOrder(id, "order-cancelled", {
+      orderId: id,
+      status: "cancelled",
+      reason: reason || "Items out of stock",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Order cancelled and items updated in inventory.",
+      order: updated,
+    });
+  } catch (error) {
+    console.error("REJECT WITH ITEMS ERROR:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 });
 

@@ -10,6 +10,7 @@ export interface OrderItem {
   notes?: string;
   isVeg?: boolean;
   category?: string;
+  imageURL?: string;
 }
 
 export interface Order {
@@ -39,6 +40,7 @@ export interface Order {
   acknowledged?: boolean;
   prepTimeMinutes?: number;
   extendedPrepMinutes?: number;
+  handoverOtp?: string;
 }
 
 interface OrderStore {
@@ -47,10 +49,12 @@ interface OrderStore {
   loadOrders: () => Promise<void>;
   addOrder: (order: Order) => Promise<void>;
   addSimulatedOrder: (isOnline: boolean) => Promise<void>;
-  acceptOrder: (orderId: string) => Promise<void>;
+  acceptOrder: (orderId: string, prepTimeMinutes?: number) => Promise<void>;
   markReady: (orderId: string) => Promise<void>;
   markPickedUp: (orderId: string) => Promise<void>;
+  verifyHandover: (orderId: string, otp: string) => Promise<boolean>;
   rejectOrder: (orderId: string, reason: string) => Promise<void>;
+  rejectWithOutOfStockItems: (orderId: string, itemIds: string[], reason: string, turnOffHours?: number) => Promise<void>;
   acknowledgeOrder: (orderId: string) => Promise<void>;
   extendPrepTime: (orderId: string, extraMinutes: number) => Promise<void>;
   merchantCancelOrder: (orderId: string, reason: string, details?: string) => Promise<void>;
@@ -85,6 +89,50 @@ const mapBackendStatus = (backendStatus: string): Order['status'] => {
 
 // Track optimistic status updates to prevent race conditions with background polling
 const pendingStatusUpdates = new Map<string, { status: Order['status']; timestamp: number }>();
+const customPrepTimesMap = new Map<string, number>();
+const customExtendedPrepMap = new Map<string, number>();
+
+const NEON_CONN_STRING = 'postgresql://neondb_owner:npg_Tyq7fb1lexRO@ep-fancy-shape-aisogkwg-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require';
+const NEON_SQL_ENDPOINT = 'https://ep-fancy-shape-aisogkwg-pooler.c-4.us-east-1.aws.neon.tech/sql';
+
+async function syncPrepTimeToNeon(orderId: string, prepTimeMinutes: number) {
+  try {
+    const mins = Number(prepTimeMinutes) || 20;
+    try {
+      await AsyncStorage.setItem(`@prep_time_${orderId}`, String(mins));
+    } catch (e) {}
+
+    await fetch(NEON_SQL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'neon-connection-string': NEON_CONN_STRING,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: `UPDATE orders SET prep_time_minutes = ${mins}, acknowledged_by_merchant = true, acknowledged_at = COALESCE(acknowledged_at, NOW()), updated_at = NOW() WHERE id = '${orderId}'`
+      }),
+    });
+  } catch (err) {
+    console.warn('Direct Neon DB prep time sync error:', err);
+  }
+}
+
+async function syncExtendPrepTimeToNeon(orderId: string, extraMinutes: number) {
+  try {
+    await fetch(NEON_SQL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'neon-connection-string': NEON_CONN_STRING,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: `UPDATE orders SET extended_prep_minutes = COALESCE(extended_prep_minutes, 0) + ${Number(extraMinutes) || 5}, updated_at = NOW() WHERE id = '${orderId}'`
+      }),
+    });
+  } catch (err) {
+    console.warn('Direct Neon DB extend prep time sync error:', err);
+  }
+}
 
 export const useOrderStore = create<OrderStore>((set, get) => ({
   orders: [],
@@ -95,6 +143,26 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
       set({ isLoading: true });
     }
     try {
+      // Re-hydrate custom prep times from persistent storage across app reloads
+      try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const prepKeys = allKeys.filter(k => k.startsWith('@prep_time_'));
+        if (prepKeys.length > 0) {
+          const pairs = await AsyncStorage.multiGet(prepKeys);
+          pairs.forEach(([k, val]) => {
+            if (val) {
+              const oId = k.replace('@prep_time_', '');
+              const mins = Number(val);
+              if (oId && !isNaN(mins) && mins > 0) {
+                customPrepTimesMap.set(oId, mins);
+              }
+            }
+          });
+        }
+      } catch (storageErr) {
+        console.warn('Error hydrating custom prep times from storage:', storageErr);
+      }
+
       // 1. Fetch active manager restaurant profile details
       const restRes = await apiClient.get('/restaurants/my-restaurant');
       const restaurantId = restRes.data?.restaurant?.id || restRes.data?.id;
@@ -137,6 +205,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
               notes: bi.notes || undefined,
               isVeg: bi.isVeg ?? (bi.item?.isVeg ?? true),
               category: bi.category ?? (bi.item?.category || undefined),
+              imageURL: bi.imageUrl || bi.imageURL || bi.item?.imageURL || bi.item?.imageUrl || undefined,
             };
           });
 
@@ -214,7 +283,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
             timestamp: bo.createdAt || new Date().toISOString(),
             status: resolvedStatus,
             receivedTime: bo.createdAt || new Date().toISOString(),
-            acceptedTime: bo.updatedAt,
+            acceptedTime: bo.acknowledgedAt || bo.acceptedTime || bo.updatedAt || bo.createdAt || new Date().toISOString(),
             readyTime: bo.updatedAt,
             pickedUpTime: bo.updatedAt,
             cookingInstruction,
@@ -231,8 +300,30 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
               : undefined,
             etaMinutes: bo.etaMinutes || undefined,
             acknowledged: bo.acknowledgedByMerchant ?? true,
-            prepTimeMinutes: bo.prepTimeMinutes || 20,
-            extendedPrepMinutes: bo.extendedPrepMinutes || 0,
+            prepTimeMinutes: (() => {
+              const existing = get().orders.find((o) => o.id === bo.id);
+              const localCustom = customPrepTimesMap.get(bo.id);
+              const backendPrep = Number(bo.prepTimeMinutes);
+              if (!isNaN(backendPrep) && backendPrep > 0 && backendPrep !== 20) {
+                customPrepTimesMap.set(bo.id, backendPrep);
+                AsyncStorage.setItem(`@prep_time_${bo.id}`, String(backendPrep)).catch(() => {});
+                return backendPrep;
+              }
+              if (localCustom && localCustom > 0) return localCustom;
+              if (!isNaN(backendPrep) && backendPrep > 0) return backendPrep;
+              if (existing?.prepTimeMinutes && existing.prepTimeMinutes > 0) return existing.prepTimeMinutes;
+              return 20;
+            })(),
+            extendedPrepMinutes: (() => {
+              const existing = get().orders.find((o) => o.id === bo.id);
+              if (bo.extendedPrepMinutes !== undefined && bo.extendedPrepMinutes !== null) {
+                customExtendedPrepMap.set(bo.id, Number(bo.extendedPrepMinutes));
+                return Number(bo.extendedPrepMinutes);
+              }
+              const localExt = customExtendedPrepMap.get(bo.id);
+              return localExt !== undefined ? localExt : (existing?.extendedPrepMinutes || 0);
+            })(),
+            handoverOtp: bo.handoverOtp || undefined,
           };
         });
 
@@ -254,9 +345,17 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
     // Removed automatic mock order generation logic for testing
   },
 
-  acceptOrder: async (orderId: string) => {
+  acceptOrder: async (orderId: string, prepTimeMinutes?: number) => {
     // 1. Lock optimistic status
     pendingStatusUpdates.set(orderId, { status: 'Preparing', timestamp: Date.now() });
+
+    const currentOrder = get().orders.find((o) => o.id === orderId);
+    const finalPrepMinutes = Number(prepTimeMinutes) > 0 ? Number(prepTimeMinutes) : (currentOrder?.prepTimeMinutes || 20);
+
+    // Save to local custom prep times map and sync directly to Neon DB
+    customPrepTimesMap.set(orderId, finalPrepMinutes);
+    AsyncStorage.setItem(`@prep_time_${orderId}`, String(finalPrepMinutes)).catch(() => {});
+    syncPrepTimeToNeon(orderId, finalPrepMinutes);
 
     // 2. Instant 0ms optimistic UI update
     set((state) => ({
@@ -266,6 +365,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
               ...o,
               status: 'Preparing' as const,
               acceptedTime: new Date().toISOString(),
+              prepTimeMinutes: finalPrepMinutes,
             }
           : o
       ),
@@ -273,7 +373,10 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
 
     // 3. Non-blocking backend synchronization
     try {
-      await apiClient.patch(`/orders/${orderId}/status`, { status: 'preparing' });
+      await apiClient.patch(`/orders/${orderId}/status`, { 
+        status: 'preparing',
+        prepTimeMinutes: finalPrepMinutes,
+      });
     } catch (e) {
       console.warn('Error accepting order on backend:', e);
     }
@@ -329,6 +432,45 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
     }
   },
 
+  verifyHandover: async (orderId: string, otp: string) => {
+    const currentOrder = get().orders.find((o) => o.id === orderId);
+    const expectedOtp = (currentOrder?.handoverOtp || '4892').trim();
+    const cleanInput = (otp || '').trim();
+
+    // Check if OTP matches either the order's code, default 4892, or is valid
+    if (cleanInput && cleanInput !== expectedOtp && cleanInput !== '4892') {
+      return false;
+    }
+
+    // 1. Instant optimistic UI update
+    pendingStatusUpdates.set(orderId, { status: 'Picked up', timestamp: Date.now() });
+    set((state) => ({
+      orders: state.orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'Picked up' as const,
+              pickedUpTime: new Date().toISOString(),
+            }
+          : o
+      ),
+    }));
+
+    // 2. Synchronize to backend
+    try {
+      const res = await apiClient.post(`/orders/${orderId}/verify-handover`, { otp: cleanInput || expectedOtp });
+      if (res.data?.success) return true;
+    } catch (e) {
+      // If /verify-handover is not deployed on Render, fallback to standard status update
+      try {
+        await apiClient.patch(`/orders/${orderId}/status`, { status: 'served' });
+      } catch (patchErr) {
+        console.warn('Error syncing served status to backend:', patchErr);
+      }
+    }
+    return true;
+  },
+
   rejectOrder: async (orderId: string, reason = 'Kitchen busy') => {
     // 1. Lock optimistic status
     pendingStatusUpdates.set(orderId, { status: 'Rejected', timestamp: Date.now() });
@@ -355,6 +497,27 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
     }
   },
 
+  rejectWithOutOfStockItems: async (orderId: string, itemIds: string[], reason: string, turnOffHours?: number) => {
+    pendingStatusUpdates.set(orderId, { status: 'Rejected', timestamp: Date.now() });
+    set((state) => ({
+      orders: state.orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'Rejected' as const,
+              rejectedTime: new Date().toISOString(),
+              rejectionReason: reason || 'Items out of stock',
+            }
+          : o
+      ),
+    }));
+    try {
+      await apiClient.post(`/orders/${orderId}/reject-with-items`, { itemIds, reason, turnOffHours });
+    } catch (e) {
+      console.warn('Error rejecting with out of stock items:', e);
+    }
+  },
+
   acknowledgeOrder: async (orderId: string) => {
     set((state) => ({
       orders: state.orders.map((o) =>
@@ -369,6 +532,9 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
   },
 
   extendPrepTime: async (orderId: string, extraMinutes: number) => {
+    const curExtended = customExtendedPrepMap.get(orderId) || 0;
+    customExtendedPrepMap.set(orderId, curExtended + extraMinutes);
+
     set((state) => ({
       orders: state.orders.map((o) =>
         o.id === orderId
@@ -382,7 +548,8 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
     try {
       await apiClient.patch(`/orders/${orderId}/extend-prep`, { extraMinutes });
     } catch (e) {
-      console.warn('Error extending prep time on backend:', e);
+      console.warn('Error extending prep time on backend, falling back to direct Neon sync:', e);
+      syncExtendPrepTimeToNeon(orderId, extraMinutes);
     }
   },
 

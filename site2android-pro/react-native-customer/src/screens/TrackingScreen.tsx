@@ -63,6 +63,7 @@ import {
   Check,
   Clock,
   AlertCircle,
+  ShieldCheck,
 } from 'lucide-react-native';
 import { DeliveredOrderView } from './DeliveredOrderView';
 import Svg, {
@@ -76,6 +77,10 @@ import Svg, {
 } from 'react-native-svg';
 
 import { BACKEND_URL, OLA_MAPS_API_KEY } from '../config';
+import { SecureStorage } from '../utils/secureStorage';
+
+// Public fallback session token to access live delivery tracking when customer is unauthenticated
+const PUBLIC_FALLBACK_TRACKING_TOKEN = 'Sd1mjQDnOckkKUkS8ddE0WJ3TJ8gG9Jv';
 import { useViewModel } from '../state/MainViewModel';
 
 // Strict Figma Assets
@@ -94,6 +99,34 @@ const BRAND_RED = '#E03546';
 const BRAND_GREEN = '#149E55';
 const GOLD = '#DEA430';
 
+// ─── Decode Ola Maps Directions API precision-5 polyline format into GeoJSON [lng, lat] coordinates ─────
+function decodePolyline(str: string, precision = 5): [number, number][] {
+  let index = 0, lat = 0, lng = 0;
+  const coordinates: [number, number][] = [];
+  const factor = Math.pow(10, precision);
+
+  while (index < str.length) {
+    let byte = 0, shift = 0, result = 0;
+    do {
+      byte = str.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lat += ((result & 1) ? ~(result >> 1) : (result >> 1));
+
+    shift = 0; result = 0;
+    do {
+      byte = str.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    lng += ((result & 1) ? ~(result >> 1) : (result >> 1));
+
+    coordinates.push([Number((lng / factor).toFixed(6)), Number((lat / factor).toFixed(6))]);
+  }
+  return coordinates;
+}
+
 // ─── Ola Map HTML Generator for Fullscreen Interactive Map ──────────────────
 function buildOlaMapHtml(
   apiKey: string,
@@ -105,8 +138,9 @@ function buildOlaMapHtml(
   dropLng: number,
   storeName: string,
   currentStatus: string,
+  roadCoords: [number, number][] = [],
 ): string {
-  // Quadratic bezier curve points between two coords
+  // Quadratic bezier curve points fallback
   function bezier(
     fromLng: number, fromLat: number,
     toLng: number, toLat: number,
@@ -123,8 +157,8 @@ function buildOlaMapHtml(
       const t = i / segments;
       const mt = 1 - t;
       pts.push([
-        mt * mt * fromLng + 2 * mt * t * cpLng + t * t * toLng,
-        mt * mt * fromLat + 2 * mt * t * cpLat + t * t * toLat,
+        Number((mt * mt * fromLng + 2 * mt * t * cpLng + t * t * toLng).toFixed(6)),
+        Number((mt * mt * fromLat + 2 * mt * t * cpLat + t * t * toLat).toFixed(6)),
       ]);
     }
     return pts;
@@ -135,32 +169,56 @@ function buildOlaMapHtml(
   const isPickedUp = ['picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
   const isUnassigned = !isRiderAssigned;
 
-  // Paths:
-  // 1) Store → Dropoff (gold dotted line for unassigned state)
-  const storeToDropCoords = JSON.stringify(bezier(storeLng, storeLat, dropLng, dropLat));
-  // 2) Rider → Dropoff (solid delivery route for picked_up / out_for_delivery state)
-  const riderToDropCoords = JSON.stringify(bezier(riderLng, riderLat, dropLng, dropLat));
+  // Active navigation route coordinates:
+  // Use exact road coordinates if available, otherwise fallback to bezier curve
+  let activeCoords: [number, number][] = [];
+  if (roadCoords && roadCoords.length > 0) {
+    activeCoords = roadCoords;
+  } else if (isGoingToPickup) {
+    activeCoords = bezier(riderLng, riderLat, storeLng, storeLat);
+  } else if (isPickedUp) {
+    activeCoords = bezier(riderLng, riderLat, dropLng, dropLat);
+  } else {
+    activeCoords = bezier(storeLng, storeLat, dropLng, dropLat);
+  }
+
+  const activeCoordsJson = JSON.stringify(activeCoords);
 
   // Bounds
   let allLats = [storeLat, dropLat];
   let allLngs = [storeLng, dropLng];
   if (isPickedUp) {
-    allLats = [riderLat, dropLat, storeLat];
-    allLngs = [riderLng, dropLng, storeLng];
+    allLats = [riderLat, dropLat];
+    allLngs = [riderLng, dropLng];
   } else if (isGoingToPickup) {
-    allLats = [riderLat, storeLat, dropLat];
-    allLngs = [riderLng, storeLng, dropLng];
+    allLats = [riderLat, storeLat];
+    allLngs = [riderLng, storeLng];
   }
 
-  const minLat = Math.min(...allLats) - 0.010;
-  const maxLat = Math.max(...allLats) + 0.010;
-  const minLng = Math.min(...allLngs) - 0.010;
-  const maxLng = Math.max(...allLngs) + 0.010;
+  if (activeCoords.length > 0) {
+    activeCoords.forEach(([lng, lat]) => {
+      allLats.push(lat);
+      allLngs.push(lng);
+    });
+  }
+
+  const minLat = Math.min(...allLats) - 0.008;
+  const maxLat = Math.max(...allLats) + 0.008;
+  const minLng = Math.min(...allLngs) - 0.008;
+  const maxLng = Math.max(...allLngs) + 0.008;
 
   const centerLng = (minLng + maxLng) / 2;
   const centerLat = (minLat + maxLat) / 2;
 
-  const storeNameJson = JSON.stringify(storeName || 'Hotel Mayfair');
+  const storeNameJson = JSON.stringify(storeName || 'Restaurant');
+
+  // Route colors:
+  // - Going to pickup: Emerald Green (#059669) route to restaurant
+  // - Picked up / Out for delivery: Electric Blue (#2563EB) route to customer
+  // - Unassigned: Gold (#DEA430) dashed route
+  const routeColor = isGoingToPickup ? '#059669' : (isPickedUp ? '#2563EB' : '#DEA430');
+  const glowColor = isGoingToPickup ? '#10B981' : (isPickedUp ? '#3B82F6' : '#DEA430');
+  const isDashed = isUnassigned;
 
   return `<!DOCTYPE html>
 <html>
@@ -196,22 +254,40 @@ function buildOlaMapHtml(
       box-shadow:0 3px 8px rgba(0,0,0,.45);
     }
 
-    /* Rider GPS dot */
-    .gps-ring{
-      width:26px;height:26px;border-radius:13px;
-      background:rgba(37,99,235,.25);border:1.5px solid rgba(59,130,246,.7);
+    /* Animated Delivery Bike Marker */
+    .bike-marker{
+      position:relative;
+      width:40px;height:40px;
       display:flex;align-items:center;justify-content:center;
+      pointer-events:none;
     }
-    .gps-dot{
-      width:12px;height:12px;border-radius:6px;
-      background:#2563EB;border:2.5px solid #FFFFFF;
-      box-shadow:0 1px 6px rgba(37,99,235,0.7);
+    .bike-aura{
+      position:absolute;
+      width:38px;height:38px;border-radius:19px;
+      background:rgba(56,189,248,0.28);
+      animation:bike-pulse 1.8s infinite ease-out;
+    }
+    @keyframes bike-pulse{
+      0%{transform:scale(0.85);opacity:0.9;}
+      100%{transform:scale(1.55);opacity:0;}
+    }
+    .bike-icon-wrapper{
+      width:34px;height:34px;
+      display:flex;align-items:center;justify-content:center;
+      transform-origin:center center;
+      transition:transform 0.35s cubic-bezier(0.25,1,0.5,1);
+      filter:drop-shadow(0 3px 6px rgba(0,0,0,0.5));
     }
   </style>
 </head>
 <body>
 <div id="map"></div>
 <script>
+  var currentRiderLng = ${riderLng};
+  var currentRiderLat = ${riderLat};
+  var riderMarker = null;
+  var animationFrameId = null;
+
   var map = new maplibregl.Map({
     container:'map',
     style:'https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json',
@@ -221,56 +297,134 @@ function buildOlaMapHtml(
     transformRequest:function(url){return{url:url+(url.includes('?')?'&':'?')+'api_key=${apiKey}'}}
   });
 
+  function calculateBearing(lat1, lon1, lat2, lon2) {
+    var dLon = (lon2 - lon1) * Math.PI / 180;
+    var lat1Rad = lat1 * Math.PI / 180;
+    var lat2Rad = lat2 * Math.PI / 180;
+    var y = Math.sin(dLon) * Math.cos(lat2Rad);
+    var x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+    var brng = Math.atan2(y, x) * 180 / Math.PI;
+    return (brng + 360) % 360;
+  }
+
+  // Smooth live animation of rider bike marker with bearing rotation
+  window.updateRiderPosition = function(targetLng, targetLat) {
+    targetLng = Number(targetLng);
+    targetLat = Number(targetLat);
+    if (isNaN(targetLng) || isNaN(targetLat)) return;
+
+    if (!riderMarker) {
+      var bikeEl = document.createElement('div');
+      bikeEl.className = 'bike-marker';
+      bikeEl.id = 'rider-bike-marker';
+      bikeEl.innerHTML = '<div class="bike-aura"></div><div class="bike-icon-wrapper" id="bike-icon-inner"><svg width="34" height="34" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="16" fill="#0F172A" stroke="#38BDF8" stroke-width="2.5"/><polygon points="18,3 23,10 13,10" fill="#38BDF8"/><rect x="16" y="10" width="4" height="16" rx="2" fill="#F8FAFC"/><circle cx="18" cy="12" r="2.2" fill="#0284C7"/><line x1="12" y1="12" x2="24" y2="12" stroke="#CBD5E1" stroke-width="2.2" stroke-linecap="round"/><circle cx="18" cy="23" r="2.5" fill="#0284C7"/><rect x="13" y="15" width="10" height="7.5" rx="2" fill="#F59E0B" stroke="#FFFFFF" stroke-width="1"/></svg></div>';
+      riderMarker = new maplibregl.Marker({element: bikeEl, anchor: 'center'}).setLngLat([targetLng, targetLat]).addTo(map);
+      currentRiderLng = targetLng;
+      currentRiderLat = targetLat;
+      return;
+    }
+
+    var dist = Math.hypot(targetLng - currentRiderLng, targetLat - currentRiderLat);
+    if (dist > 0.000015) {
+      var bearing = calculateBearing(currentRiderLat, currentRiderLng, targetLat, targetLng);
+      var iconEl = document.getElementById('bike-icon-inner');
+      if (iconEl) {
+        iconEl.style.transform = 'rotate(' + Math.round(bearing) + 'deg)';
+      }
+    }
+
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+
+    var startLng = currentRiderLng;
+    var startLat = currentRiderLat;
+    var startTime = performance.now();
+    var duration = 1200;
+
+    function step(now) {
+      var elapsed = now - startTime;
+      var progress = Math.min(1, elapsed / duration);
+      var ease = 1 - Math.pow(1 - progress, 2);
+      var curLng = startLng + (targetLng - startLng) * ease;
+      var curLat = startLat + (targetLat - startLat) * ease;
+      currentRiderLng = curLng;
+      currentRiderLat = curLat;
+      riderMarker.setLngLat([curLng, curLat]);
+
+      if (progress < 1) {
+        animationFrameId = requestAnimationFrame(step);
+      }
+    }
+    animationFrameId = requestAnimationFrame(step);
+  };
+
+  // Dynamic route update without map reload
+  window.updateRouteCoords = function(coords) {
+    try {
+      var parsed = typeof coords === 'string' ? JSON.parse(coords) : coords;
+      if (map && map.getSource('route-active') && Array.isArray(parsed) && parsed.length > 0) {
+        map.getSource('route-active').setData({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: parsed }
+        });
+        var lats = parsed.map(function(pt){ return pt[1]; });
+        var lngs = parsed.map(function(pt){ return pt[0]; });
+        var minX = Math.min.apply(null, lngs) - 0.006;
+        var maxX = Math.max.apply(null, lngs) + 0.006;
+        var minY = Math.min.apply(null, lats) - 0.006;
+        var maxY = Math.max.apply(null, lats) + 0.006;
+        map.fitBounds([[minX, minY], [maxX, maxY]], {
+          padding: { top: 80, bottom: 120, left: 50, right: 50 },
+          duration: 900
+        });
+      }
+    } catch(e) {}
+  };
+
   map.on('load',function(){
     map.fitBounds([[${minLng},${minLat}],[${maxLng},${maxLat}]],{
       padding:{top:80,bottom:120,left:50,right:50},duration:0
     });
 
-    // ── a) When no rider is assigned: display delivery location and restaurant location connected via dotted line
-    if (${isUnassigned}) {
-      map.addSource('route-store-drop',{
-        type:'geojson',
-        data:{type:'Feature',geometry:{type:'LineString',coordinates:${storeToDropCoords}}}
-      });
+    // ── Active Navigation Road Route Layer (Exact Road / Street Geometry) ──
+    map.addSource('route-active',{
+      type:'geojson',
+      data:{
+        type:'Feature',
+        geometry:{type:'LineString',coordinates:${activeCoordsJson}}
+      }
+    });
+
+    ${isDashed ? `
       map.addLayer({
-        id:'route-store-drop-dash',type:'line',source:'route-store-drop',
+        id:'route-active-line',type:'line',source:'route-active',
         paint:{
-          'line-color':'#DEA430',
-          'line-width':3,
+          'line-color':'${routeColor}',
+          'line-width':3.5,
           'line-dasharray':[2.5,2.5]
         },
         layout:{'line-join':'round','line-cap':'round'}
       });
-    }
-
-    // ── b) When rider is assigned and going to pick up: NO dotted lines, NO paths, show live rider location only
-
-    // ── c) When rider has picked up the order: show live rider location and the path to customer delivery location
-    if (${isPickedUp}) {
-      map.addSource('route-rider-drop',{
-        type:'geojson',
-        data:{type:'Feature',geometry:{type:'LineString',coordinates:${riderToDropCoords}}}
-      });
-      // Outer subtle glow casing
+    ` : `
+      // Outer glow casing
       map.addLayer({
-        id:'route-rider-drop-glow',type:'line',source:'route-rider-drop',
+        id:'route-active-glow',type:'line',source:'route-active',
         paint:{
-          'line-color':'#3B82F6',
-          'line-width':6,
+          'line-color':'${glowColor}',
+          'line-width':7,
           'line-opacity':0.35
         },
         layout:{'line-join':'round','line-cap':'round'}
       });
-      // Main vibrant route line
+      // Main vibrant road line
       map.addLayer({
-        id:'route-rider-drop-line',type:'line',source:'route-rider-drop',
+        id:'route-active-core',type:'line',source:'route-active',
         paint:{
-          'line-color':'#2563EB',
-          'line-width':4
+          'line-color':'${routeColor}',
+          'line-width':4.5
         },
         layout:{'line-join':'round','line-cap':'round'}
       });
-    }
+    `}
 
     // Pickup / Store marker (black pill with gold icon)
     var storeEl=document.createElement('div');
@@ -284,12 +438,22 @@ function buildOlaMapHtml(
     custEl.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>';
     new maplibregl.Marker({element:custEl,anchor:'center'}).setLngLat([${dropLng},${dropLat}]).addTo(map);
 
-    // Live Rider Location GPS Marker (shown whenever rider is assigned: going to pickup OR picked up)
+    // Live Delivery Bike Marker with directional pointer
     if (${isRiderAssigned}) {
-      var gpsEl=document.createElement('div');
-      gpsEl.className='gps-ring';
-      gpsEl.innerHTML='<div class="gps-dot"></div>';
-      new maplibregl.Marker({element:gpsEl,anchor:'center'}).setLngLat([${riderLng},${riderLat}]).addTo(map);
+      var bikeEl=document.createElement('div');
+      bikeEl.className='bike-marker';
+      bikeEl.id='rider-bike-marker';
+      bikeEl.innerHTML='<div class="bike-aura"></div><div class="bike-icon-wrapper" id="bike-icon-inner"><svg width="34" height="34" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="16" fill="#0F172A" stroke="#38BDF8" stroke-width="2.5"/><polygon points="18,3 23,10 13,10" fill="#38BDF8"/><rect x="16" y="10" width="4" height="16" rx="2" fill="#F8FAFC"/><circle cx="18" cy="12" r="2.2" fill="#0284C7"/><line x1="12" y1="12" x2="24" y2="12" stroke="#CBD5E1" stroke-width="2.2" stroke-linecap="round"/><circle cx="18" cy="23" r="2.5" fill="#0284C7"/><rect x="13" y="15" width="10" height="7.5" rx="2" fill="#F59E0B" stroke="#FFFFFF" stroke-width="1"/></svg></div>';
+      riderMarker = new maplibregl.Marker({element:bikeEl,anchor:'center'}).setLngLat([${riderLng},${riderLat}]).addTo(map);
+
+      // Initial bearing towards immediate waypoint
+      var destLat = ${isGoingToPickup ? storeLat : dropLat};
+      var destLng = ${isGoingToPickup ? storeLng : dropLng};
+      var initBearing = calculateBearing(${riderLat}, ${riderLng}, destLat, destLng);
+      var iconEl = document.getElementById('bike-icon-inner');
+      if (iconEl && !isNaN(initBearing)) {
+        iconEl.style.transform = 'rotate(' + Math.round(initBearing) + 'deg)';
+      }
     }
   });
 </script>
@@ -307,6 +471,7 @@ function buildMiniOlaMapHtml(
   riderLat: number,
   riderLng: number,
   currentStatus: string,
+  roadCoords: [number, number][] = [],
 ): string {
   function bezier(
     fromLng: number, fromLat: number,
@@ -324,8 +489,8 @@ function buildMiniOlaMapHtml(
       const t = i / segments;
       const mt = 1 - t;
       pts.push([
-        mt * mt * fromLng + 2 * mt * t * cpLng + t * t * toLng,
-        mt * mt * fromLat + 2 * mt * t * cpLat + t * t * toLat,
+        Number((mt * mt * fromLng + 2 * mt * t * cpLng + t * t * toLng).toFixed(6)),
+        Number((mt * mt * fromLat + 2 * mt * t * cpLat + t * t * toLat).toFixed(6)),
       ]);
     }
     return pts;
@@ -336,20 +501,36 @@ function buildMiniOlaMapHtml(
   const isPickedUp = ['picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
   const isUnassigned = !isRiderAssigned;
 
-  const storeToDropCoords = JSON.stringify(bezier(storeLng, storeLat, dropLng, dropLat));
-  const riderToDropCoords = JSON.stringify(bezier(riderLng, riderLat, dropLng, dropLat));
+  let activeCoords: [number, number][] = [];
+  if (roadCoords && roadCoords.length > 0) {
+    activeCoords = roadCoords;
+  } else if (isGoingToPickup) {
+    activeCoords = bezier(riderLng, riderLat, storeLng, storeLat);
+  } else if (isPickedUp) {
+    activeCoords = bezier(riderLng, riderLat, dropLng, dropLat);
+  } else {
+    activeCoords = bezier(storeLng, storeLat, dropLng, dropLat);
+  }
+
+  const activeCoordsJson = JSON.stringify(activeCoords);
 
   let allLats = [storeLat, dropLat];
   let allLngs = [storeLng, dropLng];
-  if (isRiderAssigned) {
-    allLats = [riderLat, storeLat, dropLat];
-    allLngs = [riderLng, storeLng, dropLng];
+  if (isPickedUp) {
+    allLats = [riderLat, dropLat];
+    allLngs = [riderLng, dropLng];
+  } else if (isGoingToPickup) {
+    allLats = [riderLat, storeLat];
+    allLngs = [riderLng, storeLng];
   }
 
   const minLat = Math.min(...allLats) - 0.006;
   const maxLat = Math.max(...allLats) + 0.006;
   const minLng = Math.min(...allLngs) - 0.006;
   const maxLng = Math.max(...allLngs) + 0.006;
+
+  const routeColor = isGoingToPickup ? '#059669' : (isPickedUp ? '#2563EB' : '#DEA430');
+  const isDashed = isUnassigned;
 
   return `<!DOCTYPE html>
 <html>
@@ -363,12 +544,21 @@ function buildMiniOlaMapHtml(
     .maplibregl-ctrl-attrib,.maplibregl-ctrl-logo{display:none!important}
     .pin{width:12px;height:12px;border-radius:6px;background:#000;border:2px solid #F2CA50;}
     .cust{width:12px;height:12px;border-radius:6px;background:#000;border:2px solid #FFF;}
-    .rider{width:10px;height:10px;border-radius:5px;background:#2563EB;border:1.5px solid #FFF;}
+    .mini-bike{
+      width:18px;height:18px;border-radius:9px;background:#0F172A;border:1.5px solid #38BDF8;
+      display:flex;align-items:center;justify-content:center;
+      transform-origin:center center;
+      transition:transform 0.35s ease;
+    }
   </style>
 </head>
 <body>
 <div id="map"></div>
 <script>
+  var currentRiderLng = ${riderLng};
+  var currentRiderLat = ${riderLat};
+  var riderMarker = null;
+
   var map = new maplibregl.Map({
     container:'map',
     style:'https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json',
@@ -379,26 +569,78 @@ function buildMiniOlaMapHtml(
     transformRequest:function(url){return{url:url+(url.includes('?')?'&':'?')+'api_key=${apiKey}'}}
   });
 
+  function calculateBearing(lat1, lon1, lat2, lon2) {
+    var dLon = (lon2 - lon1) * Math.PI / 180;
+    var lat1Rad = lat1 * Math.PI / 180;
+    var lat2Rad = lat2 * Math.PI / 180;
+    var y = Math.sin(dLon) * Math.cos(lat2Rad);
+    var x = Math.cos(lat1Rad) * Math.sin(lat2Rad) - Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+    var brng = Math.atan2(y, x) * 180 / Math.PI;
+    return (brng + 360) % 360;
+  }
+
+  window.updateRiderPosition = function(targetLng, targetLat) {
+    targetLng = Number(targetLng);
+    targetLat = Number(targetLat);
+    if (isNaN(targetLng) || isNaN(targetLat)) return;
+
+    if (!riderMarker) {
+      var p3 = document.createElement('div');
+      p3.className = 'mini-bike';
+      p3.id = 'mini-bike-inner';
+      p3.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="#38BDF8"><polygon points="12,2 20,18 12,14 4,18"/></svg>';
+      riderMarker = new maplibregl.Marker({element: p3, anchor: 'center'}).setLngLat([targetLng, targetLat]).addTo(map);
+      currentRiderLng = targetLng;
+      currentRiderLat = targetLat;
+      return;
+    }
+
+    var dist = Math.hypot(targetLng - currentRiderLng, targetLat - currentRiderLat);
+    if (dist > 0.000015) {
+      var bearing = calculateBearing(currentRiderLat, currentRiderLng, targetLat, targetLng);
+      var iconEl = document.getElementById('mini-bike-inner');
+      if (iconEl) iconEl.style.transform = 'rotate(' + Math.round(bearing) + 'deg)';
+    }
+    currentRiderLng = targetLng;
+    currentRiderLat = targetLat;
+    riderMarker.setLngLat([targetLng, targetLat]);
+  };
+
+  window.updateRouteCoords = function(coords) {
+    try {
+      var parsed = typeof coords === 'string' ? JSON.parse(coords) : coords;
+      if (map && map.getSource('route-active') && Array.isArray(parsed) && parsed.length > 0) {
+        map.getSource('route-active').setData({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: parsed }
+        });
+        var lats = parsed.map(function(pt){ return pt[1]; });
+        var lngs = parsed.map(function(pt){ return pt[0]; });
+        var minX = Math.min.apply(null, lngs) - 0.004;
+        var maxX = Math.max.apply(null, lngs) + 0.004;
+        var minY = Math.min.apply(null, lats) - 0.004;
+        var maxY = Math.max.apply(null, lats) + 0.004;
+        map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 20, duration: 900 });
+      }
+    } catch(e) {}
+  };
+
   map.on('load',function(){
     map.fitBounds([[${minLng},${minLat}],[${maxLng},${maxLat}]],{padding:20,duration:0});
 
-    if (${isUnassigned}) {
-      map.addSource('route-store-drop',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:${storeToDropCoords}}}});
-      map.addLayer({
-        id:'route-store-drop-line',type:'line',source:'route-store-drop',
-        paint:{'line-color':'#DEA430','line-width':3,'line-dasharray':[2,2]},
-        layout:{'line-join':'round','line-cap':'round'}
-      });
-    }
-
-    if (${isPickedUp}) {
-      map.addSource('route-rider-drop',{type:'geojson',data:{type:'Feature',geometry:{type:'LineString',coordinates:${riderToDropCoords}}}});
-      map.addLayer({
-        id:'route-rider-drop-line',type:'line',source:'route-rider-drop',
-        paint:{'line-color':'#2563EB','line-width':3},
-        layout:{'line-join':'round','line-cap':'round'}
-      });
-    }
+    map.addSource('route-active',{
+      type:'geojson',
+      data:{type:'Feature',geometry:{type:'LineString',coordinates:${activeCoordsJson}}}
+    });
+    map.addLayer({
+      id:'route-active-line',type:'line',source:'route-active',
+      paint:{
+        'line-color':'${routeColor}',
+        'line-width':3,
+        ${isDashed ? "'line-dasharray':[2,2]" : ''}
+      },
+      layout:{'line-join':'round','line-cap':'round'}
+    });
 
     var p1=document.createElement('div'); p1.className='pin';
     new maplibregl.Marker({element:p1,anchor:'center'}).setLngLat([${storeLng},${storeLat}]).addTo(map);
@@ -407,8 +649,19 @@ function buildMiniOlaMapHtml(
     new maplibregl.Marker({element:p2,anchor:'center'}).setLngLat([${dropLng},${dropLat}]).addTo(map);
 
     if (${isRiderAssigned}) {
-      var p3=document.createElement('div'); p3.className='rider';
-      new maplibregl.Marker({element:p3,anchor:'center'}).setLngLat([${riderLng},${riderLat}]).addTo(map);
+      var p3=document.createElement('div');
+      p3.className='mini-bike';
+      p3.id='mini-bike-inner';
+      p3.innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="#38BDF8"><polygon points="12,2 20,18 12,14 4,18"/></svg>';
+      riderMarker = new maplibregl.Marker({element:p3,anchor:'center'}).setLngLat([${riderLng},${riderLat}]).addTo(map);
+
+      var destLat = ${isGoingToPickup ? storeLat : dropLat};
+      var destLng = ${isGoingToPickup ? storeLng : dropLng};
+      var initBearing = calculateBearing(${riderLat}, ${riderLng}, destLat, destLng);
+      var miniIcon = document.getElementById('mini-bike-inner');
+      if (miniIcon && !isNaN(initBearing)) {
+        miniIcon.style.transform = 'rotate(' + Math.round(initBearing) + 'deg)';
+      }
     }
   });
 </script>
@@ -441,7 +694,9 @@ const DEFAULT_MOCK_ORDER = {
   customerLatitude: 20.2505,
   customerLongitude: 85.7882,
   status: 'placed',
-  etaMinutes: 18,
+  prepTimeMinutes: 20,
+  extendedPrepMinutes: 0,
+  etaMinutes: 28,
   createdAt: new Date().toISOString(),
   totalAmount: 589,
   itemTotal: 520,
@@ -494,6 +749,102 @@ const DEFAULT_MOCK_TRACKING = {
   etaMinutes: 18,
 };
 
+// Kitchen status lifecycle rank (strictly restaurant order states)
+const KITCHEN_STATUS_RANK: Record<string, number> = {
+  placed: 1,
+  confirmed: 2,
+  preparing: 3,
+  ready: 4,
+  served: 5,
+  delivered: 6,
+  cancelled: 99,
+  rejected: 99,
+};
+
+const mergeKitchenStatus = (currentStatus?: string, incomingStatus?: string): string => {
+  if (!incomingStatus) return currentStatus || 'placed';
+  // If incoming status is actually a delivery status, do not overwrite kitchen status with it
+  if (['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery'].includes(incomingStatus)) {
+    return currentStatus || 'preparing';
+  }
+  if (!currentStatus) return incomingStatus;
+
+  // Terminal cancellation / rejection always takes priority
+  if (incomingStatus === 'cancelled' || incomingStatus === 'rejected') return incomingStatus;
+  if (currentStatus === 'cancelled' || currentStatus === 'rejected') return currentStatus;
+
+  const currentRank = KITCHEN_STATUS_RANK[currentStatus] || 0;
+  const incomingRank = KITCHEN_STATUS_RANK[incomingStatus] || 0;
+
+  return incomingRank >= currentRank ? incomingStatus : currentStatus;
+};
+
+// Delivery status lifecycle rank (strictly rider / transit states)
+const DELIVERY_STATUS_RANK: Record<string, number> = {
+  unassigned: 0,
+  offered: 1,
+  assigned: 2,
+  arrived_at_store: 3,
+  picked_up: 4,
+  out_for_delivery: 5,
+  delivered: 6,
+  cancelled: 99,
+};
+
+const mergeDeliveryStatus = (currentStatus?: string, incomingStatus?: string): string => {
+  if (!incomingStatus) return currentStatus || 'unassigned';
+  if (!currentStatus) return incomingStatus;
+  const currentRank = DELIVERY_STATUS_RANK[currentStatus] || 0;
+  const incomingRank = DELIVERY_STATUS_RANK[incomingStatus] || 0;
+  return incomingRank >= currentRank ? incomingStatus : currentStatus;
+};
+
+// Backwards compatibility alias
+const mergeOrderStatus = mergeKitchenStatus;
+
+// ── Price & Amount Normalizers for Orders & Items ──
+export const normalizePrice = (raw: any): number => {
+  if (raw === undefined || raw === null || raw === '') return 0;
+  let num = typeof raw === 'number' ? raw : (parseFloat(String(raw).replace(/[^0-9.]/g, '')) || 0);
+  if (isNaN(num) || num <= 0) return 0;
+  // Handle paise: e.g. 15000 -> 150, 30000 -> 300, 29900 -> 299, 45000 -> 450
+  if (num >= 1000 && num % 100 === 0) {
+    num = num / 100;
+  } else if (num >= 2000) {
+    num = num / 100;
+  }
+  return Math.round(num);
+};
+
+export const getItemPrice = (it: any): number => {
+  if (!it) return 0;
+  const qty = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+  const rawUnit = it.price ?? it.unitPrice ?? it.basePrice ?? it.itemPrice ?? it.foodItem?.price;
+  let unitPrice = normalizePrice(rawUnit);
+  if (unitPrice <= 0 && it.totalPrice !== undefined && it.totalPrice !== null) {
+    const normalizedTotal = normalizePrice(it.totalPrice);
+    unitPrice = qty > 1 ? Math.round(normalizedTotal / qty) : normalizedTotal;
+  }
+  return Math.max(0, unitPrice);
+};
+
+export const getOrderTotalAmount = (order: any, itemsList: any[] = []): number => {
+  if (!order) return 0;
+  const raw = order.grandTotal ?? order.totalAmount ?? order.billTotal ?? order.amount ?? order.subtotal;
+  let total = normalizePrice(raw);
+  if (total > 0) return total;
+
+  if (itemsList && itemsList.length > 0) {
+    const sum = itemsList.reduce((acc: number, it: any) => {
+      const p = getItemPrice(it);
+      const q = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+      return acc + (p * q);
+    }, 0);
+    if (sum > 0) return Math.round(sum);
+  }
+  return 0;
+};
+
 interface TrackingScreenProps {
   orderId: string | null;
   onBack: () => void;
@@ -513,6 +864,8 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       id: orderId,
       orderId: orderId,
       status: 'placed',
+      prepTimeMinutes: 20,
+      extendedPrepMinutes: 0,
       createdAt: new Date().toISOString(),
       items: [],
     };
@@ -522,9 +875,43 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     return null;
   });
   const [riderInfo, setRiderInfo] = useState<any>(null);
-  const [olaEtaMins, setOlaEtaMins] = useState<number | null>(null);
+  const [olaTransitMins, setOlaTransitMins] = useState<number | null>(null);
+  const [roadRouteCoords, setRoadRouteCoords] = useState<[number, number][]>([]);
+  const fullMapWebviewRef = useRef<WebView>(null);
+  const miniMapWebviewRef = useRef<WebView>(null);
   const [prepExtensionNotice, setPrepExtensionNotice] = useState<string | null>(null);
   const socketRef = useRef<any>(null);
+
+  // Live ticker updating every 1s for real-time ETA countdown matching restaurant app
+  const [tickNow, setTickNow] = useState(() => Date.now());
+  useEffect(() => {
+    const ticker = setInterval(() => setTickNow(Date.now()), 1000);
+    return () => clearInterval(ticker);
+  }, []);
+
+  // Single-run local cache hydration ref to prevent polling from reverting to stale local order status
+  const hasHydratedLocalRef = useRef(false);
+
+  const syncOrderToLocalStorage = async (updatedFields: any) => {
+    if (!orderId) return;
+    try {
+      const localData = await AsyncStorage.getItem('@placed_orders_history');
+      if (!localData) return;
+      const list = JSON.parse(localData);
+      let changed = false;
+      const updatedList = list.map((item: any) => {
+        if (item.id === orderId || item.orderId === orderId) {
+          changed = true;
+          const mergedStatus = mergeKitchenStatus(item.status, updatedFields.status);
+          return { ...item, ...updatedFields, status: mergedStatus };
+        }
+        return item;
+      });
+      if (changed) {
+        await AsyncStorage.setItem('@placed_orders_history', JSON.stringify(updatedList));
+      }
+    } catch (e) {}
+  };
 
   // UI Interactive States
   const [isMapExpanded, setIsMapExpanded] = useState(false);
@@ -566,10 +953,6 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const [sendingMessage, setSendingMessage] = useState(false);
   const chatScrollRef = useRef<any>(null);
 
-  // Dev Testing Panel
-  const [isDevPanelOpen, setIsDevPanelOpen] = useState(true);
-  const [simulating, setSimulating] = useState(false);
-
   const currentRestaurant = allRestaurants?.find(r => 
     (orderDetail?.restaurantName && (r.name.toLowerCase().includes(orderDetail.restaurantName.toLowerCase()) || orderDetail.restaurantName.toLowerCase().includes(r.name.toLowerCase()))) || 
     (orderDetail?.restaurantId && (r.id === orderDetail.restaurantId || (r as any)._id === orderDetail.restaurantId)) ||
@@ -592,9 +975,21 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     orderDetail?.items && orderDetail.items.length > 0
       ? orderDetail.items
       : (cartItems && cartItems.length > 0
-          ? cartItems.map((c: any) => ({ id: c.id, menuItemName: c.name, quantity: c.quantity, isVeg: c.isVeg, price: c.price }))
-          : []);
-  const itemsCount = orderItemsList.reduce((sum: number, i: any) => sum + (i.quantity || 1), 0);
+          ? cartItems.map((c: any) => ({
+              id: c.id || c.foodItem?.id,
+              name: c.name || c.foodItem?.name || 'Food Item',
+              menuItemName: c.name || c.foodItem?.name || 'Food Item',
+              quantity: c.quantity || 1,
+              isVeg: c.isVeg ?? c.foodItem?.isVeg,
+              price: typeof c.price === 'number' ? c.price : (c.foodItem?.price || 0),
+              unitPrice: typeof c.price === 'number' ? c.price : (c.foodItem?.price || 0),
+            }))
+          : (!isRealOrder ? DEFAULT_MOCK_ORDER.items : []));
+  const itemsCount = orderItemsList.reduce(
+    (sum: number, i: any) => sum + Math.max(1, parseInt(String(i.quantity || i.qty || 1), 10)),
+    0
+  );
+  const orderTotalAmount = getOrderTotalAmount(orderDetail, orderItemsList);
 
   // Format Order Placed Time (e.g. 04:43PM)
   const orderCreatedAt = orderDetail?.createdAt ? new Date(orderDetail.createdAt) : new Date();
@@ -624,24 +1019,89 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const riderLat = trackingData?.currentLat || (restLat * 0.4 + custLat * 0.6);
   const riderLng = trackingData?.currentLng || (restLng * 0.4 + custLng * 0.6);
 
-  // Fetch Ola Maps Driving Directions & Dynamic Route
+  // 1. Restaurant / Kitchen lifecycle status from Restaurant App
+  const kitchenStatus = orderDetail?.status || 'placed';
+
+  // 2. Delivery Partner / Logistics lifecycle status from Rider App or Order Details
+  const riderStatus =
+    trackingData?.status ||
+    orderDetail?.deliveryStatus ||
+    orderDetail?.delivery?.status ||
+    orderDetail?.riderStatus ||
+    null;
+
+  const riderDisplayName =
+    riderInfo?.name ||
+    riderInfo?.fullName ||
+    trackingData?.riderName ||
+    trackingData?.rider?.name ||
+    orderDetail?.riderName ||
+    orderDetail?.delivery?.riderName ||
+    (orderDetail as any)?.rider?.name ||
+    null;
+
+  // Active status check: has a rider accepted / been assigned to this order?
+  const isRiderAssignedStatus = Boolean(
+    riderStatus &&
+    ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(riderStatus)
+  );
+  const isRiderAccepted = Boolean(
+    isRiderAssignedStatus ||
+    (riderDisplayName && typeof riderDisplayName === 'string' && riderDisplayName.trim().length > 0 && riderStatus !== 'offered' && riderStatus !== 'unassigned') ||
+    Boolean(trackingData?.riderId && riderStatus && riderStatus !== 'offered' && riderStatus !== 'unassigned')
+  );
+  const effectiveRiderStatus = isRiderAccepted
+    ? (riderStatus && riderStatus !== 'offered' && riderStatus !== 'unassigned' ? riderStatus : 'assigned')
+    : riderStatus;
+  const currentStatus = isRiderAccepted
+    ? effectiveRiderStatus
+    : (kitchenStatus || 'placed');
+
+  // Fetch Ola Maps Driving Directions & Dynamic Turn-by-Turn Road Route
   useEffect(() => {
     if (!restLat || !restLng || !custLat || !custLng || !OLA_MAPS_API_KEY) return;
     let isMounted = true;
 
     const fetchOlaDirections = async () => {
       try {
-        const url = `https://api.olamaps.io/routing/v1/directions/basic?origin=${restLat},${restLng}&destination=${custLat},${custLng}&api_key=${OLA_MAPS_API_KEY}`;
-        const res = await fetch(url);
+        let origin = `${restLat},${restLng}`;
+        let destination = `${custLat},${custLng}`;
+
+        if (riderStatus === 'assigned' || riderStatus === 'arrived_at_store') {
+          // Rider is heading to restaurant to pick up order: Rider -> Restaurant
+          origin = `${riderLat},${riderLng}`;
+          destination = `${restLat},${restLng}`;
+        } else if (riderStatus === 'picked_up' || riderStatus === 'out_for_delivery') {
+          // Rider has picked up and is heading to customer: Rider -> Customer
+          origin = `${riderLat},${riderLng}`;
+          destination = `${custLat},${custLng}`;
+        }
+
+        const url = `https://api.olamaps.io/routing/v1/directions/basic?origin=${origin}&destination=${destination}&api_key=${OLA_MAPS_API_KEY}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Request-Id': `route-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          },
+        });
         if (res.ok) {
           const data = await res.json();
           const route = data.routes?.[0];
           if (route) {
             const durationSec = route.legs?.[0]?.duration || route.duration || 0;
-            const transitMins = Math.round(durationSec / 60);
-            const prepTime = (currentRestaurant as any)?.prepTime || 12;
-            const totalMins = prepTime + (transitMins > 0 ? transitMins : 8);
-            if (isMounted) setOlaEtaMins(totalMins);
+            const transitMins = Math.max(2, Math.round(durationSec / 60));
+            if (isMounted) setOlaTransitMins(transitMins);
+
+            if (route.overview_polyline) {
+              const decoded = decodePolyline(route.overview_polyline);
+              if (decoded && decoded.length > 0 && isMounted) {
+                setRoadRouteCoords(decoded);
+                const script = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(decoded)}); } true;`;
+                fullMapWebviewRef.current?.injectJavaScript(script);
+                miniMapWebviewRef.current?.injectJavaScript(script);
+              }
+            }
           }
         }
       } catch (e) {
@@ -650,38 +1110,89 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     };
 
     fetchOlaDirections();
-    return () => { isMounted = false; };
-  }, [restLat, restLng, custLat, custLng]);
+    const interval = setInterval(fetchOlaDirections, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [restLat, restLng, custLat, custLng, riderStatus, isRiderAccepted]);
 
-  // Dynamic ETA Calculation (Zero Static Fallbacks)
+  // ── Dynamic Live ETA: Exact Restaurant Preparation Time + Delivery Transit Time ──
+  const basePrepMins = Number(orderDetail?.prepTimeMinutes ?? orderDetail?.prep_time_minutes) > 0 
+    ? Number(orderDetail.prepTimeMinutes ?? orderDetail.prep_time_minutes) 
+    : ((currentRestaurant as any)?.prepTime || 20);
+  const extraPrepMins = Number(orderDetail?.extendedPrepMinutes ?? orderDetail?.extended_prep_minutes) || 0;
+  const totalKitchenPrepTime = basePrepMins + extraPrepMins;
+
+  // 3. Road delivery transit time (Ola Maps driving directions if available, or road distance ~3 mins/km, min 2-3 mins)
   const distKm = calculateDistanceKm(restLat, restLng, custLat, custLng);
-  const dynamicDistanceEta = Math.max(12, ((currentRestaurant as any)?.prepTime || 12) + Math.ceil(distKm * 3.2));
-  const etaMinutes =
-    trackingData?.etaMinutes !== undefined && trackingData?.etaMinutes !== null
-      ? trackingData.etaMinutes
-      : orderDetail?.etaMinutes
-      ? orderDetail.etaMinutes
-      : olaEtaMins
-      ? olaEtaMins
-      : typeof currentRestaurant?.deliveryTime === 'number' && currentRestaurant.deliveryTime > 0
-      ? currentRestaurant.deliveryTime
-      : dynamicDistanceEta;
+  const transitMins = olaTransitMins !== null && olaTransitMins > 0
+    ? olaTransitMins
+    : (distKm > 0 ? Math.max(2, Math.ceil(distKm * 3)) : 3);
 
-  // 1. Restaurant / Kitchen lifecycle status from Restaurant App
-  const kitchenStatus = orderDetail?.status || 'placed';
+  // 4. Live Remaining Preparation & Delivery Time
+  const isDineIn = Boolean(orderDetail?.tableId && !orderDetail?.deliveryAddress && !orderDetail?.address && !trackingData?.riderId && !isRiderAccepted);
+  const isCancelled = kitchenStatus === 'cancelled' || kitchenStatus === 'rejected';
+  const isOrderDelivered = riderStatus === 'delivered' || (isDineIn && (kitchenStatus === 'served' || kitchenStatus === 'delivered'));
+  const isPickedUp = riderStatus === 'picked_up' || riderStatus === 'out_for_delivery';
+  const isReady = kitchenStatus === 'ready' || (isDineIn && kitchenStatus === 'served');
+  const isPreparing = kitchenStatus === 'preparing' || kitchenStatus === 'confirmed';
 
-  // 2. Delivery Partner / Logistics lifecycle status from Rider App
-  const riderStatus = trackingData?.status || null;
+  // Live remaining kitchen preparation time (synchronized with restaurant app timer)
+  let activePrepMins = 0;
+  if (!isCancelled && !isOrderDelivered && !isPickedUp && !isReady) {
+    if (isPreparing) {
+      // Order is actively being prepared in the kitchen.
+      // Starts from the exact moment the restaurant accepted the order (acceptedTime / acknowledgedAt / updatedAt / createdAt)
+      const prepStartTime = new Date(
+        orderDetail?.acceptedTime ||
+        orderDetail?.acknowledgedAt ||
+        orderDetail?.updatedAt ||
+        orderDetail?.createdAt ||
+        Date.now()
+      ).getTime();
+      const elapsedPrepSecs = Math.max(0, Math.floor((tickNow - prepStartTime) / 1000));
+      const remainingPrepSecs = (totalKitchenPrepTime * 60) - elapsedPrepSecs;
+      // Mirror restaurant app countdown: round up remaining minutes, minimum 1 min while waiting to pack/handover
+      activePrepMins = remainingPrepSecs > 0 ? Math.ceil(remainingPrepSecs / 60) : 1;
+    } else {
+      // Order placed / received: kitchen has not started cooking yet, full prep time applies
+      activePrepMins = totalKitchenPrepTime;
+    }
+  }
 
-  // Active status check: has a rider accepted / been assigned to this order?
-  const currentStatus = (isRealOrder && !trackingData?.riderId) ? kitchenStatus : (riderStatus || kitchenStatus || 'placed');
-  const isRiderAccepted = Boolean(
-    trackingData?.riderId &&
-    riderStatus &&
-    ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(riderStatus)
-  );
+  // Live remaining delivery transit time (Matching Swiggy ETA dispatch algorithm)
+  let activeDeliveryMins = 0;
+  if (!isCancelled && !isOrderDelivered) {
+    if (isPickedUp) {
+      // Food picked up: countdown remaining road transit time to customer doorstep
+      const pickupTime = new Date(
+        trackingData?.updatedAt ||
+        trackingData?.createdAt ||
+        Date.now()
+      ).getTime();
+      const elapsedTransitSecs = Math.max(0, Math.floor((tickNow - pickupTime) / 1000));
+      const remainingTransitSecs = (transitMins * 60) - elapsedTransitSecs;
+      activeDeliveryMins = remainingTransitSecs > 0 ? Math.ceil(remainingTransitSecs / 60) : 1;
+    } else if (isReady && !isRiderAccepted) {
+      // Swiggy behavior: Food is ready, but delivery partner is not assigned yet.
+      // Add the buffer for partner matching & rider traveling to store (~6 mins) + store-to-customer transit
+      const riderAssignmentAndPickupBuffer = 6;
+      activeDeliveryMins = riderAssignmentAndPickupBuffer + transitMins;
+    } else if (isReady && riderStatus === 'assigned') {
+      // Food is ready and partner is assigned, rushing to store (~3 mins) + store-to-customer transit
+      const riderArrivalAtStoreBuffer = 3;
+      activeDeliveryMins = riderArrivalAtStoreBuffer + transitMins;
+    } else {
+      // Food at restaurant: full road delivery transit time from store to customer
+      activeDeliveryMins = transitMins;
+    }
+  }
 
-  const riderDisplayName = riderInfo?.name || riderInfo?.fullName || null;
+  // Exact Preparation Time + Delivery Time (Live Updating in Real-Time)
+  const etaMinutes = (isCancelled || isOrderDelivered)
+    ? 0
+    : Math.max(1, activePrepMins + activeDeliveryMins);
 
   const getStatusDisplay = () => {
     // ── STAGE 6: CANCELLED / REJECTED ──
@@ -693,12 +1204,14 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       };
     }
 
-    // ── STAGE 5: DELIVERED / SERVED ──
-    if (riderStatus === 'delivered' || kitchenStatus === 'served' || kitchenStatus === 'delivered') {
+    // ── STAGE 5: DELIVERED (Or SERVED for Dine-in) ──
+    if (riderStatus === 'delivered' || (isDineIn && (kitchenStatus === 'served' || kitchenStatus === 'delivered'))) {
       return {
-        title: 'Order Delivered! 🎉',
-        description: `Enjoy your delicious meal from\n${restaurantName}`,
-        badge: 'DELIVERED',
+        title: isDineIn ? 'Order Served! 🍽️' : 'Order Delivered! 🎉',
+        description: isDineIn
+          ? `Enjoy your meal at ${restaurantName}`
+          : `Enjoy your delicious meal from\n${restaurantName}`,
+        badge: isDineIn ? 'SERVED' : 'DELIVERED',
       };
     }
 
@@ -722,7 +1235,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
     // ── STAGE 2: PARTNER ARRIVED AT RESTAURANT ──
     if (riderStatus === 'arrived_at_store') {
-      if (kitchenStatus === 'ready') {
+      if (kitchenStatus === 'ready' || kitchenStatus === 'served') {
         return {
           title: 'Collecting your order',
           description: `${riderDisplayName} is at ${restaurantName} collecting your packed order`,
@@ -739,36 +1252,45 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     }
 
     // ── STAGE 1B: PARTNER ASSIGNED & ON THE WAY TO RESTAURANT ──
-    if (riderStatus === 'assigned') {
-      if (kitchenStatus === 'ready') {
+    if (riderStatus === 'assigned' || isRiderAccepted) {
+      const partnerName = riderDisplayName || 'Delivery partner';
+      if (kitchenStatus === 'ready' || kitchenStatus === 'served') {
         return {
           title: 'Order is Ready & Partner is on the way',
-          description: `Your order is packed & ready. ${riderDisplayName} is rushing to ${restaurantName} to pick it up`,
+          description: `Your order is packed & ready. ${partnerName} is rushing to ${restaurantName} to pick it up`,
           badge: 'READY FOR PICKUP',
         };
       } else {
         // Food is cooking, rider is on the way
         return {
           title: 'Partner is on the way',
-          description: `${riderDisplayName} is on the way to ${restaurantName} while your food is being freshly prepared`,
+          description: `${partnerName} is on the way to ${restaurantName} • Food prep: ${totalKitchenPrepTime} mins (~${activePrepMins} mins left)`,
           badge: 'ON THE WAY',
         };
       }
     }
 
     // ── STAGE 1A: NO RIDER ASSIGNED YET (WAITING / FINDING PARTNER) ──
-    if (kitchenStatus === 'ready') {
+    if (kitchenStatus === 'ready' || kitchenStatus === 'served') {
       return {
-        title: 'Order is Ready',
-        description: 'Order is Ready, waiting for delivery partner to be assigned...',
-        badge: 'ORDER READY',
+        title: 'Order is Ready! Finding Partner',
+        description: `Your food from ${restaurantName} is freshly prepared & hot! Assigning nearest delivery partner to pick it up...`,
+        badge: 'FINDING PARTNER',
       };
     }
 
     if (kitchenStatus === 'preparing' || kitchenStatus === 'confirmed') {
+      if (isRiderAccepted || riderStatus === 'assigned') {
+        const partnerName = riderDisplayName || 'Delivery partner';
+        return {
+          title: 'Partner is on the way',
+          description: `${partnerName} is on the way to ${restaurantName} • Food prep: ${totalKitchenPrepTime} mins (~${activePrepMins} mins left)`,
+          badge: 'ON THE WAY',
+        };
+      }
       return {
         title: 'Preparing your order',
-        description: `Chef at ${restaurantName} is preparing your freshly made meal. Finding a delivery partner nearby...`,
+        description: `Chef at ${restaurantName} is preparing your fresh meal (${totalKitchenPrepTime} mins prep time). Finding a delivery partner nearby...`,
         badge: 'PREPARING',
       };
     }
@@ -790,7 +1312,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const prevStatusKeyRef = useRef<string>('');
 
   useEffect(() => {
-    const currentStatusKey = `${statusInfo.title}_${statusInfo.badge}_${isRiderAccepted}_${kitchenStatus}_${riderStatus}`;
+    const currentStatusKey = `${statusInfo.title}_${statusInfo.badge}_${isRiderAccepted}_${kitchenStatus}_${riderStatus}_${riderDisplayName}`;
     if (prevStatusKeyRef.current && prevStatusKeyRef.current !== currentStatusKey) {
       // 1. Smooth layout animation for card resize
       try {
@@ -822,10 +1344,16 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       ]).start();
     }
     prevStatusKeyRef.current = currentStatusKey;
-  }, [statusInfo.title, statusInfo.badge, isRiderAccepted, kitchenStatus, riderStatus]);
+  }, [statusInfo.title, statusInfo.badge, isRiderAccepted, kitchenStatus, riderStatus, riderDisplayName]);
 
   const handleCallRider = () => {
-    const phone = riderInfo?.phone || riderInfo?.contactNumber;
+    const phone =
+      riderInfo?.phone ||
+      riderInfo?.contactNumber ||
+      trackingData?.riderPhone ||
+      trackingData?.rider?.phone ||
+      orderDetail?.riderPhone ||
+      orderDetail?.delivery?.riderPhone;
     if (phone) {
       Linking.openURL(`tel:${phone}`);
     } else if (Platform.OS === 'android') {
@@ -839,41 +1367,174 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       return;
     }
     try {
-      // 1. Fetch from local AsyncStorage @placed_orders_history immediately
-      try {
-        const localData = await AsyncStorage.getItem('@placed_orders_history');
-        if (localData) {
-          const list = JSON.parse(localData);
-          const found = list.find((o: any) => o.id === orderId || o.orderId === orderId);
-          if (found) {
-            setOrderDetail((prev: any) => ({ ...prev, ...found }));
+      // 1. Fetch from local AsyncStorage @placed_orders_history ONLY ONCE on initial mount
+      // to provide immediate offline/cache hydration without causing regression loops during polling
+      if (!hasHydratedLocalRef.current) {
+        hasHydratedLocalRef.current = true;
+        try {
+          const localData = await AsyncStorage.getItem('@placed_orders_history');
+          if (localData) {
+            const list = JSON.parse(localData);
+            const found = list.find((o: any) => o.id === orderId || o.orderId === orderId);
+            if (found) {
+              setOrderDetail((prev: any) => {
+                const resolvedStatus = mergeKitchenStatus(prev?.status, found.status);
+                const items = (found.items && found.items.length > 0) ? found.items : (prev?.items || []);
+                return { ...prev, ...found, items, status: resolvedStatus };
+              });
+            }
           }
-        }
-      } catch (e) {}
+        } catch (e) {}
+      }
 
-      // 2. Fetch from backend order detail endpoint
+      // Retrieve active auth token if available (Keychain/KeyStore -> Auth State -> Session Storage -> Public Fallback)
+      let activeToken = sessionToken;
+      if (!activeToken) {
+        try {
+          const secToken = await SecureStorage.getSessionToken();
+          if (secToken) activeToken = secToken;
+        } catch (e) {}
+      }
+      if (!activeToken) {
+        try {
+          const stored = await AsyncStorage.getItem('@auth_state');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.sessionToken) activeToken = parsed.sessionToken;
+          }
+        } catch (e) {}
+      }
+      if (!activeToken) {
+        try {
+          const secBackup = await AsyncStorage.getItem('@sec_myquro_auth_session_token');
+          if (secBackup) activeToken = secBackup;
+        } catch (e) {}
+      }
+
+      // If user is guest/unauthenticated, use public fallback token to access tracking on live server
+      const effectiveToken = activeToken || PUBLIC_FALLBACK_TRACKING_TOKEN;
+      const authHeaders: Record<string, string> = { Authorization: `Bearer ${effectiveToken}` };
+
+      // 2. Fetch live data from backend order detail endpoint
       const orderResp = await fetch(`${BACKEND_URL}/api/orders/${orderId}/detail`, {
-        headers: { ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
+        headers: authHeaders,
       });
       if (orderResp.ok) {
         const data = await orderResp.json();
         if (data.order) {
-          setOrderDetail((prev: any) => ({ ...prev, ...data.order }));
+          const prepMins = Number(data.order.prepTimeMinutes ?? data.order.prep_time_minutes) > 0 
+            ? Number(data.order.prepTimeMinutes ?? data.order.prep_time_minutes) 
+            : undefined;
+          const extPrepMins = (data.order.extendedPrepMinutes !== undefined || data.order.extended_prep_minutes !== undefined)
+            ? Number(data.order.extendedPrepMinutes ?? data.order.extended_prep_minutes)
+            : undefined;
+
+          setOrderDetail((prev: any) => {
+            const resolvedStatus = mergeKitchenStatus(prev?.status, data.order.status);
+            const acceptedTime = data.order.acknowledgedAt || data.order.acceptedTime || (resolvedStatus === 'preparing' ? (data.order.updatedAt || prev?.acceptedTime) : undefined) || prev?.acceptedTime;
+            const items = (data.order.items && data.order.items.length > 0) ? data.order.items : (prev?.items && prev.items.length > 0 ? prev.items : []);
+            return { 
+              ...prev, 
+              ...data.order, 
+              items,
+              status: resolvedStatus,
+              ...(prepMins ? { prepTimeMinutes: prepMins } : {}),
+              ...(extPrepMins !== undefined ? { extendedPrepMinutes: extPrepMins } : {}),
+              ...(acceptedTime ? { acceptedTime } : {})
+            };
+          });
+
+          // Hydrate rider & delivery tracking if order contains assigned delivery info
+          const orderDel = data.order.delivery || null;
+          const assignedDelStatus = (data.order.deliveryStatus && data.order.deliveryStatus !== 'offered' && data.order.deliveryStatus !== 'unassigned')
+            ? data.order.deliveryStatus
+            : (orderDel?.status && orderDel.status !== 'offered' && orderDel.status !== 'unassigned' ? orderDel.status : null);
+          const assignedRiderName = data.order.riderName || orderDel?.riderName || data.order.rider?.name;
+          const assignedRiderPhone = data.order.riderPhone || orderDel?.riderPhone || data.order.rider?.phone;
+          const assignedRiderId = data.order.riderId || orderDel?.riderId || data.order.rider?.id;
+
+          if (assignedDelStatus || assignedRiderName || orderDel) {
+            setTrackingData((prev: any) => ({
+              ...prev,
+              ...(orderDel || {}),
+              status: assignedDelStatus || prev?.status || orderDel?.status,
+              riderId: assignedRiderId || prev?.riderId || (assignedRiderName ? 'assigned_rider' : prev?.riderId),
+              riderName: assignedRiderName || prev?.riderName,
+              riderPhone: assignedRiderPhone || prev?.riderPhone,
+            }));
+          }
+
+          if (assignedRiderName || assignedRiderPhone || data.order.rider) {
+            setRiderInfo((prev: any) => ({
+              ...prev,
+              ...(data.order.rider || {}),
+              name: assignedRiderName || prev?.name,
+              phone: assignedRiderPhone || prev?.phone,
+            }));
+          }
+
+          syncOrderToLocalStorage(data.order);
         }
       }
 
       // 3. Fetch from backend delivery track endpoint
-      const trackResp = await fetch(`${BACKEND_URL}/api/delivery/track/${orderId}`, {
-        headers: { ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
+      let trackResp = await fetch(`${BACKEND_URL}/api/delivery/track/${orderId}`, {
+        headers: authHeaders,
       });
+      if (!trackResp.ok && trackResp.status === 401 && effectiveToken !== PUBLIC_FALLBACK_TRACKING_TOKEN) {
+        // Fallback retry with public tracking token
+        trackResp = await fetch(`${BACKEND_URL}/api/delivery/track/${orderId}`, {
+          headers: { Authorization: `Bearer ${PUBLIC_FALLBACK_TRACKING_TOKEN}` },
+        });
+      }
+      if (!trackResp.ok && trackResp.status === 401) {
+        // Fallback retry without auth header in case server is running updated public route
+        trackResp = await fetch(`${BACKEND_URL}/api/delivery/track/${orderId}`);
+      }
       if (trackResp.ok) {
         const data = await trackResp.json();
-        setTrackingData(data.delivery || null);
-        setRiderInfo(data.rider || null);
+        const delStatus = data.delivery?.status || data.deliveryStatus || 'assigned';
+        const riderName = data.rider?.name || data.delivery?.riderName || data.riderName;
+        const riderPhone = data.rider?.phone || data.delivery?.riderPhone || data.riderPhone;
+        const riderId = data.delivery?.riderId || data.rider?.id || data.riderId;
+
+        if (data.delivery || riderName || (delStatus && delStatus !== 'offered' && delStatus !== 'unassigned')) {
+          setTrackingData((prev: any) => ({
+            ...prev,
+            ...(data.delivery || {}),
+            status: delStatus,
+            riderId: riderId || prev?.riderId || (riderName ? 'assigned_rider' : undefined),
+            riderName: riderName || prev?.riderName,
+            riderPhone: riderPhone || prev?.riderPhone,
+          }));
+        }
+        if (data.rider || riderName || riderPhone) {
+          setRiderInfo((prev: any) => ({
+            ...prev,
+            ...(data.rider || {}),
+            name: riderName || prev?.name,
+            phone: riderPhone || prev?.phone,
+          }));
+        }
+        if (data.delivery?.currentLat && data.delivery?.currentLng) {
+          const lat = Number(data.delivery.currentLat);
+          const lng = Number(data.delivery.currentLng);
+          const updateScript = `if (window.updateRiderPosition) { window.updateRiderPosition(${lng}, ${lat}); } true;`;
+          fullMapWebviewRef.current?.injectJavaScript(updateScript);
+          miniMapWebviewRef.current?.injectJavaScript(updateScript);
+        }
       } else if (trackResp.status === 404) {
-        // No delivery partner assigned yet
-        setTrackingData(null);
-        setRiderInfo(null);
+        // Only clear trackingData if not already populated with an assigned partner
+        setTrackingData((prev: any) => {
+          if (prev?.riderId || prev?.riderName || prev?.status === 'assigned') {
+            return prev;
+          }
+          return null;
+        });
+        setRiderInfo((prev: any) => {
+          if (prev?.name) return prev;
+          return null;
+        });
       }
     } catch (err) {
       console.warn('Error fetching tracking data:', err);
@@ -884,10 +1545,11 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
   useEffect(() => {
     if (!orderId || orderId === 'ORD-98421') return;
+    hasHydratedLocalRef.current = false;
     fetchInitialData();
     const interval = setInterval(() => {
       fetchInitialData();
-    }, 3000);
+    }, 2000);
     return () => clearInterval(interval);
   }, [orderId]);
 
@@ -907,52 +1569,219 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     socket.on('delivery-update', (data: any) => {
       // Backend sends a flat object { orderId, status, currentLat, currentLng, riderName, riderPhone }
       // OR { delivery: {...}, rider: {...} } — handle both shapes.
+      let newLat: number | undefined;
+      let newLng: number | undefined;
+      const assignedRiderId = data.delivery?.riderId ?? data.riderId ?? data.rider?.id;
+      const assignedStatus = data.delivery?.status ?? data.deliveryStatus ?? data.status;
+      const assignedRiderName = data.riderName ?? data.delivery?.riderName ?? data.rider?.name;
+      const assignedRiderPhone = data.riderPhone ?? data.delivery?.riderPhone ?? data.rider?.phone;
+
       if (data.delivery) {
-        setTrackingData((prev: any) => ({ ...prev, ...data.delivery }));
-      } else if (data.status) {
+        setTrackingData((prev: any) => ({
+          ...prev,
+          ...data.delivery,
+          status: assignedStatus || prev?.status || 'assigned',
+          riderId: assignedRiderId ?? prev?.riderId ?? (assignedRiderName ? 'assigned_rider' : undefined),
+          riderName: assignedRiderName ?? prev?.riderName,
+          riderPhone: assignedRiderPhone ?? prev?.riderPhone,
+        }));
+        newLat = data.delivery.currentLat;
+        newLng = data.delivery.currentLng;
+      } else if (data.status || data.deliveryStatus) {
         // Flat payload from /api/delivery/status/update and /api/delivery/accept
         setTrackingData((prev: any) => ({
           ...prev,
-          status: data.status,
+          status: assignedStatus,
           currentLat: data.currentLat ?? prev?.currentLat,
           currentLng: data.currentLng ?? prev?.currentLng,
-          riderId: data.riderId ?? data.rider?.id ?? prev?.riderId,
+          riderId: assignedRiderId ?? prev?.riderId ?? (assignedRiderName ? 'assigned_rider' : undefined),
+          riderName: assignedRiderName ?? prev?.riderName,
+          riderPhone: assignedRiderPhone ?? prev?.riderPhone,
         }));
+        newLat = data.currentLat;
+        newLng = data.currentLng;
       }
-      if (data.rider) setRiderInfo(data.rider);
-      if (data.riderName || data.riderPhone) {
+      if (data.rider) {
+        setRiderInfo((prev: any) => ({ ...prev, ...data.rider }));
+      }
+      if (assignedRiderName || assignedRiderPhone) {
         setRiderInfo((prev: any) => ({
           ...prev,
-          name: data.riderName ?? prev?.name,
-          phone: data.riderPhone ?? prev?.phone,
+          name: assignedRiderName ?? prev?.name,
+          phone: assignedRiderPhone ?? prev?.phone,
         }));
+      }
+
+      // Smooth Bike Gliding & Bearing Rotation without page reload!
+      if (newLat !== undefined && newLng !== undefined) {
+        const updateScript = `if (window.updateRiderPosition) { window.updateRiderPosition(${Number(newLng)}, ${Number(newLat)}); } true;`;
+        fullMapWebviewRef.current?.injectJavaScript(updateScript);
+        miniMapWebviewRef.current?.injectJavaScript(updateScript);
       }
     });
 
     socket.on('order-update', (data: any) => {
-      if (data.order) setOrderDetail((prev: any) => ({ ...prev, ...data.order }));
-      if (data.status) setOrderDetail((prev: any) => ({ ...prev, status: data.status }));
+      const incomingOrder = data.order || {};
+      const prepTimeMinutes = Number(data.prepTimeMinutes || incomingOrder.prepTimeMinutes || data.prep_time_minutes || incomingOrder.prep_time_minutes) || undefined;
+      const extendedPrepMinutes = (data.extendedPrepMinutes !== undefined || incomingOrder.extendedPrepMinutes !== undefined || data.extended_prep_minutes !== undefined || incomingOrder.extended_prep_minutes !== undefined)
+        ? Number(data.extendedPrepMinutes ?? incomingOrder.extendedPrepMinutes ?? data.extended_prep_minutes ?? incomingOrder.extended_prep_minutes)
+        : undefined;
+      const isNowPreparing = (data.status || incomingOrder.status) === 'preparing' || (data.status || incomingOrder.status) === 'confirmed';
+      const acceptedTime = isNowPreparing
+        ? (data.acceptedTime || incomingOrder.acceptedTime || data.acknowledgedAt || incomingOrder.acknowledgedAt || data.updatedAt || incomingOrder.updatedAt || new Date().toISOString())
+        : undefined;
+
+      const orderDelStatus = data.deliveryStatus || incomingOrder.deliveryStatus;
+      const orderRiderName = data.riderName || incomingOrder.riderName;
+      const orderRiderPhone = data.riderPhone || incomingOrder.riderPhone;
+
+      if (orderDelStatus && orderDelStatus !== 'offered' && orderDelStatus !== 'unassigned') {
+        setTrackingData((prev: any) => ({
+          ...prev,
+          status: orderDelStatus,
+          riderId: data.riderId ?? incomingOrder.riderId ?? prev?.riderId ?? (orderRiderName ? 'assigned_rider' : undefined),
+          riderName: orderRiderName ?? prev?.riderName,
+          riderPhone: orderRiderPhone ?? prev?.riderPhone,
+        }));
+      }
+      if (orderRiderName || orderRiderPhone) {
+        setRiderInfo((prev: any) => ({
+          ...prev,
+          name: orderRiderName ?? prev?.name,
+          phone: orderRiderPhone ?? prev?.phone,
+        }));
+      }
+
+      setOrderDetail((prev: any) => {
+        const resolvedStatus = mergeKitchenStatus(prev?.status, data.status || incomingOrder.status);
+        return { 
+          ...prev, 
+          ...incomingOrder, 
+          status: resolvedStatus,
+          ...(orderDelStatus ? { deliveryStatus: orderDelStatus } : {}),
+          ...(orderRiderName ? { riderName: orderRiderName } : {}),
+          ...(orderRiderPhone ? { riderPhone: orderRiderPhone } : {}),
+          ...(prepTimeMinutes ? { prepTimeMinutes } : {}),
+          ...(extendedPrepMinutes !== undefined ? { extendedPrepMinutes } : {}),
+          ...(acceptedTime ? { acceptedTime } : (prev?.acceptedTime ? { acceptedTime: prev.acceptedTime } : {}))
+        };
+      });
+      syncOrderToLocalStorage({ 
+        ...incomingOrder, 
+        status: data.status || incomingOrder.status,
+        ...(orderDelStatus ? { deliveryStatus: orderDelStatus } : {}),
+        ...(orderRiderName ? { riderName: orderRiderName } : {}),
+        ...(orderRiderPhone ? { riderPhone: orderRiderPhone } : {}),
+        ...(prepTimeMinutes ? { prepTimeMinutes } : {}),
+        ...(extendedPrepMinutes !== undefined ? { extendedPrepMinutes } : {}),
+        ...(acceptedTime ? { acceptedTime } : {})
+      });
     });
 
     socket.on('order-status-update', (data: any) => {
-      if (data.status) {
-        setOrderDetail((prev: any) => ({ ...prev, status: data.status }));
+      const orderDelStatus = data.deliveryStatus;
+      const orderRiderName = data.riderName;
+      const orderRiderPhone = data.riderPhone;
+
+      if (orderDelStatus && orderDelStatus !== 'offered' && orderDelStatus !== 'unassigned') {
+        setTrackingData((prev: any) => ({
+          ...prev,
+          status: orderDelStatus,
+          riderId: data.riderId ?? prev?.riderId ?? (orderRiderName ? 'assigned_rider' : undefined),
+          riderName: orderRiderName ?? prev?.riderName,
+          riderPhone: orderRiderPhone ?? prev?.riderPhone,
+        }));
+      }
+      if (orderRiderName || orderRiderPhone) {
+        setRiderInfo((prev: any) => ({
+          ...prev,
+          name: orderRiderName ?? prev?.name,
+          phone: orderRiderPhone ?? prev?.phone,
+        }));
+      }
+
+      if (data.status || data.prepTimeMinutes || data.extendedPrepMinutes !== undefined || orderDelStatus) {
+        const isNowPreparing = data.status === 'preparing' || data.status === 'confirmed';
+        const acceptedTime = isNowPreparing
+          ? (data.acceptedTime || data.acknowledgedAt || data.updatedAt || new Date().toISOString())
+          : undefined;
+
+        setOrderDetail((prev: any) => {
+          const resolvedStatus = mergeKitchenStatus(prev?.status, data.status);
+          const prepTimeMinutes = Number(data.prepTimeMinutes || data.prep_time_minutes) > 0 ? Number(data.prepTimeMinutes || data.prep_time_minutes) : prev?.prepTimeMinutes;
+          const extendedPrepMinutes = (data.extendedPrepMinutes !== undefined || data.extended_prep_minutes !== undefined)
+            ? Number(data.extendedPrepMinutes ?? data.extended_prep_minutes)
+            : prev?.extendedPrepMinutes;
+          return { 
+            ...prev, 
+            status: resolvedStatus, 
+            ...(orderDelStatus ? { deliveryStatus: orderDelStatus } : {}),
+            ...(orderRiderName ? { riderName: orderRiderName } : {}),
+            ...(orderRiderPhone ? { riderPhone: orderRiderPhone } : {}),
+            ...(prepTimeMinutes ? { prepTimeMinutes } : {}),
+            ...(extendedPrepMinutes !== undefined ? { extendedPrepMinutes } : {}),
+            ...(acceptedTime ? { acceptedTime } : (prev?.acceptedTime ? { acceptedTime: prev.acceptedTime } : {}))
+          };
+        });
+        syncOrderToLocalStorage({ 
+          status: data.status,
+          ...(orderDelStatus ? { deliveryStatus: orderDelStatus } : {}),
+          ...(orderRiderName ? { riderName: orderRiderName } : {}),
+          ...(orderRiderPhone ? { riderPhone: orderRiderPhone } : {}),
+          ...(data.prepTimeMinutes ? { prepTimeMinutes: Number(data.prepTimeMinutes) } : {}),
+          ...(data.extendedPrepMinutes !== undefined ? { extendedPrepMinutes: Number(data.extendedPrepMinutes) } : {}),
+          ...(acceptedTime ? { acceptedTime } : {})
+        });
       }
     });
 
     socket.on('order-status', (data: any) => {
       console.log('📡 [TrackingScreen] Received order-status event:', data);
-      if (data.status) {
-        setOrderDetail((prev: any) => ({ ...prev, status: data.status }));
+      if (data.status || data.prepTimeMinutes || data.extendedPrepMinutes !== undefined) {
+        const isNowPreparing = data.status === 'preparing' || data.status === 'confirmed';
+        const acceptedTime = isNowPreparing
+          ? (data.acceptedTime || data.acknowledgedAt || data.updatedAt || new Date().toISOString())
+          : undefined;
+
+        setOrderDetail((prev: any) => {
+          const resolvedStatus = mergeKitchenStatus(prev?.status, data.status);
+          const prepTimeMinutes = Number(data.prepTimeMinutes || data.prep_time_minutes) > 0 ? Number(data.prepTimeMinutes || data.prep_time_minutes) : prev?.prepTimeMinutes;
+          const extendedPrepMinutes = (data.extendedPrepMinutes !== undefined || data.extended_prep_minutes !== undefined)
+            ? Number(data.extendedPrepMinutes ?? data.extended_prep_minutes)
+            : prev?.extendedPrepMinutes;
+          return { 
+            ...prev, 
+            status: resolvedStatus, 
+            ...(prepTimeMinutes ? { prepTimeMinutes } : {}),
+            ...(extendedPrepMinutes !== undefined ? { extendedPrepMinutes } : {}),
+            ...(acceptedTime ? { acceptedTime } : (prev?.acceptedTime ? { acceptedTime: prev.acceptedTime } : {}))
+          };
+        });
+        syncOrderToLocalStorage({ 
+          status: data.status,
+          ...(data.prepTimeMinutes ? { prepTimeMinutes: Number(data.prepTimeMinutes) } : {}),
+          ...(data.extendedPrepMinutes !== undefined ? { extendedPrepMinutes: Number(data.extendedPrepMinutes) } : {}),
+          ...(acceptedTime ? { acceptedTime } : {})
+        });
       }
     });
 
     socket.on('order-prep-extended', (data: any) => {
       console.log('📡 [TrackingScreen] Received order-prep-extended event:', data);
-      setPrepExtensionNotice(data.message || `Kitchen requested ${data.extraMinutes || 10} extra minutes to prepare fresh food.`);
-      if (data.totalPrepMinutes) {
-        setOrderDetail((prev: any) => ({ ...prev, prepTimeMinutes: data.totalPrepMinutes }));
-      }
+      const extra = Number(data.extraMinutes) || 5;
+      const resolvedExtended = data.totalExtendedMinutes !== undefined
+        ? Number(data.totalExtendedMinutes)
+        : extra;
+      setPrepExtensionNotice(data.message || `Kitchen requested ${extra} extra minutes to prepare fresh food.`);
+      setOrderDetail((prev: any) => {
+        return {
+          ...prev,
+          extendedPrepMinutes: resolvedExtended,
+        };
+      });
+      syncOrderToLocalStorage({
+        extendedPrepMinutes: resolvedExtended,
+      });
     });
 
     socket.on('order-cancelled', (data: any) => {
@@ -1024,115 +1853,16 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     }
   };
 
-  const simulateStep = async (status: string) => {
-    setSimulating(true);
-
-    // 1. Immediately apply local stage state so UI updates in real-time
-    if (status === 'placed') {
-      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'placed' }));
-      setTrackingData(null);
-      setRiderInfo(null);
-    } else if (status === 'assigned') {
-      // DEV-ONLY inline mock rider — no DEFAULT_MOCK_RIDER constant
-      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
-      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'preparing' }));
-      setTrackingData({
-        orderId: orderId || 'ORD-98421',
-        status: 'assigned',
-        riderId: 'dev_rider',
-        currentLat: restLat + 0.005,
-        currentLng: restLng - 0.004,
-        etaMinutes: 22,
-      });
-      setRiderInfo(devMockRider);
-    } else if (status === 'arrived_at_store') {
-      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
-      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'ready' }));
-      setTrackingData({
-        orderId: orderId || 'ORD-98421',
-        status: 'arrived_at_store',
-        riderId: 'dev_rider',
-        currentLat: restLat,
-        currentLng: restLng,
-        etaMinutes: 18,
-      });
-      setRiderInfo(devMockRider);
-    } else if (status === 'picked_up') {
-      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
-      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'ready' }));
-      setTrackingData({
-        orderId: orderId || 'ORD-98421',
-        status: 'picked_up',
-        riderId: 'dev_rider',
-        currentLat: restLat * 0.8 + custLat * 0.2,
-        currentLng: restLng * 0.8 + custLng * 0.2,
-        etaMinutes: 14,
-      });
-      setRiderInfo(devMockRider);
-    } else if (status === 'out_for_delivery') {
-      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
-      setOrderDetail((prev: any) => ({ ...(prev || DEFAULT_MOCK_ORDER), status: 'out_for_delivery' }));
-      setTrackingData({
-        orderId: orderId || 'ORD-98421',
-        status: 'out_for_delivery',
-        riderId: 'dev_rider',
-        currentLat: restLat * 0.4 + custLat * 0.6,
-        currentLng: restLng * 0.4 + custLng * 0.6,
-        etaMinutes: 8,
-      });
-      setRiderInfo(devMockRider);
-    } else if (status === 'delivered') {
-      const devMockRider = { id: 'dev_rider', name: 'Dev Rider', fullName: 'Dev Rider', phone: '+91 99999 99999', contactNumber: '+91 99999 99999', rating: 4.8, totalDeliveries: 50, vehicleModel: 'Simulator Bike', vaccinated: true };
-      setOrderDetail((prev: any) => ({
-        ...(prev || DEFAULT_MOCK_ORDER),
-        status: 'delivered',
-        updatedAt: new Date().toISOString(),
-      }));
-      setTrackingData({
-        orderId: orderId || 'ORD-98421',
-        status: 'delivered',
-        riderId: 'dev_rider',
-        currentLat: custLat,
-        currentLng: custLng,
-        etaMinutes: 0,
-        updatedAt: new Date().toISOString(),
-      });
-      setRiderInfo(devMockRider);
-    }
-
-    if (Platform.OS === 'android') {
-      ToastAndroid.show(`Simulated: ${status.toUpperCase().replace(/_/g, ' ')}`, ToastAndroid.SHORT);
-    }
-
-    // 2. Also forward to backend if running a real backend order
-    if (orderId && orderId !== 'ORD-98421') {
-      try {
-        await fetch(`${BACKEND_URL}/api/delivery/simulate/step`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-          },
-          body: JSON.stringify({ orderId, status }),
-        });
-      } catch (err) {
-        // Silently handled
-      }
-    }
-
-    setSimulating(false);
-  };
-
-  // Only show DeliveredOrderView when the rider explicitly marks delivery complete.
-  // Do NOT trigger on kitchenStatus==='served' — that fires when the rider picks up the food.
-  const isDelivered = riderStatus === 'delivered';
+  // Only show DeliveredOrderView when the rider explicitly marks delivery complete (or when food is served for dine-in).
+  // Do NOT trigger on kitchenStatus==='served' for delivery — that fires when the rider picks up the food.
+  const isDelivered = riderStatus === 'delivered' || (isDineIn && (kitchenStatus === 'served' || kitchenStatus === 'delivered'));
 
   if (isDelivered) {
     return (
       <DeliveredOrderView
         orderId={orderId || undefined}
         restaurantName={restaurantName}
-        riderName={riderDisplayName}
+        riderName={riderDisplayName || riderInfo?.name || riderInfo?.fullName || 'HARAPRASAD S'}
         riderPhone={riderInfo?.phone}
         itemsCount={itemsCount}
         deliveredTime={trackingData?.updatedAt || orderDetail?.updatedAt}
@@ -1215,6 +1945,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             /* Live Interactive Full Ola MapView Mode (matching IncomingRequestModal UI) */
             <View style={StyleSheet.absoluteFill}>
               <WebView
+                ref={fullMapWebviewRef}
                 source={{
                   html: buildOlaMapHtml(
                     OLA_MAPS_API_KEY,
@@ -1226,6 +1957,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                     custLng,
                     restaurantName,
                     currentStatus,
+                    roadRouteCoords,
                   ),
                 }}
                 style={StyleSheet.absoluteFill}
@@ -1330,6 +2062,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             {/* Mini Map Canvas with Rounded Lens */}
             <View style={styles.miniMapLensWrapper}>
               <WebView
+                ref={miniMapWebviewRef}
                 source={{
                   html: buildMiniOlaMapHtml(
                     OLA_MAPS_API_KEY,
@@ -1340,6 +2073,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                     riderLat,
                     riderLng,
                     currentStatus,
+                    roadRouteCoords,
                   ),
                 }}
                 style={StyleSheet.absoluteFill}
@@ -1380,7 +2114,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         <View style={styles.overlappingCardContainer}>
           <View style={styles.deliveryStatusCard}>
             {!isRiderAccepted ? (
-              /* ── STAGE 1: ORDER RECEIVED (INITIAL STATE MATCHING SCREENSHOT) ── */
+              /* ── STAGE 1: ORDER RECEIVED / KITCHEN PREPARING (NO RIDER ASSIGNED YET) ── */
               <View>
                 <View style={styles.statusCardTopSection}>
                   {/* Left: Order Received Title + Restaurant/Address Timeline */}
@@ -1421,13 +2155,31 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                       </View>
                     )}
 
-                    {/* Waiting for delivery partner badge — always shown when no rider accepted */}
-                    <View style={styles.waitingPartnerBadge}>
-                      <View style={styles.pulsingAmberDot} />
-                      <Text style={styles.waitingPartnerBadgeText}>
-                        Waiting for delivery partner to be assigned
-                      </Text>
-                    </View>
+                    {/* Live Kitchen Preparation Time Badge / Pill */}
+                    {isPreparing && (
+                      <View style={styles.kitchenPrepPill}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
+                          <ChefHat size={14 * SCALE} color="#F5B800" style={{ marginRight: 6 }} />
+                          <Text style={styles.kitchenPrepPillText}>
+                            Kitchen Prep: <Text style={{ fontWeight: '800', color: '#F5B800' }}>{totalKitchenPrepTime}m</Text>
+                          </Text>
+                        </View>
+                        <View style={styles.kitchenPrepCountdownBadge}>
+                          <Clock size={11 * SCALE} color="#000000" style={{ marginRight: 4 }} />
+                          <Text style={styles.kitchenPrepCountdownText}>~{activePrepMins}m left</Text>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Finding delivery partner badge (amber pill shown ONLY when rider is not accepted) */}
+                    {!isRiderAccepted && (kitchenStatus === 'preparing' || kitchenStatus === 'confirmed' || kitchenStatus === 'ready') && (
+                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2E2005', borderColor: '#F59E0B', marginTop: 8 }]}>
+                        <View style={styles.pulsingAmberDot} />
+                        <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', flex: 1, fontWeight: '700' }]}>
+                          Finding a delivery partner nearby...
+                        </Text>
+                      </View>
+                    )}
 
                     {/* Extra prep time extension alert during dinner rush */}
                     {prepExtensionNotice && (
@@ -1436,6 +2188,23 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                         <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', flex: 1 }]}>
                           {prepExtensionNotice}
                         </Text>
+                      </View>
+                    )}
+
+                    {/* Swiggy Handover / Delivery Pickup OTP Badge */}
+                    {orderDetail?.handoverOtp && orderDetail?.status !== 'cancelled' && orderDetail?.status !== 'served' && (
+                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#1A1811', borderColor: '#F5B800', marginTop: 6, justifyContent: 'space-between' }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <ShieldCheck size={14} color="#F5B800" style={{ marginRight: 6 }} />
+                          <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', fontWeight: '700' }]}>
+                            Pickup Handover OTP:
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: '#F5B800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: '#000000', letterSpacing: 2 }}>
+                            {orderDetail.handoverOtp}
+                          </Text>
+                        </View>
                       </View>
                     )}
 
@@ -1450,7 +2219,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                     )}
                   </Animated.View>
 
-                  {/* Right: Gold ETA Box (30 mins) */}
+                  {/* Right: Gold ETA Box */}
                   <View style={styles.etaGoldBadgeCard}>
                     <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
                       <Defs>
@@ -1514,6 +2283,39 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
                     {/* Subtitle Description */}
                     <Text style={styles.partnerStatusDesc}>{statusInfo.description}</Text>
+
+                    {/* Partner Name Capsule + Kitchen Prep Mini Pill */}
+                    <View style={styles.partnerDetailsRow}>
+                      <View style={styles.partnerNameCapsule}>
+                        <View style={styles.riderOnlineDot} />
+                        <Text style={styles.partnerNameText} numberOfLines={1}>
+                          {riderDisplayName || 'Delivery Partner'}
+                        </Text>
+                      </View>
+                      {isPreparing && (
+                        <View style={styles.kitchenPrepMiniPill}>
+                          <ChefHat size={12 * SCALE} color="#F5B800" style={{ marginRight: 4 }} />
+                          <Text style={styles.kitchenPrepMiniText}>Prep: {totalKitchenPrepTime}m (~{activePrepMins}m left)</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Swiggy Handover / Delivery Pickup OTP Badge */}
+                    {orderDetail?.handoverOtp && orderDetail?.status !== 'cancelled' && orderDetail?.status !== 'served' && (
+                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#1A1811', borderColor: '#F5B800', marginTop: 6, justifyContent: 'space-between' }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <ShieldCheck size={14} color="#F5B800" style={{ marginRight: 6 }} />
+                          <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', fontWeight: '700' }]}>
+                            Pickup Handover OTP:
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: '#F5B800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: '#000000', letterSpacing: 2 }}>
+                            {orderDetail.handoverOtp}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
                   </Animated.View>
 
                   {/* Right: Gold ETA Badge (Matching Screenshot) */}
@@ -1623,18 +2425,10 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             <Text style={styles.savingsBannerText}>
               Yay!{' '}
               <Text style={styles.savingsAmountHighlight}>
-                {orderDetail?.discount > 0 ? `₹${orderDetail.discount} saved` : 'FREE delivery'}
+                {normalizePrice(orderDetail?.discount) > 0 ? `₹${normalizePrice(orderDetail.discount)} saved` : 'FREE delivery'}
               </Text>
               {' '}on this order
             </Text>
-
-            {/* Right Glowing Diamond Star */}
-            <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
-                fill="#34D399"
-              />
-            </Svg>
           </View>
 
           {/* ══════════════════════════════════════════════════════════════════════
@@ -1723,10 +2517,10 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               {/* Store Information */}
               <View style={styles.addressTextCol}>
                 <Text style={styles.addressNameTitle} numberOfLines={1}>
-                  {restaurantName || 'The Maharaja Restaurant'}
+                  {restaurantName || 'Restaurant'}
                 </Text>
-                <Text style={styles.addressSubtitle} numberOfLines={1}>
-                  Plot No- 475(P) Cosmopolis Road Dumduma, Khandagiri
+                <Text style={styles.addressSubtitle} numberOfLines={2}>
+                  {orderDetail?.restaurantAddress || currentRestaurant?.address || 'Store Location'}
                 </Text>
               </View>
             </View>
@@ -1746,8 +2540,8 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                 <Text style={styles.addressNameTitle} numberOfLines={1}>
                   Delivering to Home
                 </Text>
-                <Text style={styles.addressSubtitle} numberOfLines={1}>
-                  {deliveryAddress || 'The Iron Fist GYM, L.S Complex, Plot No – 784, 2nd Floor'}
+                <Text style={styles.addressSubtitle} numberOfLines={2}>
+                  {deliveryAddress || 'Your Delivery Location'}
                 </Text>
               </View>
             </View>
@@ -1762,10 +2556,13 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
             {/* List of Ordered Items */}
             <View style={styles.itemsListContainer}>
-              {(orderItemsList && orderItemsList.length > 0 ? orderItemsList : (!isRealOrder ? DEFAULT_MOCK_ORDER.items : [])).map((item: any, idx: number) => {
-                const itemName = item.name || item.menuItemName || 'MuscleBlaze Micronised Creatine Monohydrate CreAMP Powder (Citrus Blast)';
-                const itemQty = item.quantity || 1;
-                const itemPrice = item.price ? item.price * itemQty : 999;
+              {orderItemsList.map((item: any, idx: number) => {
+                const rawItemName = item.name || item.menuItemName || item.foodItem?.name || item.title || item.notes || 'Food Item';
+                const variantSuffix = item.variantName && item.variantName !== 'Regular' ? ` (${item.variantName})` : '';
+                const itemName = `${rawItemName}${variantSuffix}`;
+                const itemQty = Math.max(1, parseInt(String(item.quantity || item.qty || 1), 10));
+                const unitPrice = getItemPrice(item);
+                const itemPrice = (item.totalPrice ? normalizePrice(item.totalPrice) : (unitPrice * itemQty)) || (unitPrice * itemQty);
                 return (
                   <View key={item.id || idx} style={styles.orderDetailItemRow}>
                     {/* Gold Check Circle Badge */}
@@ -1785,6 +2582,18 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               })}
             </View>
 
+            {/* Total Bill Row */}
+            {orderTotalAmount > 0 && (
+              <View style={[styles.orderDetailItemRow, { marginTop: 12 * SCALE, paddingTop: 10 * SCALE, borderTopWidth: 1, borderTopColor: '#1F1D17' }]}>
+                <Text style={[styles.orderDetailItemName, { fontFamily: 'Urbanist-Bold', color: '#FFFFFF', fontSize: 14 * SCALE }]}>
+                  Total Bill
+                </Text>
+                <Text style={[styles.orderDetailItemPrice, { color: '#DEA430', fontSize: 15 * SCALE }]}>
+                  ₹{orderTotalAmount}
+                </Text>
+              </View>
+            )}
+
             {/* Dotted / Dashed Divider Line */}
             <View style={styles.dashedDividerLine} />
 
@@ -1794,7 +2603,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               <Text style={styles.metaLabelText}>
                 Placed at{' '}
                 <Text style={styles.metaValueGold}>
-                  {placedTimeFormatted || '05:56 PM'}
+                  {placedTimeFormatted || 'Just now'}
                 </Text>
               </Text>
 
@@ -1802,7 +2611,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               <Text style={styles.metaLabelText}>
                 Order{' '}
                 <Text style={styles.metaValueGold}>
-                  #246543925184003
+                  #{orderId || orderDetail?.id || orderDetail?.orderId || 'Recent'}
                 </Text>
               </Text>
             </View>
@@ -2001,7 +2810,7 @@ const styles = StyleSheet.create({
   headerRestaurantTitle: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 16.5 * SCALE,
-    color: '#E8E8E8',
+    color: '#FFFFFF',
     textAlign: 'center',
   },
   headerSubRow: {
@@ -2427,6 +3236,83 @@ const styles = StyleSheet.create({
     fontFamily: 'Outfit-Medium',
     letterSpacing: 0.2,
   },
+  kitchenPrepPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#16140D',
+    borderWidth: 1,
+    borderColor: '#3A3015',
+    borderRadius: 10 * SCALE,
+    paddingHorizontal: 10 * SCALE,
+    paddingVertical: 6 * SCALE,
+    marginTop: 8 * SCALE,
+    marginBottom: 4 * SCALE,
+  },
+  kitchenPrepPillText: {
+    color: '#E0D8C8',
+    fontSize: 12 * SCALE,
+    fontFamily: 'Urbanist-SemiBold',
+  },
+  kitchenPrepCountdownBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5B800',
+    paddingHorizontal: 7 * SCALE,
+    paddingVertical: 2.5 * SCALE,
+    borderRadius: 6 * SCALE,
+    marginLeft: 6 * SCALE,
+  },
+  kitchenPrepCountdownText: {
+    color: '#000000',
+    fontSize: 11 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+  },
+  partnerDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6 * SCALE,
+    marginTop: 8 * SCALE,
+    marginBottom: 4 * SCALE,
+  },
+  partnerNameCapsule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#131317',
+    borderWidth: 1,
+    borderColor: '#2E2D38',
+    borderRadius: 12 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    paddingVertical: 4 * SCALE,
+  },
+  riderOnlineDot: {
+    width: 6 * SCALE,
+    height: 6 * SCALE,
+    borderRadius: 3 * SCALE,
+    backgroundColor: '#10B981',
+    marginRight: 6 * SCALE,
+  },
+  partnerNameText: {
+    color: '#FFFFFF',
+    fontSize: 12.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+  },
+  kitchenPrepMiniPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#16140D',
+    borderWidth: 1,
+    borderColor: '#3A3015',
+    borderRadius: 12 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    paddingVertical: 4 * SCALE,
+  },
+  kitchenPrepMiniText: {
+    color: '#DEA430',
+    fontSize: 11 * SCALE,
+    fontFamily: 'Urbanist-Medium',
+  },
   timelineRowContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -2813,43 +3699,6 @@ const styles = StyleSheet.create({
   metaValueGold: {
     fontFamily: 'Urbanist-Bold',
     color: '#DEA430',
-  },
-
-  // Simulator Section
-  devSimulatorSection: {
-    backgroundColor: '#0D0D10',
-    borderWidth: 1,
-    borderColor: '#24242A',
-    borderRadius: 16 * SCALE,
-    padding: 12 * SCALE,
-    marginBottom: 10 * SCALE,
-  },
-  devHeaderToggle: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  devHeaderText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 12 * SCALE,
-    color: '#8E8E98',
-  },
-  devButtonsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6 * SCALE,
-    marginTop: 10 * SCALE,
-  },
-  devBtn: {
-    backgroundColor: '#1E1E24',
-    borderRadius: 8 * SCALE,
-    paddingHorizontal: 10 * SCALE,
-    paddingVertical: 6 * SCALE,
-  },
-  devBtnText: {
-    fontFamily: 'Urbanist-Bold',
-    fontSize: 11 * SCALE,
-    color: '#C0C0C0',
   },
 
   bottomHomeBar: {

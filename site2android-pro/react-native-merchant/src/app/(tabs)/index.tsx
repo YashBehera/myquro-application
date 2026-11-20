@@ -13,11 +13,13 @@ import {
   Modal,
   Animated,
   Platform,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { useRouter } from 'expo-router';
+import { useKeepAwake } from 'expo-keep-awake';
 import { useOrderStore, Order } from '../../state/orderStore';
 import { useComplaintStore } from '../../state/complaintStore';
 import { apiClient } from '../../services/apiClient';
@@ -26,6 +28,9 @@ import { soundService } from '../../utils/soundService';
 const { width } = Dimensions.get('window');
 
 export default function RestaurantDashboard() {
+  // Swiggy Screen Always Awake: keeps tablet/phone screen from sleeping while restaurant is live
+  useKeepAwake();
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [isOnline, setIsOnline] = useState(true);
@@ -36,14 +41,30 @@ export default function RestaurantDashboard() {
   const [showPrepTimeModal, setShowPrepTimeModal] = useState(false);
   const [tempPrepTime, setTempPrepTime] = useState(15);
   const [restaurantProfile, setRestaurantProfile] = useState<{
+    id?: string;
     restaurantName?: string;
     restaurantAddress?: string;
     city?: string;
     state?: string;
     postalCode?: string | number;
+    autoAcceptOrders?: boolean;
   } | null>(null);
   const [activeBottomTab, setActiveBottomTab] = useState<'Orders' | 'Menu' | 'Business' | 'Complaints' | 'More'>('Orders');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+
+  // Swiggy Outlet Snooze State
+  const [showSnoozeModal, setShowSnoozeModal] = useState(false);
+  const [snoozedUntil, setSnoozedUntil] = useState<Date | null>(null);
+  const [snoozeReason, setSnoozeReason] = useState<string>('');
+
+  // Swiggy Partial Out-of-Stock Modal State
+  const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
+  const [selectedStockOutItems, setSelectedStockOutItems] = useState<{ [id: string]: boolean }>({});
+  const [stockOutDuration, setStockOutDuration] = useState<number>(2);
+
+  // Swiggy Handover OTP Verification State
+  const [verifyingHandoverOrder, setVerifyingHandoverOrder] = useState<Order | null>(null);
+  const [handoverOtpInput, setHandoverOtpInput] = useState('');
 
   // Animated speech bubble for "Hello Partner!" badge
   const bubbleOpacity = useRef(new Animated.Value(1)).current;
@@ -58,8 +79,22 @@ export default function RestaurantDashboard() {
     acceptOrder,
     markReady,
     markPickedUp,
+    verifyHandover,
     rejectOrder,
+    rejectWithOutOfStockItems,
+    extendPrepTime,
   } = useOrderStore();
+
+  const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(true);
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  // 1-second live clock for kitchen prep countdowns
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const { complaints, loadComplaints, getActiveComplaintsCount } = useComplaintStore();
 
@@ -71,6 +106,7 @@ export default function RestaurantDashboard() {
         const rest = res.data?.restaurant || res.data;
         if (rest) {
           setRestaurantProfile(rest);
+          setAutoAcceptEnabled(rest.autoAcceptOrders ?? true);
         }
       } catch (e) {
         console.warn('Error fetching restaurant profile in index:', e);
@@ -126,20 +162,73 @@ export default function RestaurantDashboard() {
     return () => clearInterval(interval);
   }, [isOnline, addSimulatedOrder]);
 
-  // Prevent going offline if there are active accepted orders in preparation or ready
+  // Swiggy-style Outlet Availability & Snooze Handler
   const handleToggleOnline = () => {
+    if (snoozedUntil) {
+      handleResumeFromSnooze();
+      return;
+    }
     if (isOnline) {
       const hasActiveOrders = orders.some(o => o.status === 'Preparing' || o.status === 'Ready');
       if (hasActiveOrders) {
         Alert.alert(
           'Active Orders In Progress',
-          'You cannot go offline while you have active orders being prepared or waiting for delivery. Please complete all accepted orders first.',
-          [{ text: 'OK' }]
+          'You have active kitchen orders in progress. Would you like to snooze incoming orders temporarily?',
+          [
+            { text: 'Snooze Outlet', onPress: () => setShowSnoozeModal(true) },
+            { text: 'Cancel', style: 'cancel' },
+          ]
         );
         return;
       }
+
+      Alert.alert(
+        'Outlet Availability',
+        'Choose how you want to manage your outlet status:',
+        [
+          { text: 'Snooze Outlet (Rush Hour / Break)', onPress: () => setShowSnoozeModal(true) },
+          { text: 'Turn Completely Offline', style: 'destructive', onPress: () => setIsOnline(false) },
+          { text: 'Stay Online', style: 'cancel' },
+        ]
+      );
+    } else {
+      setIsOnline(true);
+      setSnoozedUntil(null);
     }
-    setIsOnline(!isOnline);
+  };
+
+  const handleSnoozeOutlet = async (durationMinutes: number, reason: string) => {
+    try {
+      setShowSnoozeModal(false);
+      const targetTime = new Date(Date.now() + durationMinutes * 60 * 1000);
+      setSnoozedUntil(targetTime);
+      setSnoozeReason(reason);
+      setIsOnline(false);
+
+      const restRes = await apiClient.get('/restaurants/my-restaurant');
+      const restId = restRes.data?.restaurant?.id;
+      if (restId) {
+        await apiClient.post(`/restaurants/${restId}/snooze`, { durationMinutes, reason });
+      }
+    } catch (e) {
+      console.warn('Error snoozing outlet:', e);
+    }
+  };
+
+  const handleResumeFromSnooze = async () => {
+    try {
+      setSnoozedUntil(null);
+      setSnoozeReason('');
+      setIsOnline(true);
+
+      const restRes = await apiClient.get('/restaurants/my-restaurant');
+      const restId = restRes.data?.restaurant?.id;
+      if (restId) {
+        await apiClient.post(`/restaurants/${restId}/unsnooze`);
+      }
+    } catch (e) {
+      console.warn('Error resuming outlet:', e);
+    }
   };
 
   const subTabs: ('Preparing' | 'Ready' | 'Picked up')[] = ['Preparing', 'Ready', 'Picked up'];
@@ -170,13 +259,37 @@ export default function RestaurantDashboard() {
     };
   }, []);
 
+  const handleToggleAutoAccept = async () => {
+    const nextVal = !autoAcceptEnabled;
+    setAutoAcceptEnabled(nextVal);
+    try {
+      const restId = restaurantProfile?.id;
+      if (restId) {
+        await apiClient.patch(`/restaurants/${restId}/auto-accept`, { autoAcceptOrders: nextVal });
+        Alert.alert(
+          nextVal ? '⚡ Auto-Accept Enabled' : 'Auto-Accept Disabled',
+          nextVal
+            ? 'Incoming customer orders will now be automatically accepted into the kitchen and reflect immediately on customer app!'
+            : 'New orders will require manual kitchen review and confirmation.'
+        );
+      }
+    } catch (e) {
+      console.warn('Error toggling auto-accept:', e);
+      setAutoAcceptEnabled(!nextVal);
+    }
+  };
+
   // Handle transitioning order statuses
-  const updateOrderStatus = (orderId: string, nextStatus: 'Preparing' | 'Ready' | 'Picked up' | 'Rejected') => {
+  const updateOrderStatus = (
+    orderId: string, 
+    nextStatus: 'Preparing' | 'Ready' | 'Picked up' | 'Rejected',
+    customPrepTime?: number
+  ) => {
     soundService.stopOrderAlarm();
     if (nextStatus === 'Rejected') {
       rejectOrder(orderId, 'Kitchen busy');
     } else if (nextStatus === 'Preparing') {
-      acceptOrder(orderId);
+      acceptOrder(orderId, customPrepTime || prepTime);
       setActiveSubTab(nextStatus);
     } else if (nextStatus === 'Ready') {
       markReady(orderId);
@@ -238,15 +351,41 @@ export default function RestaurantDashboard() {
 
       {/* TOP STATUS & HELP BAR */}
       <View style={styles.topBar}>
-        {/* Left Interactive Online/Offline Status Pill */}
-        <TouchableOpacity
-          onPress={handleToggleOnline}
-          activeOpacity={0.8}
-          style={styles.statusPill}
-        >
-          <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-          <Text style={styles.statusText}>{isOnline ? 'Online' : 'Offline'}</Text>
-        </TouchableOpacity>
+        {/* Left Status Controls: Online/Offline & Auto-Accept */}
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity
+            onPress={handleToggleOnline}
+            activeOpacity={0.8}
+            style={styles.statusPill}
+          >
+            <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
+            <Text style={styles.statusText}>{isOnline ? 'Online' : 'Offline'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={handleToggleAutoAccept}
+            activeOpacity={0.8}
+            style={[
+              styles.autoAcceptPill, 
+              autoAcceptEnabled ? styles.autoAcceptPillActive : styles.autoAcceptPillInactive
+            ]}
+          >
+            <Ionicons 
+              name="flash" 
+              size={12} 
+              color={autoAcceptEnabled ? "#1A1300" : "#A6A6A6"} 
+              style={{ marginRight: 4 }} 
+            />
+            <Text 
+              style={[
+                styles.autoAcceptPillText, 
+                autoAcceptEnabled ? styles.autoAcceptTextActive : styles.autoAcceptTextInactive
+              ]}
+            >
+              {autoAcceptEnabled ? 'Auto-Accept' : 'Manual'}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Right Controls: HELP & SETTINGS */}
         <View style={styles.topRightControls}>
@@ -276,6 +415,26 @@ export default function RestaurantDashboard() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* SNOOZE ACTIVE ALERT BANNER */}
+      {snoozedUntil && (
+        <View style={styles.snoozeNotificationCard}>
+          <View style={styles.snoozeNotificationLeft}>
+            <Ionicons name="pause-circle" size={20} color="#E8C547" />
+            <View style={{ marginLeft: 8, flex: 1 }}>
+              <Text style={styles.snoozeNotificationTitle}>Outlet Snoozed: {snoozeReason}</Text>
+              <Text style={styles.snoozeNotificationSub}>New orders paused • Auto-resumes at {snoozedUntil.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.resumeNowPill}
+            activeOpacity={0.8}
+            onPress={handleResumeFromSnooze}
+          >
+            <Text style={styles.resumeNowText}>Resume Now</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* FULL-LENGTH SCROLLABLE DASHBOARD CONTENT */}
       <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
@@ -630,7 +789,10 @@ export default function RestaurantDashboard() {
                         <TouchableOpacity
                           activeOpacity={0.8}
                           style={styles.acceptBtn}
-                          onPress={() => updateOrderStatus(order.id, 'Preparing')}
+                          onPress={() => {
+                            setSelectedNewOrder(order);
+                            setShowNewOrderModal(true);
+                          }}
                         >
                           <Text style={styles.acceptBtnText}>Accept Order</Text>
                           <View style={styles.acceptChevron}>
@@ -640,26 +802,106 @@ export default function RestaurantDashboard() {
                       </>
                     )}
 
-                    {order.status === 'Preparing' && (
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        style={styles.prepareBtn}
-                        onPress={() => updateOrderStatus(order.id, 'Ready')}
-                      >
-                        <Ionicons name="checkmark-circle-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                        <Text style={styles.prepareBtnText}>Mark as Ready</Text>
-                      </TouchableOpacity>
-                    )}
+                    {order.status === 'Preparing' && (() => {
+                      const startTime = order.acceptedTime ? new Date(order.acceptedTime).getTime() : new Date(order.timestamp).getTime();
+                      const totalPrepMins = (order.prepTimeMinutes || 20) + (order.extendedPrepMinutes || 0);
+                      const totalPrepSecs = totalPrepMins * 60;
+                      const elapsedSecs = Math.max(0, Math.floor((nowMs - startTime) / 1000));
+                      const remainingSecs = totalPrepSecs - elapsedSecs;
+                      const isOverdue = remainingSecs <= 0;
+                      const displayMins = Math.floor(Math.abs(remainingSecs) / 60);
+                      const displaySecs = Math.abs(remainingSecs) % 60;
+                      const progressPct = Math.min(100, Math.max(0, (elapsedSecs / totalPrepSecs) * 100));
+
+                      return (
+                        <View style={{ width: '100%' }}>
+                          {/* ── KITCHEN PREPARATION TIMER BAR ── */}
+                          <View style={styles.prepCountdownCard}>
+                            <View style={styles.prepCountdownTopRow}>
+                              <View style={[styles.prepTimerIconBadge, isOverdue && { backgroundColor: '#3A1414', borderColor: '#7F1D1D' }]}>
+                                <Ionicons 
+                                  name={isOverdue ? "alert-circle" : "timer-outline"} 
+                                  size={16} 
+                                  color={isOverdue ? "#EF4444" : "#F2CA50"} 
+                                />
+                              </View>
+                              <View style={{ flex: 1, marginLeft: 8 }}>
+                                <Text style={[styles.prepCountdownLabel, isOverdue && { color: '#EF4444' }]}>
+                                  {isOverdue ? 'Cooking Overdue' : 'Preparation Timer'}
+                                </Text>
+                                <Text style={[styles.prepCountdownTimeText, isOverdue && { color: '#EF4444' }]}>
+                                  {isOverdue 
+                                    ? `+${displayMins}m ${displaySecs < 10 ? '0' + displaySecs : displaySecs}s delayed`
+                                    : `${displayMins}m ${displaySecs < 10 ? '0' + displaySecs : displaySecs}s remaining`}
+                                  <Text style={styles.prepTotalMinsNote}> ({totalPrepMins}m set)</Text>
+                                </Text>
+                              </View>
+
+                              {/* Quick Extend Buttons */}
+                              <View style={styles.extendChipsRow}>
+                                <TouchableOpacity
+                                  style={styles.extendChipBtn}
+                                  activeOpacity={0.8}
+                                  onPress={() => extendPrepTime(order.id, 5)}
+                                >
+                                  <Text style={styles.extendChipText}>+5m</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.extendChipBtn}
+                                  activeOpacity={0.8}
+                                  onPress={() => extendPrepTime(order.id, 10)}
+                                >
+                                  <Text style={styles.extendChipText}>+10m</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+
+                            {/* Cooking Progress Track */}
+                            <View style={styles.prepProgressTrack}>
+                              <View 
+                                style={[
+                                  styles.prepProgressBar, 
+                                  { width: `${progressPct}%` },
+                                  isOverdue && { backgroundColor: '#EF4444' }
+                                ]} 
+                              />
+                            </View>
+                          </View>
+
+                          {/* Mark as Ready Button */}
+                          <TouchableOpacity
+                            activeOpacity={0.8}
+                            style={styles.prepareBtn}
+                            onPress={() => updateOrderStatus(order.id, 'Ready')}
+                          >
+                            <Ionicons name="checkmark-circle-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                            <Text style={styles.prepareBtnText}>Mark as Ready</Text>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })()}
 
                     {order.status === 'Ready' && (
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        style={styles.readyBtn}
-                        onPress={() => updateOrderStatus(order.id, 'Picked up')}
-                      >
-                        <Ionicons name="bicycle-outline" size={16} color="#0E0C0A" style={{ marginRight: 6 }} />
-                        <Text style={styles.readyBtnText}>Complete Picked Up</Text>
-                      </TouchableOpacity>
+                      <View style={{ width: '100%' }}>
+                        <TouchableOpacity
+                          activeOpacity={0.8}
+                          style={styles.readyBtn}
+                          onPress={() => {
+                            setVerifyingHandoverOrder(order);
+                            setHandoverOtpInput(order.handoverOtp || '4892');
+                          }}
+                        >
+                          <Ionicons name="key-outline" size={16} color="#0E0C0A" style={{ marginRight: 6 }} />
+                          <Text style={styles.readyBtnText}>Verify OTP & Complete Pickup</Text>
+                        </TouchableOpacity>
+
+                        <View style={styles.dashboardCardOtpBanner}>
+                          <Ionicons name="shield-checkmark" size={13} color="#E8C547" />
+                          <Text style={styles.dashboardCardOtpText}>
+                            Pickup Handover OTP: <Text style={styles.dashboardCardOtpVal}>{order.handoverOtp || '4892'}</Text>
+                          </Text>
+                        </View>
+                      </View>
                     )}
 
                     {order.status === 'Picked up' && (
@@ -1046,23 +1288,6 @@ export default function RestaurantDashboard() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 24 }}
               >
-                {/* SWIGGY-STYLE ALARM & VOLUME STATUS BANNER */}
-                <View style={styles.alarmStatusBanner}>
-                  <View style={styles.alarmStatusLeft}>
-                    <Ionicons name="volume-high" size={20} color="#F2CA50" />
-                    <View style={{ marginLeft: 10, flex: 1 }}>
-                      <Text style={styles.alarmStatusTitle}>Kitchen Alarm Ringing 🚨</Text>
-                      <Text style={styles.alarmStatusSub}>Keep phone volume above 70% to clearly hear incoming order alerts</Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.alarmTestBtn}
-                    onPress={() => soundService.playSingleChime()}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.alarmTestBtnText}>Test Chime</Text>
-                  </TouchableOpacity>
-                </View>
 
                 {/* CARD 1: CUSTOMER DETAILS */}
                 <View style={styles.customerCardContainer}>
@@ -1203,10 +1428,8 @@ export default function RestaurantDashboard() {
                       activeOpacity={0.85}
                       style={styles.outOfStockBtn}
                       onPress={() => {
-                        soundService.stopOrderAlarm();
-                        updateOrderStatus(selectedNewOrder.id, 'Rejected');
-                        setShowNewOrderModal(false);
-                        setSelectedNewOrder(null);
+                        setSelectedStockOutItems({});
+                        setShowOutOfStockModal(true);
                       }}
                     >
                       <Text style={styles.outOfStockBtnText}>OUT OF STOCK?</Text>
@@ -1217,7 +1440,7 @@ export default function RestaurantDashboard() {
                       style={styles.confirmNowBtn}
                       onPress={() => {
                         soundService.stopOrderAlarm();
-                        updateOrderStatus(selectedNewOrder.id, 'Preparing');
+                        updateOrderStatus(selectedNewOrder.id, 'Preparing', prepTime);
                         setShowNewOrderModal(false);
                         setSelectedNewOrder(null);
                       }}
@@ -1260,7 +1483,7 @@ export default function RestaurantDashboard() {
                   {/* Minus Button */}
                   <TouchableOpacity
                     activeOpacity={0.7}
-                    onPress={() => setTempPrepTime((prev) => Math.max(5, prev - 1))}
+                    onPress={() => setTempPrepTime((prev) => Math.max(5, prev - 5))}
                     style={styles.prepCircleBtn}
                   >
                     <Image
@@ -1278,7 +1501,7 @@ export default function RestaurantDashboard() {
                   {/* Plus Button */}
                   <TouchableOpacity
                     activeOpacity={0.7}
-                    onPress={() => setTempPrepTime((prev) => Math.min(15, prev + 1))}
+                    onPress={() => setTempPrepTime((prev) => Math.min(60, prev + 5))}
                     style={styles.prepCircleBtn}
                   >
                     <Image
@@ -1321,6 +1544,235 @@ export default function RestaurantDashboard() {
         </View>
       </Modal>
 
+      {/* 1. SWIGGY OUTLET SNOOZE / PAUSE MODAL */}
+      <Modal
+        visible={showSnoozeModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSnoozeModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlayDark}
+          activeOpacity={1}
+          onPress={() => setShowSnoozeModal(false)}
+        >
+          <View style={styles.snoozeModalContent}>
+            <View style={styles.modalHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitleWhite}>Snooze Outlet</Text>
+                <Text style={styles.modalSubtitleGray}>Temporarily pause incoming orders during rush or breaks</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowSnoozeModal(false)}>
+                <Ionicons name="close" size={24} color="#8E8E8E" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.snoozeOptionsContainer}>
+              {[
+                { label: 'Heavy Dining Rush', mins: 30, desc: 'Kitchen full • Auto-resumes in 30 mins', icon: 'flame-outline' },
+                { label: 'Kitchen Prep / Cleaning', mins: 45, desc: 'Restocking & deep clean • Auto-resumes in 45 mins', icon: 'sparkles-outline' },
+                { label: 'Rain / Delivery Delay', mins: 60, desc: 'Bad weather • Auto-resumes in 1 hour', icon: 'rainy-outline' },
+                { label: 'Staff Shortage', mins: 120, desc: 'Peak shortage • Auto-resumes in 2 hours', icon: 'people-outline' },
+              ].map((opt, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.snoozeOptionBtn}
+                  activeOpacity={0.8}
+                  onPress={() => handleSnoozeOutlet(opt.mins, opt.label)}
+                >
+                  <View style={styles.snoozeIconBox}>
+                    <Ionicons name={opt.icon as any} size={20} color="#E8C547" />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.snoozeOptTitle}>{opt.label} ({opt.mins}m)</Text>
+                    <Text style={styles.snoozeOptDesc}>{opt.desc}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#666666" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 2. SWIGGY PARTIAL OUT-OF-STOCK REVIEW MODAL */}
+      <Modal
+        visible={showOutOfStockModal && !!selectedNewOrder}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowOutOfStockModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlayDark}
+          activeOpacity={1}
+          onPress={() => setShowOutOfStockModal(false)}
+        >
+          <View style={styles.outOfStockModalContent}>
+            <View style={styles.modalHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitleWhite}>Select Out-of-Stock Items</Text>
+                <Text style={styles.modalSubtitleGray}>These items will automatically turn off in your menu</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowOutOfStockModal(false)}>
+                <Ionicons name="close" size={24} color="#8E8E8E" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 200 }}>
+              {selectedNewOrder?.items.map((item, idx) => {
+                const isChecked = !!selectedStockOutItems[item.name];
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.stockCheckRow, isChecked && styles.stockCheckRowSelected]}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setSelectedStockOutItems((prev) => ({
+                        ...prev,
+                        [item.name]: !prev[item.name],
+                      }));
+                    }}
+                  >
+                    <Ionicons
+                      name={isChecked ? "checkbox" : "square-outline"}
+                      size={22}
+                      color={isChecked ? "#EF4444" : "#8E8E8E"}
+                    />
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.stockItemName}>{item.name}</Text>
+                      <Text style={styles.stockItemPrice}>₹{item.price} • {item.qty} ordered</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <Text style={styles.durationSelectorTitle}>Turn Off Selected Items For:</Text>
+            <View style={styles.durationTabsRow}>
+              {[
+                { label: '2 Hours', val: 2 },
+                { label: 'Rest of Today', val: 24 },
+                { label: 'Indefinitely', val: 0 },
+              ].map((d) => (
+                <TouchableOpacity
+                  key={d.val}
+                  style={[styles.durationTab, stockOutDuration === d.val && styles.durationTabActive]}
+                  onPress={() => setStockOutDuration(d.val)}
+                >
+                  <Text style={[styles.durationTabText, stockOutDuration === d.val && styles.durationTabTextActive]}>
+                    {d.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.outOfStockActionRow}>
+              <TouchableOpacity
+                style={styles.stockCancelBtn}
+                onPress={() => setShowOutOfStockModal(false)}
+              >
+                <Text style={styles.stockCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.stockConfirmRejectBtn}
+                activeOpacity={0.85}
+                onPress={async () => {
+                  if (selectedNewOrder) {
+                    const unavailableNames = Object.keys(selectedStockOutItems).filter(k => selectedStockOutItems[k]);
+                    const reason = unavailableNames.length > 0
+                      ? `Items unavailable: ${unavailableNames.join(', ')}`
+                      : 'Kitchen item out of stock';
+                    
+                    soundService.stopOrderAlarm();
+                    await rejectWithOutOfStockItems(selectedNewOrder.id, [], reason, stockOutDuration);
+                    setShowOutOfStockModal(false);
+                    setShowNewOrderModal(false);
+                    setSelectedNewOrder(null);
+                    Alert.alert('Order Cancelled', 'Selected items have been turned off in your menu inventory.');
+                  }
+                }}
+              >
+                <Text style={styles.stockConfirmRejectBtnText}>Decline & Turn Off Items</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 3. SWIGGY PICKUP HANDOVER OTP VERIFICATION MODAL */}
+      <Modal
+        visible={!!verifyingHandoverOrder}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVerifyingHandoverOrder(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlayDark}
+          activeOpacity={1}
+          onPress={() => setVerifyingHandoverOrder(null)}
+        >
+          <View style={styles.handoverModalContent}>
+            <View style={styles.modalHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitleWhite}>Verify Pickup Handover</Text>
+                <Text style={styles.modalSubtitleGray}>
+                  Order #{verifyingHandoverOrder?.id.slice(-4) || '1956'} • {verifyingHandoverOrder?.customer}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setVerifyingHandoverOrder(null)}>
+                <Ionicons name="close" size={24} color="#8E8E8E" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.handoverOtpDisplayCard}>
+              <Text style={styles.handoverOtpDisplayLabel}>Expected 4-Digit Handover Code</Text>
+              <Text style={styles.handoverOtpDisplayVal}>{verifyingHandoverOrder?.handoverOtp || '4892'}</Text>
+              <Text style={styles.handoverOtpDisplayHint}>Ask the delivery partner or customer for this code</Text>
+            </View>
+
+            <View style={{ marginBottom: 18 }}>
+              <Text style={styles.handoverInputLabel}>Enter Code from Driver / Customer:</Text>
+              <TextInput
+                style={styles.handoverTextInput}
+                value={handoverOtpInput}
+                onChangeText={setHandoverOtpInput}
+                keyboardType="numeric"
+                maxLength={4}
+                placeholder="4-digit OTP"
+                placeholderTextColor="#666666"
+              />
+            </View>
+
+            <View style={styles.outOfStockActionRow}>
+              <TouchableOpacity
+                style={styles.stockCancelBtn}
+                onPress={() => setVerifyingHandoverOrder(null)}
+              >
+                <Text style={styles.stockCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.handoverConfirmBtn}
+                activeOpacity={0.88}
+                onPress={async () => {
+                  if (verifyingHandoverOrder) {
+                    const code = handoverOtpInput.trim() || verifyingHandoverOrder.handoverOtp || '4892';
+                    const success = await verifyHandover(verifyingHandoverOrder.id, code);
+                    if (success) {
+                      setVerifyingHandoverOrder(null);
+                      Alert.alert('Handover Complete', 'Food successfully handed over to partner.');
+                    } else {
+                      Alert.alert('Invalid OTP', 'The code entered does not match. Please verify with the driver.');
+                    }
+                  }
+                }}
+              >
+                <Text style={styles.handoverConfirmBtnText}>Confirm Handover</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </View>
   );
 }
@@ -1350,6 +1802,32 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 22,
     gap: 7,
+  },
+  autoAcceptPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 22,
+    marginLeft: 8,
+  },
+  autoAcceptPillActive: {
+    backgroundColor: '#F2CA50',
+  },
+  autoAcceptPillInactive: {
+    backgroundColor: '#1E1B18',
+    borderWidth: 1,
+    borderColor: '#3D3934',
+  },
+  autoAcceptPillText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12,
+  },
+  autoAcceptTextActive: {
+    color: '#000000',
+  },
+  autoAcceptTextInactive: {
+    color: '#A6A6A6',
   },
   statusDot: {
     width: 12,
@@ -1936,6 +2414,78 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  /* LIVE KITCHEN PREP TIMER */
+  prepCountdownCard: {
+    backgroundColor: '#17140E',
+    borderWidth: 1,
+    borderColor: '#382D16',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  },
+  prepCountdownTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  prepTimerIconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#272010',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#4A3B18',
+  },
+  prepCountdownLabel: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11,
+    color: '#E8C547',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  prepCountdownTimeText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13,
+    color: '#FFFFFF',
+    marginTop: 2,
+  },
+  prepTotalMinsNote: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#8A857B',
+  },
+  extendChipsRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  extendChipBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#261F12',
+    borderWidth: 1,
+    borderColor: '#544219',
+    borderRadius: 6,
+  },
+  extendChipText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11.5,
+    color: '#F2CA50',
+  },
+  prepProgressTrack: {
+    height: 4,
+    backgroundColor: '#2A2417',
+    borderRadius: 2,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  prepProgressBar: {
+    height: '100%',
+    backgroundColor: '#F2CA50',
+    borderRadius: 2,
+  },
+
   prepareBtn: {
     flex: 1,
     backgroundColor: '#1E6FBF',
@@ -2944,5 +3494,318 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontWeight: '700',
     fontFamily: 'Urbanist-Bold',
+  },
+
+  /* SNOOZE ACTIVE ALERT BANNER */
+  snoozeNotificationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(234, 179, 8, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(234, 179, 8, 0.35)',
+    borderRadius: 14,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  snoozeNotificationLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  snoozeNotificationTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#EAB308',
+  },
+  snoozeNotificationSub: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 1,
+  },
+  resumeNowPill: {
+    backgroundColor: '#EAB308',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  resumeNowText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0B0B0B',
+  },
+
+  /* DASHBOARD CARD HANDOVER OTP BANNER */
+  dashboardCardOtpBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(232, 197, 71, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(232, 197, 71, 0.3)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 8,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  dashboardCardOtpText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#E8C547',
+    marginLeft: 6,
+  },
+  dashboardCardOtpVal: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    letterSpacing: 2,
+  },
+
+  /* MODAL OVERLAYS & SHEETS */
+  modalOverlayDark: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'flex-end',
+  },
+  modalTitleWhite: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  modalSubtitleGray: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12,
+    color: '#8E8E8E',
+    marginTop: 2,
+  },
+
+  /* SNOOZE MODAL */
+  snoozeModalContent: {
+    backgroundColor: '#161616',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 36,
+    borderTopWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  snoozeOptionsContainer: {
+    gap: 10,
+  },
+  snoozeOptionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E1E1E',
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    borderRadius: 14,
+    padding: 12,
+  },
+  snoozeIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(232, 197, 71, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  snoozeOptTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  snoozeOptDesc: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11,
+    color: '#8E8E8E',
+    marginTop: 2,
+  },
+
+  /* OUT OF STOCK MODAL */
+  outOfStockModalContent: {
+    backgroundColor: '#161616',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 36,
+    borderTopWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  stockCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#1C1C1C',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#282828',
+  },
+  stockCheckRowSelected: {
+    borderColor: 'rgba(239, 68, 68, 0.5)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  stockItemName: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  stockItemPrice: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#8E8E8E',
+    marginTop: 2,
+  },
+  durationSelectorTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#E8C547',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  durationTabsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  durationTab: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#202020',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2F2F2F',
+  },
+  durationTabActive: {
+    backgroundColor: 'rgba(232, 197, 71, 0.15)',
+    borderColor: '#E8C547',
+  },
+  durationTabText: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12,
+    color: '#8E8E8E',
+  },
+  durationTabTextActive: {
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#E8C547',
+  },
+  outOfStockActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  stockCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#242424',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stockCancelBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8E8E8E',
+  },
+  stockConfirmRejectBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stockConfirmRejectBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+
+  /* HANDOVER MODAL */
+  handoverModalContent: {
+    backgroundColor: '#161616',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: 36,
+    borderTopWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  handoverOtpDisplayCard: {
+    alignItems: 'center',
+    backgroundColor: '#1E1E1E',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  handoverOtpDisplayLabel: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#8E8E8E',
+  },
+  handoverOtpDisplayVal: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#E8C547',
+    letterSpacing: 6,
+    marginVertical: 4,
+  },
+  handoverOtpDisplayHint: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11,
+    color: '#666666',
+  },
+  handoverInputLabel: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  handoverTextInput: {
+    backgroundColor: '#0E0E0E',
+    borderWidth: 1.5,
+    borderColor: '#3A3A3A',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 6,
+    textAlign: 'center',
+  },
+  handoverConfirmBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#E8C547',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  handoverConfirmBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0B0B0B',
   },
 });

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  type ScrollViewInstance,
   StatusBar,
   TextInput,
   KeyboardAvoidingView,
@@ -16,7 +17,7 @@ import {
   Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import * as ImagePicker from 'expo-image-picker';
@@ -38,7 +39,7 @@ export default function DailyIncentiveFormScreen() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const { sessionToken } = useRider();
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<ScrollViewInstance>(null);
   
   const dateStr = (params.date as string) || 'Tuesday, 18 August';
   const language = (params.language as string) || 'English';

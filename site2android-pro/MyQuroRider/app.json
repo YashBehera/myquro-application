@@ -1,11 +1,8 @@
 {
-  "name": "MyQuroRider",
-  "displayName": "MyQuroRider",
   "expo": {
     "name": "MyQuro Rider",
     "slug": "myquro-rider-app",
     "version": "1.0.0",
-    "sdkVersion": "54.0.0",
     "newArchEnabled": false,
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -52,7 +49,11 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow MyQuro Rider to access your location to show live pickup and dropoff routes."
         }
-      ]
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-image",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true
