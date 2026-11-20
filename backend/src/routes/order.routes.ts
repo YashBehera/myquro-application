@@ -17,10 +17,11 @@ import { authSessions } from "../db/schema/auth-sessions.js";
 import { orderDeliveries } from "../db/schema/order-deliveries.js";
 import { deliveryRiders } from "../db/schema/delivery-riders.js";
 import { merchantPenalties } from "../db/schema/merchant-penalties.js";
+import { profiles } from "../db/schema/profiles.js";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
 
 import { nanoid } from "nanoid";
-import { eq, and, inArray, sql, desc } from "drizzle-orm";
+import { eq, and, inArray, sql, desc, like } from "drizzle-orm";
 
 import { auth } from "../auth/auth.js";
 import { fromNodeHeaders } from "better-auth/node";
@@ -1399,6 +1400,8 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
       orderId,
       status,
       prepTimeMinutes: effectivePrepMinutes,
+      extendedPrepMinutes: orderRow.extendedPrepMinutes || 0,
+      totalPrepMinutes: effectivePrepMinutes + (orderRow.extendedPrepMinutes || 0),
       acceptedTime: nowIso,
       acknowledgedAt: nowIso,
       restaurantId: orderRow.restaurantId,
@@ -1411,6 +1414,8 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
       orderId,
       status,
       prepTimeMinutes: effectivePrepMinutes,
+      extendedPrepMinutes: orderRow.extendedPrepMinutes || 0,
+      totalPrepMinutes: effectivePrepMinutes + (orderRow.extendedPrepMinutes || 0),
       acceptedTime: nowIso,
       acknowledgedAt: nowIso,
       updatedAt: nowIso
@@ -1419,6 +1424,8 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
       orderId,
       status,
       prepTimeMinutes: effectivePrepMinutes,
+      extendedPrepMinutes: orderRow.extendedPrepMinutes || 0,
+      totalPrepMinutes: effectivePrepMinutes + (orderRow.extendedPrepMinutes || 0),
       acceptedTime: nowIso,
       acknowledgedAt: nowIso,
       updatedAt: nowIso
@@ -1427,12 +1434,15 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
       orderId,
       status,
       prepTimeMinutes: effectivePrepMinutes,
+      extendedPrepMinutes: orderRow.extendedPrepMinutes || 0,
+      totalPrepMinutes: effectivePrepMinutes + (orderRow.extendedPrepMinutes || 0),
       acceptedTime: nowIso,
       acknowledgedAt: nowIso,
       order: {
         id: orderId,
         status,
         prepTimeMinutes: effectivePrepMinutes,
+        extendedPrepMinutes: orderRow.extendedPrepMinutes || 0,
       },
       updatedAt: nowIso
     });
@@ -1532,6 +1542,20 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
         .json({ message: "You are not authorized to view these orders" });
     }
 
+    // Find all linked customer accounts (by phone or ID) so user sees all their real database orders
+    const userProfile = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
+    let allUserIds = [userId];
+    if (userProfile.length > 0 && userProfile[0].phoneNumber) {
+      const cleanPhone = userProfile[0].phoneNumber.replace(/[^0-9]/g, '').slice(-10);
+      if (cleanPhone.length >= 7) {
+        const matchingProfiles = await db
+          .select({ userId: profiles.userId })
+          .from(profiles)
+          .where(like(profiles.phoneNumber, `%${cleanPhone}%`));
+        allUserIds = Array.from(new Set([userId, ...matchingProfiles.map(p => p.userId)]));
+      }
+    }
+
     const userOrders = await db
       .select({
         id: orders.id,
@@ -1556,7 +1580,7 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
       })
       .from(orders)
       .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
-      .where(eq(orders.placedByUserId, userId))
+      .where(inArray(orders.placedByUserId, allUserIds))
       .orderBy(desc(orders.createdAt));
 
     const orderIds = userOrders.map(o => o.id);
@@ -1649,6 +1673,26 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
   } catch (error) {
     console.error("Error fetching user orders:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /verify-existing (batch check if order IDs exist in the database)
+router.post("/verify-existing", async (req: any, res) => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(200).json({ existingIds: [] });
+    }
+    const cleanIds = orderIds.map(String).filter(Boolean).slice(0, 500);
+    const existing = await db
+      .select({ id: orders.id })
+      .from(orders)
+      .where(inArray(orders.id, cleanIds));
+    const existingIds = existing.map(r => r.id);
+    return res.status(200).json({ existingIds });
+  } catch (err) {
+    console.error("Error verifying order IDs:", err);
+    return res.status(500).json({ existingIds: [] });
   }
 });
 
@@ -2229,6 +2273,9 @@ router.get("/:orderId/detail", optionalAuth, async (req: any, res) => {
     return res.status(200).json({
       order: {
         ...order,
+        prepTimeMinutes: Number(order.prepTimeMinutes) || 20,
+        extendedPrepMinutes: Number(order.extendedPrepMinutes) || 0,
+        totalPrepMinutes: (Number(order.prepTimeMinutes) || 20) + (Number(order.extendedPrepMinutes) || 0),
         deliveryStatus,
         riderName,
         riderPhone,
@@ -2286,6 +2333,59 @@ router.patch("/:orderId/acknowledge", async (req: any, res) => {
   } catch (error) {
     console.error("ORDER ACKNOWLEDGE ERROR:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// PATCH /orders/:orderId/prep-time (Explicitly update kitchen prep time)
+router.patch("/:orderId/prep-time", optionalAuth, async (req: any, res) => {
+  try {
+    const { orderId } = req.params;
+    const rawMinutes = req.body.prepTimeMinutes || req.body.prep_time_minutes || req.body.minutes;
+    const prepMinutes = Number(rawMinutes);
+
+    if (isNaN(prepMinutes) || prepMinutes <= 0) {
+      return res.status(400).json({ message: "Invalid prepTimeMinutes value" });
+    }
+
+    const orderRow = (
+      await db.select().from(orders).where(eq(orders.id, orderId)).limit(1)
+    )[0];
+
+    if (!orderRow) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const now = new Date();
+    await db
+      .update(orders)
+      .set({
+        prepTimeMinutes: prepMinutes,
+        updatedAt: now,
+      })
+      .where(eq(orders.id, orderId));
+
+    orderCache.invalidate(orderRow.restaurantId);
+
+    const nowIso = now.toISOString();
+    const payload = {
+      orderId,
+      prepTimeMinutes: prepMinutes,
+      extendedPrepMinutes: orderRow.extendedPrepMinutes || 0,
+      totalPrepMinutes: prepMinutes + (orderRow.extendedPrepMinutes || 0),
+      status: orderRow.status,
+      updatedAt: nowIso,
+    };
+
+    emitToOrder(orderId, "order-prep-updated", payload);
+    emitToOrder(orderId, "order-status-update", payload);
+    emitToOrder(orderId, "order-status", payload);
+    emitToOrder(orderId, "order-update", { ...payload, order: { ...orderRow, prepTimeMinutes: prepMinutes } });
+    emitToRestaurant(orderRow.restaurantId, "order-updated", payload);
+
+    return res.status(200).json({ success: true, ...payload });
+  } catch (err) {
+    console.error("Error updating order prep time:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 });
 

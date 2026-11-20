@@ -11,7 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Restaurant, FoodCategory, AuthState, CartItem } from '../types';
 import { RestaurantRepository } from '../data/RestaurantRepository';
 import { RestaurantDatabase } from '../data/RestaurantDatabase';
-import { BACKEND_URL } from '../config';
+import { BACKEND_URL, NEON_SQL_ENDPOINT, NEON_CONN_STRING } from '../config';
 import { SecureStorage } from '../utils/secureStorage';
 
 export interface SavedAddress {
@@ -174,17 +174,19 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       } catch (err) {
         console.error("❌ [MainViewModel] Error loading stored addresses:", err);
       }
+      // Strictly clear any legacy offline order caches — past orders must show strictly database data
+      setUserOrders([]);
       try {
-        const storedOrders = await AsyncStorage.getItem('@placed_orders_history');
-        if (storedOrders) {
-          const parsed = JSON.parse(storedOrders);
-          if (Array.isArray(parsed)) {
-            setUserOrders(parsed);
-          }
+        const allKeys = await AsyncStorage.getAllKeys();
+        const orderKeys = allKeys.filter(k => 
+          (k.toLowerCase().includes('order') || k.toLowerCase().includes('placed')) && 
+          k !== '@auth_state' && 
+          k !== '@cart_items'
+        );
+        if (orderKeys.length > 0) {
+          await AsyncStorage.multiRemove(orderKeys);
         }
-      } catch (err) {
-        console.error("❌ [MainViewModel] Error loading stored orders:", err);
-      }
+      } catch (e) {}
     };
     loadStoredData();
   }, []);
@@ -226,21 +228,32 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     return undefined;
   };
 
-  // Fetch user order history
+  // Fetch user order history strictly from database
   const refreshUserOrders = async () => {
     try {
-      let localOrders: any[] = [];
-      const localData = await AsyncStorage.getItem('@placed_orders_history');
-      if (localData) {
-        try {
-          const parsed = JSON.parse(localData);
-          if (Array.isArray(parsed)) localOrders = parsed;
-        } catch (e) {}
+      let remoteOrders: any[] = [];
+      let userId: string | null = null;
+      let sessionToken: string | null = null;
+
+      if (authState.type === 'Authenticated') {
+        userId = (authState as any).userId || (authState as any).user?.id || (authState as any).id || null;
+        sessionToken = authState.sessionToken || null;
       }
 
-      let remoteOrders: any[] = [];
-      const userId = authState.type === 'Authenticated' ? ((authState as any).userId || (authState as any).user?.id) : null;
-      const sessionToken = await getActiveToken();
+      if (!userId || !sessionToken) {
+        try {
+          const secToken = await SecureStorage.getSessionToken();
+          if (secToken) sessionToken = secToken;
+          const stored = await AsyncStorage.getItem('@auth_state');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.sessionToken) sessionToken = sessionToken || parsed.sessionToken;
+            if (parsed?.userId || parsed?.user?.id || parsed?.id) {
+              userId = userId || (parsed.userId || parsed.user?.id || parsed.id);
+            }
+          }
+        } catch (e) {}
+      }
 
       if (userId && sessionToken) {
         try {
@@ -251,29 +264,51 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
             const data = await res.json();
             if (data.orders && Array.isArray(data.orders)) {
               remoteOrders = data.orders;
+            } else if (Array.isArray(data)) {
+              remoteOrders = data;
             }
           }
         } catch (e) {
-          console.warn('[MainViewModel] Error fetching user orders:', e);
+          console.warn('[MainViewModel] Error fetching user orders from server:', e);
         }
       }
 
-      const mergedMap = new Map<string, any>();
-      localOrders.forEach(o => {
-        if (o && (o.id || o.orderId)) mergedMap.set(o.id || o.orderId, o);
-      });
-      remoteOrders.forEach(o => {
-        if (o && (o.id || o.orderId)) mergedMap.set(o.id || o.orderId, o);
-      });
+      // Resilient fallback: Direct Neon PostgreSQL query if backend API had network latency or was sleeping
+      if (remoteOrders.length === 0 && userId) {
+        try {
+          const neonQuery = `SELECT o.id, o.restaurant_id as "restaurantId", o.notes, o.status, o.prep_time_minutes as "prepTimeMinutes", o.extended_prep_minutes as "extendedPrepMinutes", o.grand_total as "grandTotal", o.created_at as "createdAt", r.restaurant_name as "restaurantName", r.restaurant_banner as "restaurantBanner" FROM orders o LEFT JOIN restaurants r ON o.restaurant_id = r.id WHERE o.placed_by_user_id = '${userId}' ORDER BY o.created_at DESC;`;
+          const neonResp = await fetch(NEON_SQL_ENDPOINT, {
+            method: 'POST',
+            headers: {
+              'Neon-Connection-String': NEON_CONN_STRING,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query: neonQuery }),
+          });
+          if (neonResp.ok) {
+            const neonData = await neonResp.json();
+            if (neonData.rows && Array.isArray(neonData.rows)) {
+              remoteOrders = neonData.rows;
+            }
+          }
+        } catch (neonErr) {
+          console.warn('[MainViewModel] Error fetching user orders directly from Neon DB:', neonErr);
+        }
+      }
 
-      const combined = Array.from(mergedMap.values()).sort((a, b) => {
-        const timeA = new Date(a.createdAt || a.date || 0).getTime();
-        const timeB = new Date(b.createdAt || b.date || 0).getTime();
-        return timeB - timeA;
-      });
-
-      setUserOrders(combined);
-      await AsyncStorage.setItem('@placed_orders_history', JSON.stringify(combined));
+      // Past orders MUST show strictly real database orders!
+      setUserOrders(remoteOrders);
+      try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const orderKeys = allKeys.filter(k => 
+          (k.toLowerCase().includes('order') || k.toLowerCase().includes('placed')) && 
+          k !== '@auth_state' && 
+          k !== '@cart_items'
+        );
+        if (orderKeys.length > 0) {
+          await AsyncStorage.multiRemove(orderKeys);
+        }
+      } catch (e) {}
     } catch (err) {
       console.warn('[MainViewModel] Error in refreshUserOrders:', err);
     }
@@ -557,6 +592,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
             setAuthState(restoredAuth);
             if (tokenToUse) {
               fetchServerAddresses(tokenToUse);
+              refreshUserOrders();
             }
           } else {
             setAuthState({ type: 'Unauthenticated' });
@@ -769,6 +805,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (state.type === 'Authenticated' && state.sessionToken) {
       await SecureStorage.setSessionToken(state.sessionToken);
       fetchServerAddresses(state.sessionToken);
+      refreshUserOrders();
     }
     setAuthState(state);
     await AsyncStorage.setItem('@auth_state', JSON.stringify(state));

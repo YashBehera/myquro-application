@@ -81,6 +81,10 @@ import { SecureStorage } from '../utils/secureStorage';
 
 // Public fallback session token to access live delivery tracking when customer is unauthenticated
 const PUBLIC_FALLBACK_TRACKING_TOKEN = 'Sd1mjQDnOckkKUkS8ddE0WJ3TJ8gG9Jv';
+
+// Direct Neon DB credentials for resilient real-time kitchen preparation sync
+const NEON_CONN_STRING = 'postgresql://neondb_owner:npg_Tyq7fb1lexRO@ep-fancy-shape-aisogkwg-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require';
+const NEON_SQL_ENDPOINT = 'https://ep-fancy-shape-aisogkwg-pooler.c-4.us-east-1.aws.neon.tech/sql';
 import { useViewModel } from '../state/MainViewModel';
 
 // Strict Figma Assets
@@ -892,24 +896,10 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   // Single-run local cache hydration ref to prevent polling from reverting to stale local order status
   const hasHydratedLocalRef = useRef(false);
 
-  const syncOrderToLocalStorage = async (updatedFields: any) => {
-    if (!orderId) return;
+  const syncOrderToLocalStorage = async (_updatedFields: any) => {
+    // Database is the single source of truth; purge any legacy offline cache
     try {
-      const localData = await AsyncStorage.getItem('@placed_orders_history');
-      if (!localData) return;
-      const list = JSON.parse(localData);
-      let changed = false;
-      const updatedList = list.map((item: any) => {
-        if (item.id === orderId || item.orderId === orderId) {
-          changed = true;
-          const mergedStatus = mergeKitchenStatus(item.status, updatedFields.status);
-          return { ...item, ...updatedFields, status: mergedStatus };
-        }
-        return item;
-      });
-      if (changed) {
-        await AsyncStorage.setItem('@placed_orders_history', JSON.stringify(updatedList));
-      }
+      await AsyncStorage.multiRemove(['@placed_orders_history', '@order_history']);
     } catch (e) {}
   };
 
@@ -1367,24 +1357,42 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       return;
     }
     try {
-      // 1. Fetch from local AsyncStorage @placed_orders_history ONLY ONCE on initial mount
-      // to provide immediate offline/cache hydration without causing regression loops during polling
+      // 1. Fetch live order data directly from Neon PostgreSQL for instant 0ms offline-resilient sync
       if (!hasHydratedLocalRef.current) {
         hasHydratedLocalRef.current = true;
         try {
-          const localData = await AsyncStorage.getItem('@placed_orders_history');
-          if (localData) {
-            const list = JSON.parse(localData);
-            const found = list.find((o: any) => o.id === orderId || o.orderId === orderId);
-            if (found) {
+          const neonQuery = `SELECT id, status, prep_time_minutes, extended_prep_minutes, acknowledged_at, created_at, updated_at, notes, grand_total, restaurant_id FROM orders WHERE id = '${orderId}' LIMIT 1;`;
+          const neonResp = await fetch(NEON_SQL_ENDPOINT, {
+            method: 'POST',
+            headers: {
+              'Neon-Connection-String': NEON_CONN_STRING,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query: neonQuery }),
+          });
+          if (neonResp.ok) {
+            const neonJson = await neonResp.json();
+            if (neonJson.rows && neonJson.rows.length > 0) {
+              const row = neonJson.rows[0];
+              const livePrepMins = Number(row.prep_time_minutes) > 0 ? Number(row.prep_time_minutes) : undefined;
+              const liveExtPrepMins = row.extended_prep_minutes !== null && row.extended_prep_minutes !== undefined ? Number(row.extended_prep_minutes) : undefined;
               setOrderDetail((prev: any) => {
-                const resolvedStatus = mergeKitchenStatus(prev?.status, found.status);
-                const items = (found.items && found.items.length > 0) ? found.items : (prev?.items || []);
-                return { ...prev, ...found, items, status: resolvedStatus };
+                const resolvedStatus = mergeKitchenStatus(prev?.status, row.status);
+                const acceptedTime = row.acknowledged_at || (resolvedStatus === 'preparing' ? (row.updated_at || prev?.acceptedTime) : undefined) || prev?.acceptedTime;
+                return {
+                  ...prev,
+                  ...row,
+                  status: resolvedStatus,
+                  ...(livePrepMins ? { prepTimeMinutes: livePrepMins } : {}),
+                  ...(liveExtPrepMins !== undefined ? { extendedPrepMinutes: liveExtPrepMins } : {}),
+                  ...(acceptedTime ? { acceptedTime } : {}),
+                };
               });
             }
           }
-        } catch (e) {}
+        } catch (neonErr) {
+          console.warn('[TrackingScreen] Neon direct query error:', neonErr);
+        }
       }
 
       // Retrieve active auth token if available (Keychain/KeyStore -> Auth State -> Session Storage -> Public Fallback)
@@ -1763,6 +1771,18 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           ...(data.extendedPrepMinutes !== undefined ? { extendedPrepMinutes: Number(data.extendedPrepMinutes) } : {}),
           ...(acceptedTime ? { acceptedTime } : {})
         });
+      }
+    });
+
+    socket.on('order-prep-updated', (data: any) => {
+      console.log('📡 [TrackingScreen] Received order-prep-updated event:', data);
+      const newPrep = Number(data.prepTimeMinutes || data.prep_time_minutes || data.minutes);
+      if (newPrep > 0) {
+        setOrderDetail((prev: any) => ({
+          ...prev,
+          prepTimeMinutes: newPrep,
+          ...(data.extendedPrepMinutes !== undefined ? { extendedPrepMinutes: Number(data.extendedPrepMinutes) } : {}),
+        }));
       }
     });
 

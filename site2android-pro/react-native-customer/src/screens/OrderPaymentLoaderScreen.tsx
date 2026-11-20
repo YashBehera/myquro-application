@@ -244,36 +244,10 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
 
       setCreatedOrderId(confirmedOrderId);
 
-      // Cache confirmed order snapshot (read live status so auto-accepted orders start in 'preparing')
+      // Clean up any legacy local order caches — database is the single source of truth
       try {
-        const existingStr = await AsyncStorage.getItem('@placed_orders_history');
-        const existingList = existingStr ? JSON.parse(existingStr) : [];
-        const confirmedStatus = data.order?.status || 'placed';
-        const confirmedPrepTime = data.order?.prepTimeMinutes || 20;
-        const newOrderRecord = {
-          id: confirmedOrderId,
-          restaurantId,
-          restaurantName,
-          restaurantAddress: currentRestaurant?.address || resolvedAddress,
-          deliveryAddress: resolvedAddress,
-          status: confirmedStatus,
-          prepTimeMinutes: confirmedPrepTime,
-          items: cartItems.map(ci => ({
-            id: ci.foodItem?.id || (ci as any).id || 'item',
-            name: ci.foodItem?.name || (ci as any).name || 'Food Item',
-            quantity: ci.quantity,
-            price: typeof ci.foodItem?.price === 'number' ? ci.foodItem.price : ((ci as any).price || 0),
-          })),
-          grandTotal: amount,
-          totalAmount: amount,
-          paymentMethod,
-          createdAt: new Date().toISOString(),
-        };
-        const updatedList = [newOrderRecord, ...existingList.filter((o: any) => o.id !== confirmedOrderId)];
-        await AsyncStorage.setItem('@placed_orders_history', JSON.stringify(updatedList));
-      } catch (saveErr) {
-        console.warn('Failed to cache placed order history:', saveErr);
-      }
+        await AsyncStorage.multiRemove(['@placed_orders_history', '@order_history']);
+      } catch (saveErr) {}
 
       // Phase 1 - Step 3 after 1900ms
       const step2Timer = setTimeout(() => {

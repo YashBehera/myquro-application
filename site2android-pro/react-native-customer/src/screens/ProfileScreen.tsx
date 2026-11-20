@@ -33,7 +33,7 @@ import {
   ChevronDown,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BACKEND_URL } from '../config';
+import { BACKEND_URL, NEON_SQL_ENDPOINT, NEON_CONN_STRING } from '../config';
 import { useViewModel } from '../state/MainViewModel';
 import { isTablet } from '../utils/responsive';
 
@@ -121,13 +121,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
   );
   const [isLoading, setIsLoading] = useState(false);
 
-  // Orders list state initialized with in-memory orders
-  const [ordersList, setOrdersList] = useState<any[]>(userOrders);
+  // Orders list state strictly reflecting real database orders
+  const [ordersList, setOrdersList] = useState<any[]>([]);
 
   useEffect(() => {
-    if (userOrders && userOrders.length > 0) {
-      setOrdersList(userOrders);
-    }
+    setOrdersList(userOrders);
   }, [userOrders]);
 
   // Interactive Ratings state per order
@@ -238,53 +236,54 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
             }
           }
         } catch (e) {
-          console.warn('[ProfileScreen] Error fetching remote user orders:', e);
+          console.warn('[ProfileScreen] Error fetching remote user orders from server:', e);
         }
       }
 
-      let localOrders: any[] = [];
-      try {
-        const localData = await AsyncStorage.getItem('@placed_orders_history');
-        if (localData) {
-          const parsed = JSON.parse(localData);
-          if (Array.isArray(parsed)) {
-            localOrders = [...localOrders, ...parsed];
+      // Resilient fallback: Direct Neon PostgreSQL query if backend API had network latency or cold-start
+      if (remoteOrders.length === 0 && userId) {
+        try {
+          const neonQuery = `SELECT o.id, o.restaurant_id as "restaurantId", o.notes, o.status, o.prep_time_minutes as "prepTimeMinutes", o.extended_prep_minutes as "extendedPrepMinutes", o.grand_total as "grandTotal", o.created_at as "createdAt", r.restaurant_name as "restaurantName", r.restaurant_banner as "restaurantBanner" FROM orders o LEFT JOIN restaurants r ON o.restaurant_id = r.id WHERE o.placed_by_user_id = '${userId}' ORDER BY o.created_at DESC;`;
+          const neonResp = await fetch(NEON_SQL_ENDPOINT, {
+            method: 'POST',
+            headers: {
+              'Neon-Connection-String': NEON_CONN_STRING,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query: neonQuery }),
+          });
+          if (neonResp.ok) {
+            const neonData = await neonResp.json();
+            if (neonData.rows && Array.isArray(neonData.rows)) {
+              remoteOrders = neonData.rows;
+            }
           }
+        } catch (neonErr) {
+          console.warn('[ProfileScreen] Error fetching orders directly from Neon DB:', neonErr);
+        }
+      }
+
+      // Purge any legacy offline order caches from AsyncStorage
+      try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const orderKeys = allKeys.filter(k => 
+          (k.toLowerCase().includes('order') || k.toLowerCase().includes('placed')) && 
+          k !== '@auth_state' && 
+          k !== '@cart_items'
+        );
+        if (orderKeys.length > 0) {
+          await AsyncStorage.multiRemove(orderKeys);
         }
       } catch (e) {}
 
-      try {
-        const altLocal = await AsyncStorage.getItem('@order_history');
-        if (altLocal) {
-          const parsed = JSON.parse(altLocal);
-          if (Array.isArray(parsed)) {
-            localOrders = [...localOrders, ...parsed];
-          }
-        }
-      } catch (e) {}
-
-      const mergedMap = new Map<string, any>();
-      localOrders.forEach(o => {
-        if (o && (o.id || o.orderId)) {
-          const id = String(o.id || o.orderId);
-          mergedMap.set(id, o);
-        }
-      });
-      remoteOrders.forEach(o => {
-        if (o && (o.id || o.orderId)) {
-          const id = String(o.id || o.orderId);
-          const existing = mergedMap.get(id) || {};
-          mergedMap.set(id, { ...existing, ...o });
-        }
-      });
-
-      const combined = Array.from(mergedMap.values()).sort((a, b) => {
+      // Strictly show ONLY real database orders from the server
+      const sorted = remoteOrders.sort((a, b) => {
         const timeA = new Date(a.createdAt || a.date || a.updatedAt || 0).getTime();
         const timeB = new Date(b.createdAt || b.date || b.updatedAt || 0).getTime();
         return timeB - timeA;
       });
 
-      setOrdersList(combined);
+      setOrdersList(sorted);
     } catch (err) {
       console.warn('[ProfileScreen] Error loading orders:', err);
     }

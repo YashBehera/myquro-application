@@ -378,7 +378,14 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
         prepTimeMinutes: finalPrepMinutes,
       });
     } catch (e) {
-      console.warn('Error accepting order on backend:', e);
+      console.warn('Error accepting order on backend status endpoint, calling prep-time endpoint:', e);
+      try {
+        await apiClient.patch(`/orders/${orderId}/prep-time`, {
+          prepTimeMinutes: finalPrepMinutes,
+        });
+      } catch (e2) {
+        console.warn('Error syncing prep-time on backend:', e2);
+      }
     }
   },
 
@@ -545,11 +552,13 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
           : o
       ),
     }));
+    // Immediately sync to Neon DB for offline-resilient direct persistence
+    syncExtendPrepTimeToNeon(orderId, extraMinutes);
+
     try {
       await apiClient.patch(`/orders/${orderId}/extend-prep`, { extraMinutes });
     } catch (e) {
-      console.warn('Error extending prep time on backend, falling back to direct Neon sync:', e);
-      syncExtendPrepTimeToNeon(orderId, extraMinutes);
+      console.warn('Error extending prep time on backend:', e);
     }
   },
 
