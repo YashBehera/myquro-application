@@ -181,9 +181,23 @@ function buildOlaMapHtml(
   const isUnassigned = !isRiderAssigned;
 
   // Active navigation route coordinates:
-  // Use exact road coordinates if available, otherwise fallback to bezier curve
+  // If rider is assigned, route ALWAYS starts at the rider's exact position!
   let activeCoords: [number, number][] = [];
-  if (roadCoords && roadCoords.length > 0) {
+  if (hasRider && roadCoords && roadCoords.length > 1) {
+    let closestIdx = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < roadCoords.length; i++) {
+      const d = Math.hypot(roadCoords[i][0] - riderLng!, roadCoords[i][1] - riderLat!);
+      if (d < minDist) {
+        minDist = d;
+        closestIdx = i;
+      }
+    }
+    activeCoords = [[riderLng!, riderLat!], ...roadCoords.slice(closestIdx + 1)];
+    if (activeCoords.length < 2 && roadCoords.length > 0) {
+      activeCoords = [[riderLng!, riderLat!], roadCoords[roadCoords.length - 1]];
+    }
+  } else if (roadCoords && roadCoords.length > 0) {
     activeCoords = roadCoords;
   } else if (isGoingToPickup && hasRider) {
     activeCoords = bezier(riderLng!, riderLat!, storeLng, storeLat);
@@ -331,6 +345,43 @@ function buildOlaMapHtml(
   var isRiderAssigned = ${Boolean(isRiderAssigned)};
   var mapLoaded = false;
   var userHasInteracted = false;
+  var fullRouteCoords = ${activeCoordsJson};
+  var remainingRouteCoords = ${activeCoordsJson};
+  var maxPassedIdx = 0;
+
+  function trimRouteToRider(rLng, rLat) {
+    if (!mapLoaded || !map || !map.getSource('route-active')) return;
+    if (!fullRouteCoords || fullRouteCoords.length < 2) return;
+
+    var closestIdx = 0;
+    var minDist = Infinity;
+    for (var i = 0; i < fullRouteCoords.length; i++) {
+      var d = Math.hypot(fullRouteCoords[i][0] - rLng, fullRouteCoords[i][1] - rLat);
+      if (d < minDist) {
+        minDist = d;
+        closestIdx = i;
+      }
+    }
+
+    maxPassedIdx = closestIdx;
+
+    // Dynamic trimming: the route line ALWAYS begins at the rider's exact marker position [rLng, rLat]
+    var newRemaining = [[rLng, rLat]];
+    for (var j = maxPassedIdx + 1; j < fullRouteCoords.length; j++) {
+      newRemaining.push(fullRouteCoords[j]);
+    }
+    if (newRemaining.length < 2 && fullRouteCoords.length > 0) {
+      newRemaining = [[rLng, rLat], fullRouteCoords[fullRouteCoords.length - 1]];
+    }
+
+    remainingRouteCoords = newRemaining;
+    try {
+      map.getSource('route-active').setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: newRemaining }
+      });
+    } catch(err) {}
+  }
 
   var map = new maplibregl.Map({
     container:'map',
@@ -457,6 +508,9 @@ function buildOlaMapHtml(
 
     if (!riderMarker) {
       ensureSingleRiderMarker(targetLng, targetLat);
+      if (isRiderAssigned) {
+        trimRouteToRider(targetLng, targetLat);
+      }
       return;
     }
 
@@ -487,6 +541,9 @@ function buildOlaMapHtml(
       if (riderMarker) {
         riderMarker.setLngLat([curLng, curLat]);
       }
+      if (isRiderAssigned) {
+        trimRouteToRider(curLng, curLat);
+      }
 
       if (progress < 1) {
         animationFrameId = requestAnimationFrame(step);
@@ -500,25 +557,31 @@ function buildOlaMapHtml(
   window.updateRouteCoords = function(coords) {
     try {
       var parsed = typeof coords === 'string' ? JSON.parse(coords) : coords;
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+      fullRouteCoords = parsed;
+      maxPassedIdx = 0;
       if (!mapLoaded || !map || !map.getSource('route-active')) {
         pendingRouteCoords = parsed;
         return;
       }
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (isRiderAssigned && currentRiderLng && currentRiderLat) {
+        trimRouteToRider(currentRiderLng, currentRiderLat);
+      } else {
+        remainingRouteCoords = parsed;
         map.getSource('route-active').setData({
           type: 'Feature',
           geometry: { type: 'LineString', coordinates: parsed }
         });
-        // Never reset zoom or pan if user has zoomed into or panned the map!
-        if (!userHasInteracted) {
-          var pts = parsed.slice();
-          pts.push([${storeLng}, ${storeLat}]);
-          pts.push([${dropLng}, ${dropLat}]);
-          if (isRiderAssigned && currentRiderLng && currentRiderLat) {
-            pts.push([currentRiderLng, currentRiderLat]);
-          }
-          fitMapToActiveBounds(pts, 900);
+      }
+      // Never reset zoom or pan if user has zoomed into or panned the map!
+      if (!userHasInteracted) {
+        var pts = parsed.slice();
+        pts.push([${storeLng}, ${storeLat}]);
+        pts.push([${dropLng}, ${dropLat}]);
+        if (isRiderAssigned && currentRiderLng && currentRiderLat) {
+          pts.push([currentRiderLng, currentRiderLat]);
         }
+        fitMapToActiveBounds(pts, 900);
       }
     } catch(e) {}
   };
@@ -579,13 +642,15 @@ function buildOlaMapHtml(
     } catch(err) { console.error('Rider marker error:', err); }
 
     // 3. ACTIVE NAVIGATION ROAD ROUTE LAYER
-    var activeRouteCoords = ${activeCoordsJson};
     try {
+      if (isRiderAssigned && currentRiderLng && currentRiderLat && fullRouteCoords && fullRouteCoords.length > 1) {
+        trimRouteToRider(currentRiderLng, currentRiderLat);
+      }
       map.addSource('route-active', {
         type: 'geojson',
         data: {
           type: 'Feature',
-          geometry: { type: 'LineString', coordinates: activeRouteCoords }
+          geometry: { type: 'LineString', coordinates: remainingRouteCoords }
         }
       });
 
@@ -684,7 +749,21 @@ function buildMiniOlaMapHtml(
   const isUnassigned = !isRiderAssigned;
 
   let activeCoords: [number, number][] = [];
-  if (roadCoords && roadCoords.length > 0) {
+  if (hasRider && roadCoords && roadCoords.length > 1) {
+    let closestIdx = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < roadCoords.length; i++) {
+      const d = Math.hypot(roadCoords[i][0] - riderLng!, roadCoords[i][1] - riderLat!);
+      if (d < minDist) {
+        minDist = d;
+        closestIdx = i;
+      }
+    }
+    activeCoords = [[riderLng!, riderLat!], ...roadCoords.slice(closestIdx + 1)];
+    if (activeCoords.length < 2 && roadCoords.length > 0) {
+      activeCoords = [[riderLng!, riderLat!], roadCoords[roadCoords.length - 1]];
+    }
+  } else if (roadCoords && roadCoords.length > 0) {
     activeCoords = roadCoords;
   } else if (isGoingToPickup && hasRider) {
     activeCoords = bezier(riderLng!, riderLat!, storeLng, storeLat);
@@ -773,6 +852,42 @@ function buildMiniOlaMapHtml(
   var mapLoaded = false;
   var isRiderAssigned = ${Boolean(isRiderAssigned)};
   var pendingRouteCoords = null;
+  var fullRouteCoords = ${activeCoordsJson};
+  var remainingRouteCoords = ${activeCoordsJson};
+  var maxPassedIdx = 0;
+
+  function trimRouteToRider(rLng, rLat) {
+    if (!mapLoaded || !map || !map.getSource('route-active')) return;
+    if (!fullRouteCoords || fullRouteCoords.length < 2) return;
+
+    var closestIdx = 0;
+    var minDist = Infinity;
+    for (var i = 0; i < fullRouteCoords.length; i++) {
+      var d = Math.hypot(fullRouteCoords[i][0] - rLng, fullRouteCoords[i][1] - rLat);
+      if (d < minDist) {
+        minDist = d;
+        closestIdx = i;
+      }
+    }
+
+    maxPassedIdx = closestIdx;
+
+    var newRemaining = [[rLng, rLat]];
+    for (var j = maxPassedIdx + 1; j < fullRouteCoords.length; j++) {
+      newRemaining.push(fullRouteCoords[j]);
+    }
+    if (newRemaining.length < 2 && fullRouteCoords.length > 0) {
+      newRemaining = [[rLng, rLat], fullRouteCoords[fullRouteCoords.length - 1]];
+    }
+
+    remainingRouteCoords = newRemaining;
+    try {
+      map.getSource('route-active').setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: newRemaining }
+      });
+    } catch(err) {}
+  }
 
   var map = new maplibregl.Map({
     container:'map',
@@ -841,6 +956,9 @@ function buildMiniOlaMapHtml(
 
     if (!riderMarker) {
       ensureSingleMiniRiderMarker(targetLng, targetLat);
+      if (isRiderAssigned) {
+        trimRouteToRider(targetLng, targetLat);
+      }
       return;
     }
 
@@ -853,30 +971,39 @@ function buildMiniOlaMapHtml(
     currentRiderLng = targetLng;
     currentRiderLat = targetLat;
     riderMarker.setLngLat([targetLng, targetLat]);
+    if (isRiderAssigned) {
+      trimRouteToRider(targetLng, targetLat);
+    }
   };
 
   window.updateRouteCoords = function(coords) {
     try {
       var parsed = typeof coords === 'string' ? JSON.parse(coords) : coords;
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+      fullRouteCoords = parsed;
+      maxPassedIdx = 0;
       if (!mapLoaded || !map || !map.getSource('route-active')) {
         pendingRouteCoords = parsed;
         return;
       }
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (isRiderAssigned && currentRiderLng && currentRiderLat) {
+        trimRouteToRider(currentRiderLng, currentRiderLat);
+      } else {
+        remainingRouteCoords = parsed;
         map.getSource('route-active').setData({
           type: 'Feature',
           geometry: { type: 'LineString', coordinates: parsed }
         });
-        var lats = parsed.map(function(pt){ return pt[1]; });
-        var lngs = parsed.map(function(pt){ return pt[0]; });
-        lngs.push(${storeLng}, ${dropLng});
-        lats.push(${storeLat}, ${dropLat});
-        var minX = Math.min.apply(null, lngs);
-        var maxX = Math.max.apply(null, lngs);
-        var minY = Math.min.apply(null, lats);
-        var maxY = Math.max.apply(null, lats);
-        map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 18, maxZoom: ${miniInitialZoom + 0.6}, duration: 900 });
       }
+      var lats = parsed.map(function(pt){ return pt[1]; });
+      var lngs = parsed.map(function(pt){ return pt[0]; });
+      lngs.push(${storeLng}, ${dropLng});
+      lats.push(${storeLat}, ${dropLat});
+      var minX = Math.min.apply(null, lngs);
+      var maxX = Math.max.apply(null, lngs);
+      var minY = Math.min.apply(null, lats);
+      var maxY = Math.max.apply(null, lats);
+      map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 18, maxZoom: ${miniInitialZoom + 0.6}, duration: 900 });
     } catch(e) {}
   };
 
@@ -884,9 +1011,13 @@ function buildMiniOlaMapHtml(
     mapLoaded = true;
     map.fitBounds([[${rawMinLng},${rawMinLat}],[${rawMaxLng},${rawMaxLat}]],{padding:18,maxZoom:${miniInitialZoom + 0.6},duration:0});
 
+    if (isRiderAssigned && currentRiderLat && currentRiderLng && fullRouteCoords && fullRouteCoords.length > 1) {
+      trimRouteToRider(currentRiderLng, currentRiderLat);
+    }
+
     map.addSource('route-active',{
       type:'geojson',
-      data:{type:'Feature',geometry:{type:'LineString',coordinates:${activeCoordsJson}}}
+      data:{type:'Feature',geometry:{type:'LineString',coordinates:remainingRouteCoords}}
     });
     map.addLayer({
       id:'route-active-line',type:'line',source:'route-active',
@@ -1147,7 +1278,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     // Database is the single source of truth; purge any legacy offline cache
     try {
       await AsyncStorage.multiRemove(['@placed_orders_history', '@order_history']);
-    } catch (e) {}
+    } catch (e) { }
   };
 
   // UI Interactive States
@@ -1189,7 +1320,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const openFullMap = () => {
     setIsFullScreenMap(true);
     isFullScreenMapRef.current = true;
-    try { videoPlayer?.pause(); } catch(e) {}
+    try { videoPlayer?.pause(); } catch (e) { }
     Animated.spring(sheetAnim, {
       toValue: SCREEN_HEIGHT,
       tension: 65,
@@ -1200,7 +1331,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
   const closeFullMap = () => {
     isFullScreenMapRef.current = false;
-    try { if (isPlaying) videoPlayer?.play(); } catch(e) {}
+    try { if (isPlaying) videoPlayer?.play(); } catch (e) { }
     Animated.spring(sheetAnim, {
       toValue: 0,
       tension: 65,
@@ -1258,7 +1389,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         return gestureState.dy > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3;
       },
       onPanResponderGrant: () => {
-        try { videoPlayer?.pause(); } catch(e) {}
+        try { videoPlayer?.pause(); } catch (e) { }
       },
       onPanResponderMove: (_, gestureState) => {
         if (gestureState.dy > 0) {
@@ -1330,8 +1461,8 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const [sendingMessage, setSendingMessage] = useState(false);
   const chatScrollRef = useRef<any>(null);
 
-  const currentRestaurant = allRestaurants?.find(r => 
-    (orderDetail?.restaurantName && (r.name.toLowerCase().includes(orderDetail.restaurantName.toLowerCase()) || orderDetail.restaurantName.toLowerCase().includes(r.name.toLowerCase()))) || 
+  const currentRestaurant = allRestaurants?.find(r =>
+    (orderDetail?.restaurantName && (r.name.toLowerCase().includes(orderDetail.restaurantName.toLowerCase()) || orderDetail.restaurantName.toLowerCase().includes(r.name.toLowerCase()))) ||
     (orderDetail?.restaurantId && (r.id === orderDetail.restaurantId || (r as any)._id === orderDetail.restaurantId)) ||
     (cartItems && cartItems.length > 0 && (r.id === cartItems[0].restaurantId || (r as any)._id === cartItems[0].restaurantId))
   );
@@ -1352,16 +1483,16 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     orderDetail?.items && orderDetail.items.length > 0
       ? orderDetail.items
       : (cartItems && cartItems.length > 0
-          ? cartItems.map((c: any) => ({
-              id: c.id || c.foodItem?.id,
-              name: c.name || c.foodItem?.name || 'Food Item',
-              menuItemName: c.name || c.foodItem?.name || 'Food Item',
-              quantity: c.quantity || 1,
-              isVeg: c.isVeg ?? c.foodItem?.isVeg,
-              price: typeof c.price === 'number' ? c.price : (c.foodItem?.price || 0),
-              unitPrice: typeof c.price === 'number' ? c.price : (c.foodItem?.price || 0),
-            }))
-          : (!isRealOrder ? DEFAULT_MOCK_ORDER.items : []));
+        ? cartItems.map((c: any) => ({
+          id: c.id || c.foodItem?.id,
+          name: c.name || c.foodItem?.name || 'Food Item',
+          menuItemName: c.name || c.foodItem?.name || 'Food Item',
+          quantity: c.quantity || 1,
+          isVeg: c.isVeg ?? c.foodItem?.isVeg,
+          price: typeof c.price === 'number' ? c.price : (c.foodItem?.price || 0),
+          unitPrice: typeof c.price === 'number' ? c.price : (c.foodItem?.price || 0),
+        }))
+        : (!isRealOrder ? DEFAULT_MOCK_ORDER.items : []));
   const itemsCount = orderItemsList.reduce(
     (sum: number, i: any) => sum + Math.max(1, parseInt(String(i.quantity || i.qty || 1), 10)),
     0
@@ -1447,6 +1578,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const trackingDataRef = useRef(trackingData);
   trackingDataRef.current = trackingData;
 
+  const lastFetchedRiderPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastFetchTimestampRef = useRef<number>(0);
+
   // Memoize Map HTML & Source objects to guarantee WebView NEVER reloads or resets user zoom/pan
   const fullMapHtml = useMemo(() => {
     return buildOlaMapHtml(
@@ -1503,13 +1637,16 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         let origin = `${restLat},${restLng}`;
         let destination = `${custLat},${custLng}`;
 
-        if ((riderStatus === 'assigned' || riderStatus === 'arrived_at_store') && riderLat && riderLng) {
+        const curRiderLat = isRiderAccepted ? (riderLat || trackingDataRef.current?.currentLat) : undefined;
+        const curRiderLng = isRiderAccepted ? (riderLng || trackingDataRef.current?.currentLng) : undefined;
+
+        if ((riderStatus === 'assigned' || riderStatus === 'arrived_at_store') && curRiderLat && curRiderLng) {
           // Rider is heading to restaurant to pick up order: Rider -> Restaurant
-          origin = `${riderLat},${riderLng}`;
+          origin = `${curRiderLat},${curRiderLng}`;
           destination = `${restLat},${restLng}`;
-        } else if ((riderStatus === 'picked_up' || riderStatus === 'out_for_delivery') && riderLat && riderLng) {
+        } else if ((riderStatus === 'picked_up' || riderStatus === 'out_for_delivery') && curRiderLat && curRiderLng) {
           // Rider has picked up and is heading to customer: Rider -> Customer
-          origin = `${riderLat},${riderLng}`;
+          origin = `${curRiderLat},${curRiderLng}`;
           destination = `${custLat},${custLng}`;
         }
 
@@ -1532,8 +1669,13 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             if (route.overview_polyline) {
               const decoded = decodePolyline(route.overview_polyline);
               if (decoded && decoded.length > 0 && isMounted) {
-                setRoadRouteCoords(decoded);
-                const script = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(decoded)}); } true;`;
+                // Prepend rider position so the route line strictly originates at the rider marker
+                const fullRoute: [number, number][] = (curRiderLng && curRiderLat)
+                  ? [[Number(curRiderLng), Number(curRiderLat)], ...decoded]
+                  : decoded;
+                setRoadRouteCoords(fullRoute);
+                roadRouteCoordsRef.current = fullRoute;
+                const script = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(fullRoute)}); } true;`;
                 fullMapWebviewRef.current?.injectJavaScript(script);
                 miniMapWebviewRef.current?.injectJavaScript(script);
               }
@@ -1546,16 +1688,67 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     };
 
     fetchOlaDirections();
-    const interval = setInterval(fetchOlaDirections, 30000);
+    const interval = setInterval(fetchOlaDirections, 15000);
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
   }, [restLat, restLng, custLat, custLng, riderStatus, isRiderAccepted]);
 
+  // Re-fetch directions dynamically when rider moves significantly (>= 25 meters onto new roads)
+  useEffect(() => {
+    if (!isRiderAccepted || !riderLat || !riderLng || !restLat || !custLat || !OLA_MAPS_API_KEY) return;
+    const now = Date.now();
+    const lastPos = lastFetchedRiderPosRef.current;
+    let movedDist = Infinity;
+    if (lastPos) {
+      movedDist = calculateDistanceKm(lastPos.lat, lastPos.lng, riderLat, riderLng) * 1000;
+    }
+    // Re-fetch directions if rider moved >= 25 meters and at least 5s elapsed
+    if (movedDist >= 25 && now - lastFetchTimestampRef.current >= 5000) {
+      lastFetchedRiderPosRef.current = { lat: riderLat, lng: riderLng };
+      lastFetchTimestampRef.current = now;
+
+      let origin = `${restLat},${restLng}`;
+      let destination = `${custLat},${custLng}`;
+      if (riderStatus === 'assigned' || riderStatus === 'arrived_at_store') {
+        origin = `${riderLat},${riderLng}`;
+        destination = `${restLat},${restLng}`;
+      } else {
+        origin = `${riderLat},${riderLng}`;
+        destination = `${custLat},${custLng}`;
+      }
+
+      const url = `https://api.olamaps.io/routing/v1/directions/basic?origin=${origin}&destination=${destination}&api_key=${OLA_MAPS_API_KEY}`;
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': `route-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        },
+      })
+        .then(res => res.json())
+        .then(data => {
+          const route = data.routes?.[0];
+          if (route && route.overview_polyline) {
+            const decoded = decodePolyline(route.overview_polyline);
+            if (decoded && decoded.length > 0) {
+              const fullRoute: [number, number][] = [[riderLng, riderLat], ...decoded];
+              setRoadRouteCoords(fullRoute);
+              roadRouteCoordsRef.current = fullRoute;
+              const script = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(fullRoute)}); } true;`;
+              fullMapWebviewRef.current?.injectJavaScript(script);
+              miniMapWebviewRef.current?.injectJavaScript(script);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [riderLat, riderLng, isRiderAccepted, riderStatus, restLat, restLng, custLat, custLng]);
+
   // ── Dynamic Live ETA: Exact Restaurant Preparation Time + Delivery Transit Time ──
-  const basePrepMins = Number(orderDetail?.prepTimeMinutes ?? orderDetail?.prep_time_minutes) > 0 
-    ? Number(orderDetail.prepTimeMinutes ?? orderDetail.prep_time_minutes) 
+  const basePrepMins = Number(orderDetail?.prepTimeMinutes ?? orderDetail?.prep_time_minutes) > 0
+    ? Number(orderDetail.prepTimeMinutes ?? orderDetail.prep_time_minutes)
     : ((currentRestaurant as any)?.prepTime || 20);
   const extraPrepMins = Number(orderDetail?.extendedPrepMinutes ?? orderDetail?.extended_prep_minutes) || 0;
   const totalKitchenPrepTime = basePrepMins + extraPrepMins;
@@ -1753,7 +1946,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       // 1. Smooth layout animation for card resize
       try {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      } catch (e) {}
+      } catch (e) { }
 
       // 2. Micro fade & entrance slide for status text and badge
       statusFadeAnim.setValue(0);
@@ -1847,7 +2040,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         try {
           const secToken = await SecureStorage.getSessionToken();
           if (secToken) activeToken = secToken;
-        } catch (e) {}
+        } catch (e) { }
       }
       if (!activeToken) {
         try {
@@ -1856,13 +2049,13 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             const parsed = JSON.parse(stored);
             if (parsed?.sessionToken) activeToken = parsed.sessionToken;
           }
-        } catch (e) {}
+        } catch (e) { }
       }
       if (!activeToken) {
         try {
           const secBackup = await AsyncStorage.getItem('@sec_myquro_auth_session_token');
           if (secBackup) activeToken = secBackup;
-        } catch (e) {}
+        } catch (e) { }
       }
 
       // If user is guest/unauthenticated, use public fallback token to access tracking on live server
@@ -1876,8 +2069,8 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       if (orderResp.ok) {
         const data = await orderResp.json();
         if (data.order) {
-          const prepMins = Number(data.order.prepTimeMinutes ?? data.order.prep_time_minutes) > 0 
-            ? Number(data.order.prepTimeMinutes ?? data.order.prep_time_minutes) 
+          const prepMins = Number(data.order.prepTimeMinutes ?? data.order.prep_time_minutes) > 0
+            ? Number(data.order.prepTimeMinutes ?? data.order.prep_time_minutes)
             : undefined;
           const extPrepMins = (data.order.extendedPrepMinutes !== undefined || data.order.extended_prep_minutes !== undefined)
             ? Number(data.order.extendedPrepMinutes ?? data.order.extended_prep_minutes)
@@ -1887,9 +2080,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             const resolvedStatus = mergeKitchenStatus(prev?.status, data.order.status);
             const acceptedTime = data.order.acknowledgedAt || data.order.acceptedTime || (resolvedStatus === 'preparing' ? (data.order.updatedAt || prev?.acceptedTime) : undefined) || prev?.acceptedTime;
             const items = (data.order.items && data.order.items.length > 0) ? data.order.items : (prev?.items && prev.items.length > 0 ? prev.items : []);
-            return { 
-              ...prev, 
-              ...data.order, 
+            return {
+              ...prev,
+              ...data.order,
               items,
               status: resolvedStatus,
               ...(prepMins ? { prepTimeMinutes: prepMins } : {}),
@@ -2108,9 +2301,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
       setOrderDetail((prev: any) => {
         const resolvedStatus = mergeKitchenStatus(prev?.status, data.status || incomingOrder.status);
-        return { 
-          ...prev, 
-          ...incomingOrder, 
+        return {
+          ...prev,
+          ...incomingOrder,
           status: resolvedStatus,
           ...(orderDelStatus ? { deliveryStatus: orderDelStatus } : {}),
           ...(orderRiderName ? { riderName: orderRiderName } : {}),
@@ -2120,8 +2313,8 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           ...(acceptedTime ? { acceptedTime } : (prev?.acceptedTime ? { acceptedTime: prev.acceptedTime } : {}))
         };
       });
-      syncOrderToLocalStorage({ 
-        ...incomingOrder, 
+      syncOrderToLocalStorage({
+        ...incomingOrder,
         status: data.status || incomingOrder.status,
         ...(orderDelStatus ? { deliveryStatus: orderDelStatus } : {}),
         ...(orderRiderName ? { riderName: orderRiderName } : {}),
@@ -2166,9 +2359,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           const extendedPrepMinutes = (data.extendedPrepMinutes !== undefined || data.extended_prep_minutes !== undefined)
             ? Number(data.extendedPrepMinutes ?? data.extended_prep_minutes)
             : prev?.extendedPrepMinutes;
-          return { 
-            ...prev, 
-            status: resolvedStatus, 
+          return {
+            ...prev,
+            status: resolvedStatus,
             ...(orderDelStatus ? { deliveryStatus: orderDelStatus } : {}),
             ...(orderRiderName ? { riderName: orderRiderName } : {}),
             ...(orderRiderPhone ? { riderPhone: orderRiderPhone } : {}),
@@ -2177,7 +2370,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             ...(acceptedTime ? { acceptedTime } : (prev?.acceptedTime ? { acceptedTime: prev.acceptedTime } : {}))
           };
         });
-        syncOrderToLocalStorage({ 
+        syncOrderToLocalStorage({
           status: data.status,
           ...(orderDelStatus ? { deliveryStatus: orderDelStatus } : {}),
           ...(orderRiderName ? { riderName: orderRiderName } : {}),
@@ -2203,15 +2396,15 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           const extendedPrepMinutes = (data.extendedPrepMinutes !== undefined || data.extended_prep_minutes !== undefined)
             ? Number(data.extendedPrepMinutes ?? data.extended_prep_minutes)
             : prev?.extendedPrepMinutes;
-          return { 
-            ...prev, 
-            status: resolvedStatus, 
+          return {
+            ...prev,
+            status: resolvedStatus,
             ...(prepTimeMinutes ? { prepTimeMinutes } : {}),
             ...(extendedPrepMinutes !== undefined ? { extendedPrepMinutes } : {}),
             ...(acceptedTime ? { acceptedTime } : (prev?.acceptedTime ? { acceptedTime: prev.acceptedTime } : {}))
           };
         });
-        syncOrderToLocalStorage({ 
+        syncOrderToLocalStorage({
           status: data.status,
           ...(data.prepTimeMinutes ? { prepTimeMinutes: Number(data.prepTimeMinutes) } : {}),
           ...(data.extendedPrepMinutes !== undefined ? { extendedPrepMinutes: Number(data.extendedPrepMinutes) } : {}),
@@ -2622,658 +2815,658 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           }}
           scrollEventThrottle={16}
         >
-        {/* ════════════════════════════════════════════════════════════════════════
+          {/* ════════════════════════════════════════════════════════════════════════
             [2] HERO MEDIA AREA (FULL HEIGHT VIDEO WITH ACCENT GRADIENTS)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View
-          style={[
-            styles.heroMediaContainer,
-            { height: Math.round(SCREEN_WIDTH * (912 / 576)) },
-          ]}
-        >
-          {/* Delivery Scene with Full-Height Background Video */}
-          <View style={styles.heroSceneWrapper}>
-            {/* Full-Height Looping Background Video */}
-            <VideoView
-              player={videoPlayer}
-              style={styles.heroBgVideo}
-              contentFit="cover"
-              nativeControls={false}
-            />
-
-            {/* ── TOP SUBTLE STATUS BAR SHADING (Keeps top of video crystal clear) ── */}
-            <Svg
-              width="100%"
-              height={Math.max(topHeaderPadding + 36 * SCALE, 84)}
-              style={styles.heroTopFadeGradient}
-              pointerEvents="none"
-            >
-              <Defs>
-                <LinearGradient id="heroTopGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <Stop offset="0%" stopColor="#000000" stopOpacity="0.48" />
-                  <Stop offset="60%" stopColor="#000000" stopOpacity="0.16" />
-                  <Stop offset="100%" stopColor="#000000" stopOpacity="0" />
-                </LinearGradient>
-              </Defs>
-              <Rect width="100%" height="100%" fill="url(#heroTopGrad)" />
-            </Svg>
-
-            {/* ── BOTTOM FADE GRADIENT (Smooth transition into status card) ───── */}
-            <Svg
-              width="100%"
-              height={120 * SCALE}
-              style={styles.heroBottomFadeGradient}
-              pointerEvents="none"
-            >
-              <Defs>
-                <LinearGradient id="heroBottomGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <Stop offset="0%" stopColor="#000000" stopOpacity="0" />
-                  <Stop offset="60%" stopColor="#000000" stopOpacity="0.65" />
-                  <Stop offset="100%" stopColor="#000000" stopOpacity="1" />
-                </LinearGradient>
-              </Defs>
-              <Rect width="100%" height="100%" fill="url(#heroBottomGrad)" />
-            </Svg>
-          </View>
-
-          {/* Floating Media Action Controls (Top-Right of Hero) */}
           <View
             style={[
-              styles.floatingMediaControls,
-              { top: topHeaderPadding + 48 * SCALE },
+              styles.heroMediaContainer,
+              { height: Math.round(SCREEN_WIDTH * (912 / 576)) },
             ]}
           >
-            {/* Mute Button */}
-            <TouchableOpacity
-              style={styles.floatingMediaBtn}
-              activeOpacity={0.8}
-              onPress={() => setIsMuted(!isMuted)}
-            >
-              {isMuted ? (
-                <VolumeX size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
-              ) : (
-                <Volume2 size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
-              )}
-            </TouchableOpacity>
+            {/* Delivery Scene with Full-Height Background Video */}
+            <View style={styles.heroSceneWrapper}>
+              {/* Full-Height Looping Background Video */}
+              <VideoView
+                player={videoPlayer}
+                style={styles.heroBgVideo}
+                contentFit="cover"
+                nativeControls={false}
+              />
 
-            {/* Pause Button */}
-            <TouchableOpacity
-              style={styles.floatingMediaBtn}
-              activeOpacity={0.8}
-              onPress={() => setIsPlaying(!isPlaying)}
+              {/* ── TOP SUBTLE STATUS BAR SHADING (Keeps top of video crystal clear) ── */}
+              <Svg
+                width="100%"
+                height={Math.max(topHeaderPadding + 36 * SCALE, 84)}
+                style={styles.heroTopFadeGradient}
+                pointerEvents="none"
+              >
+                <Defs>
+                  <LinearGradient id="heroTopGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <Stop offset="0%" stopColor="#000000" stopOpacity="0.48" />
+                    <Stop offset="60%" stopColor="#000000" stopOpacity="0.16" />
+                    <Stop offset="100%" stopColor="#000000" stopOpacity="0" />
+                  </LinearGradient>
+                </Defs>
+                <Rect width="100%" height="100%" fill="url(#heroTopGrad)" />
+              </Svg>
+
+              {/* ── BOTTOM FADE GRADIENT (Smooth transition into status card) ───── */}
+              <Svg
+                width="100%"
+                height={120 * SCALE}
+                style={styles.heroBottomFadeGradient}
+                pointerEvents="none"
+              >
+                <Defs>
+                  <LinearGradient id="heroBottomGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <Stop offset="0%" stopColor="#000000" stopOpacity="0" />
+                    <Stop offset="60%" stopColor="#000000" stopOpacity="0.65" />
+                    <Stop offset="100%" stopColor="#000000" stopOpacity="1" />
+                  </LinearGradient>
+                </Defs>
+                <Rect width="100%" height="100%" fill="url(#heroBottomGrad)" />
+              </Svg>
+            </View>
+
+            {/* Floating Media Action Controls (Top-Right of Hero) */}
+            <View
+              style={[
+                styles.floatingMediaControls,
+                { top: topHeaderPadding + 48 * SCALE },
+              ]}
             >
-              {isPlaying ? (
-                <Pause size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
-              ) : (
-                <Play size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
-              )}
-            </TouchableOpacity>
+              {/* Mute Button */}
+              <TouchableOpacity
+                style={styles.floatingMediaBtn}
+                activeOpacity={0.8}
+                onPress={() => setIsMuted(!isMuted)}
+              >
+                {isMuted ? (
+                  <VolumeX size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
+                ) : (
+                  <Volume2 size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
+                )}
+              </TouchableOpacity>
+
+              {/* Pause Button */}
+              <TouchableOpacity
+                style={styles.floatingMediaBtn}
+                activeOpacity={0.8}
+                onPress={() => setIsPlaying(!isPlaying)}
+              >
+                {isPlaying ? (
+                  <Pause size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
+                ) : (
+                  <Play size={16 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* ── LIVE MINIMIZED OLA MAP DISC (MATCHING INCOMING REQUEST MODAL) ── */}
+            <Animated.View style={{ opacity: miniMapOpacity }}>
+              <TouchableOpacity
+                style={[styles.floatingMiniMapDiscContainer, isFullScreenMap && styles.floatingMiniMapDiscActive]}
+                activeOpacity={0.88}
+                onPress={openFullMap}
+              >
+                {/* Mini Map Canvas with Rounded Lens */}
+                <View style={styles.miniMapLensWrapper}>
+                  <WebView
+                    ref={miniMapWebviewRef}
+                    source={miniMapSource}
+                    style={StyleSheet.absoluteFill}
+                    scrollEnabled={false}
+                    javaScriptEnabled
+                    domStorageEnabled
+                    pointerEvents="none"
+                    originWhitelist={['*']}
+                    onLoadEnd={() => {
+                      if (roadRouteCoordsRef.current && roadRouteCoordsRef.current.length > 0) {
+                        const routeScript = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(roadRouteCoordsRef.current)}); } true;`;
+                        miniMapWebviewRef.current?.injectJavaScript(routeScript);
+                      }
+                      if (trackingDataRef.current?.currentLat && trackingDataRef.current?.currentLng) {
+                        const lat = Number(trackingDataRef.current.currentLat);
+                        const lng = Number(trackingDataRef.current.currentLng);
+                        if (!isNaN(lat) && !isNaN(lng)) {
+                          const riderScript = `if (window.updateRiderPosition) { window.updateRiderPosition(${lng}, ${lat}); } true;`;
+                          miniMapWebviewRef.current?.injectJavaScript(riderScript);
+                        }
+                      }
+                    }}
+                  />
+
+                  {/* Frosted Lens Glass Overlay */}
+                  <View style={styles.miniMapGlassVignette} />
+
+                  {/* Centered Glowing Location Pin */}
+                  <View style={styles.miniMapCenterPinBadge}>
+                    <Svg width={18 * SCALE} height={22 * SCALE} viewBox="0 0 24 28" fill="none">
+                      <Path
+                        d="M12 2C7.02944 2 3 6.02944 3 11C3 16.5 12 26 12 26C12 26 21 16.5 21 11C21 6.02944 16.9706 2 12 2Z"
+                        fill="#FFFFFF"
+                        stroke="#2A2A30"
+                        strokeWidth="1.5"
+                      />
+                      <Circle cx="12" cy="11" r="4.5" fill="#149E55" />
+                    </Svg>
+                  </View>
+                </View>
+
+                {/* Bottom Attached "MAP" Pill Badge */}
+                <View style={styles.miniMapBottomPill}>
+                  <Text style={styles.miniMapPillText}>MAP</Text>
+                </View>
+              </TouchableOpacity>
+            </Animated.View>
           </View>
 
-          {/* ── LIVE MINIMIZED OLA MAP DISC (MATCHING INCOMING REQUEST MODAL) ── */}
-          <Animated.View style={{ opacity: miniMapOpacity }}>
-            <TouchableOpacity
-              style={[styles.floatingMiniMapDiscContainer, isFullScreenMap && styles.floatingMiniMapDiscActive]}
-              activeOpacity={0.88}
-              onPress={openFullMap}
-            >
-              {/* Mini Map Canvas with Rounded Lens */}
-              <View style={styles.miniMapLensWrapper}>
-                <WebView
-                  ref={miniMapWebviewRef}
-                  source={miniMapSource}
-                  style={StyleSheet.absoluteFill}
-                  scrollEnabled={false}
-                  javaScriptEnabled
-                  domStorageEnabled
-                  pointerEvents="none"
-                  originWhitelist={['*']}
-                  onLoadEnd={() => {
-                    if (roadRouteCoordsRef.current && roadRouteCoordsRef.current.length > 0) {
-                      const routeScript = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(roadRouteCoordsRef.current)}); } true;`;
-                      miniMapWebviewRef.current?.injectJavaScript(routeScript);
-                    }
-                    if (trackingDataRef.current?.currentLat && trackingDataRef.current?.currentLng) {
-                      const lat = Number(trackingDataRef.current.currentLat);
-                      const lng = Number(trackingDataRef.current.currentLng);
-                      if (!isNaN(lat) && !isNaN(lng)) {
-                        const riderScript = `if (window.updateRiderPosition) { window.updateRiderPosition(${lng}, ${lat}); } true;`;
-                        miniMapWebviewRef.current?.injectJavaScript(riderScript);
-                      }
-                    }
-                  }}
-                />
-
-                {/* Frosted Lens Glass Overlay */}
-                <View style={styles.miniMapGlassVignette} />
-
-                {/* Centered Glowing Location Pin */}
-                <View style={styles.miniMapCenterPinBadge}>
-                  <Svg width={18 * SCALE} height={22 * SCALE} viewBox="0 0 24 28" fill="none">
-                    <Path
-                      d="M12 2C7.02944 2 3 6.02944 3 11C3 16.5 12 26 12 26C12 26 21 16.5 21 11C21 6.02944 16.9706 2 12 2Z"
-                      fill="#FFFFFF"
-                      stroke="#2A2A30"
-                      strokeWidth="1.5"
-                    />
-                    <Circle cx="12" cy="11" r="4.5" fill="#149E55" />
-                  </Svg>
-                </View>
-              </View>
-
-              {/* Bottom Attached "MAP" Pill Badge */}
-              <View style={styles.miniMapBottomPill}>
-                <Text style={styles.miniMapPillText}>MAP</Text>
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-
-        {/* ════════════════════════════════════════════════════════════════════════
+          {/* ════════════════════════════════════════════════════════════════════════
             [3] OVERLAPPING ACTIVE DELIVERY STATUS CARD (FIGMA NODE 3046:159)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.overlappingCardContainer}>
-          <View
-            style={styles.deliveryStatusCard}
-            {...cardSlidePanResponder.panHandlers}
-          >
-            {/* Slide Down Drag Indicator Bar */}
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={openFullMap}
-              style={styles.cardDragIndicatorArea}
+          <View style={styles.overlappingCardContainer}>
+            <View
+              style={styles.deliveryStatusCard}
+              {...cardSlidePanResponder.panHandlers}
             >
-              <View style={styles.cardDragHandlePill} />
-              <View style={styles.cardDragHintRow}>
-                <ChevronDown size={13 * SCALE} color="#8A8A90" strokeWidth={2.4} />
-                <Text style={styles.cardDragHintText}>Slide down for full map</Text>
-                <ChevronDown size={13 * SCALE} color="#8A8A90" strokeWidth={2.4} />
-              </View>
-            </TouchableOpacity>
-            {!isRiderAccepted ? (
-              /* ── STAGE 1: ORDER RECEIVED / KITCHEN PREPARING (NO RIDER ASSIGNED YET) ── */
-              <View>
-                <View style={styles.statusCardTopSection}>
-                  {/* Left: Order Received Title + Restaurant/Address Timeline */}
-                  <Animated.View
-                    style={[
-                      styles.statusCardLeftInfo,
-                      {
-                        opacity: statusFadeAnim,
-                        transform: [{ translateY: statusTranslateYAnim }, { scale: statusScaleAnim }],
-                      },
-                    ]}
-                  >
-                    <Text style={styles.orderReceivedHeading}>{statusInfo.title}</Text>
-
-                    {/* Description text (always shown when present) */}
-                    {statusInfo.description ? (
-                      <Text style={{ color: '#A0A0A5', fontSize: 13 * SCALE, marginTop: 4, fontFamily: 'Outfit-Regular', lineHeight: 18 }}>
-                        {statusInfo.description}
-                      </Text>
-                    ) : (
-                      <View style={styles.timelineRowContainer}>
-                        {/* Vertical Gold Line & Dots */}
-                        <View style={styles.timelineTrackCol}>
-                          <View style={styles.timelineDotYellow} />
-                          <View style={styles.timelineDottedLine} />
-                          <View style={styles.timelineDotYellow} />
-                        </View>
-
-                        {/* Text details */}
-                        <View style={styles.timelineDetailsCol}>
-                          <Text style={styles.timelineRestaurantName} numberOfLines={1}>
-                            {restaurantName}
-                          </Text>
-                          <Text style={styles.timelineAddressLine} numberOfLines={2}>
-                            @ To Home | {deliveryAddress}
-                          </Text>
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Extra prep time extension alert during dinner rush */}
-                    {prepExtensionNotice && (
-                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2E2005', borderColor: '#F59E0B', marginTop: 6 }]}>
-                        <Clock size={13} color="#F5B800" style={{ marginRight: 6 }} />
-                        <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', flex: 1 }]}>
-                          {prepExtensionNotice}
-                        </Text>
-                      </View>
-                    )}
-
-                    {/* Swiggy Handover / Delivery Pickup OTP Badge */}
-                    {orderDetail?.handoverOtp && orderDetail?.status !== 'cancelled' && orderDetail?.status !== 'served' && (
-                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#1A1811', borderColor: '#F5B800', marginTop: 6, justifyContent: 'space-between' }]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <ShieldCheck size={14} color="#F5B800" style={{ marginRight: 6 }} />
-                          <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', fontWeight: '700' }]}>
-                            Pickup Handover OTP:
-                          </Text>
-                        </View>
-                        <View style={{ backgroundColor: '#F5B800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                          <Text style={{ fontSize: 13, fontWeight: '800', color: '#000000', letterSpacing: 2 }}>
-                            {orderDetail.handoverOtp}
-                          </Text>
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Restaurant rush cancellation banner if cancelled */}
-                    {orderDetail?.status === 'cancelled' && (
-                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2A0E0E', borderColor: '#EF4444', marginTop: 6 }]}>
-                        <AlertCircle size={14} color="#EF4444" style={{ marginRight: 6 }} />
-                        <Text style={[styles.waitingPartnerBadgeText, { color: '#FCA5A5', flex: 1 }]}>
-                          Order Cancelled by Kitchen • 100% Refund Initiated
-                        </Text>
-                      </View>
-                    )}
-                  </Animated.View>
-
-                  {/* Right: Gold ETA Box */}
-                  <View style={styles.etaGoldBadgeCard}>
-                    <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-                      <Defs>
-                        <LinearGradient id="etaGoldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <Stop offset="0%" stopColor="#F5B800" />
-                          <Stop offset="100%" stopColor="#E29E00" />
-                        </LinearGradient>
-                      </Defs>
-                      <Rect width="100%" height="100%" rx={20 * SCALE} fill="url(#etaGoldGrad)" />
-                    </Svg>
-                    <Text style={styles.etaNumberBlack}>{etaMinutes}</Text>
-                    <Text style={styles.etaMinsUnitBlack}>mins</Text>
-                  </View>
+              {/* Slide Down Drag Indicator Bar */}
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={openFullMap}
+                style={styles.cardDragIndicatorArea}
+              >
+                <View style={styles.cardDragHandlePill} />
+                <View style={styles.cardDragHintRow}>
+                  <ChevronDown size={13 * SCALE} color="#8A8A90" strokeWidth={2.4} />
+                  <Text style={styles.cardDragHintText}>Slide down for full map</Text>
+                  <ChevronDown size={13 * SCALE} color="#8A8A90" strokeWidth={2.4} />
                 </View>
+              </TouchableOpacity>
+              {!isRiderAccepted ? (
+                /* ── STAGE 1: ORDER RECEIVED / KITCHEN PREPARING (NO RIDER ASSIGNED YET) ── */
+                <View>
+                  <View style={styles.statusCardTopSection}>
+                    {/* Left: Order Received Title + Restaurant/Address Timeline */}
+                    <Animated.View
+                      style={[
+                        styles.statusCardLeftInfo,
+                        {
+                          opacity: statusFadeAnim,
+                          transform: [{ translateY: statusTranslateYAnim }, { scale: statusScaleAnim }],
+                        },
+                      ]}
+                    >
+                      <Text style={styles.orderReceivedHeading}>{statusInfo.title}</Text>
 
-                {/* Divider Line */}
-                <View style={styles.statusCardDividerLine} />
-
-                {/* Bottom Row: Add Delivery Instructions */}
-                <View style={styles.statusCardBottomSection}>
-                  <TouchableOpacity
-                    style={styles.addInstructionsRow}
-                    activeOpacity={0.8}
-                    onPress={() => setShowDeliveryInstructionsModal(true)}
-                  >
-                    <Text style={styles.addInstructionsGoldText}>Add Delivery Instructions</Text>
-                    <Text style={styles.addInstructionsGoldChevron}>›</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              /* ── STAGE 2: PARTNER IS ON THE WAY (AFTER RIDER ACCEPTS) ── */
-              <View>
-                <View style={styles.statusCardTopSection}>
-                  {/* Left Content */}
-                  <Animated.View
-                    style={[
-                      styles.statusCardLeftInfo,
-                      {
-                        opacity: statusFadeAnim,
-                        transform: [{ translateY: statusTranslateYAnim }, { scale: statusScaleAnim }],
-                      },
-                    ]}
-                  >
-                    {/* ON TIME Badge Row (Gold Checkmark & Gold Text) */}
-                    <View style={styles.onTimeBadgeRow}>
-                      <Svg width={13 * SCALE} height={13 * SCALE} viewBox="0 0 24 24" fill="none">
-                        <Path
-                          d="M20 6L9 17L4 12"
-                          stroke="#E5B842"
-                          strokeWidth="3.4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </Svg>
-                      <Text style={styles.onTimeBadgeText}>{statusInfo.badge || 'ON TIME'}</Text>
-                    </View>
-
-                    {/* Main Status Title: Partner is on the way */}
-                    <Text style={styles.partnerStatusTitle}>{statusInfo.title}</Text>
-
-                    {/* Subtitle Description */}
-                    <Text style={styles.partnerStatusDesc}>{statusInfo.description}</Text>
-
-                    {/* Partner Name Capsule + Kitchen Prep Mini Pill */}
-                    <View style={styles.partnerDetailsRow}>
-                      <View style={styles.partnerNameCapsule}>
-                        <View style={styles.riderOnlineDot} />
-                        <Text style={styles.partnerNameText} numberOfLines={1}>
-                          {riderDisplayName || 'Delivery Partner'}
+                      {/* Description text (always shown when present) */}
+                      {statusInfo.description ? (
+                        <Text style={{ color: '#A0A0A5', fontSize: 13 * SCALE, marginTop: 4, fontFamily: 'Outfit-Regular', lineHeight: 18 }}>
+                          {statusInfo.description}
                         </Text>
-                      </View>
-                      {isPreparing && (
-                        <View style={styles.kitchenPrepMiniPill}>
-                          <ChefHat size={12 * SCALE} color="#F5B800" style={{ marginRight: 4 }} />
-                          <Text style={styles.kitchenPrepMiniText}>Prep: {totalKitchenPrepTime}m (~{activePrepMins}m left)</Text>
+                      ) : (
+                        <View style={styles.timelineRowContainer}>
+                          {/* Vertical Gold Line & Dots */}
+                          <View style={styles.timelineTrackCol}>
+                            <View style={styles.timelineDotYellow} />
+                            <View style={styles.timelineDottedLine} />
+                            <View style={styles.timelineDotYellow} />
+                          </View>
+
+                          {/* Text details */}
+                          <View style={styles.timelineDetailsCol}>
+                            <Text style={styles.timelineRestaurantName} numberOfLines={1}>
+                              {restaurantName}
+                            </Text>
+                            <Text style={styles.timelineAddressLine} numberOfLines={2}>
+                              @ To Home | {deliveryAddress}
+                            </Text>
+                          </View>
                         </View>
                       )}
+
+                      {/* Extra prep time extension alert during dinner rush */}
+                      {prepExtensionNotice && (
+                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2E2005', borderColor: '#F59E0B', marginTop: 6 }]}>
+                          <Clock size={13} color="#F5B800" style={{ marginRight: 6 }} />
+                          <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', flex: 1 }]}>
+                            {prepExtensionNotice}
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Swiggy Handover / Delivery Pickup OTP Badge */}
+                      {orderDetail?.handoverOtp && orderDetail?.status !== 'cancelled' && orderDetail?.status !== 'served' && (
+                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#1A1811', borderColor: '#F5B800', marginTop: 6, justifyContent: 'space-between' }]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <ShieldCheck size={14} color="#F5B800" style={{ marginRight: 6 }} />
+                            <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', fontWeight: '700' }]}>
+                              Pickup Handover OTP:
+                            </Text>
+                          </View>
+                          <View style={{ backgroundColor: '#F5B800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: '#000000', letterSpacing: 2 }}>
+                              {orderDetail.handoverOtp}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Restaurant rush cancellation banner if cancelled */}
+                      {orderDetail?.status === 'cancelled' && (
+                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2A0E0E', borderColor: '#EF4444', marginTop: 6 }]}>
+                          <AlertCircle size={14} color="#EF4444" style={{ marginRight: 6 }} />
+                          <Text style={[styles.waitingPartnerBadgeText, { color: '#FCA5A5', flex: 1 }]}>
+                            Order Cancelled by Kitchen • 100% Refund Initiated
+                          </Text>
+                        </View>
+                      )}
+                    </Animated.View>
+
+                    {/* Right: Gold ETA Box */}
+                    <View style={styles.etaGoldBadgeCard}>
+                      <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                        <Defs>
+                          <LinearGradient id="etaGoldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <Stop offset="0%" stopColor="#F5B800" />
+                            <Stop offset="100%" stopColor="#E29E00" />
+                          </LinearGradient>
+                        </Defs>
+                        <Rect width="100%" height="100%" rx={20 * SCALE} fill="url(#etaGoldGrad)" />
+                      </Svg>
+                      <Text style={styles.etaNumberBlack}>{etaMinutes}</Text>
+                      <Text style={styles.etaMinsUnitBlack}>mins</Text>
                     </View>
+                  </View>
 
-                    {/* Swiggy Handover / Delivery Pickup OTP Badge */}
-                    {orderDetail?.handoverOtp && orderDetail?.status !== 'cancelled' && orderDetail?.status !== 'served' && (
-                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#1A1811', borderColor: '#F5B800', marginTop: 6, justifyContent: 'space-between' }]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <ShieldCheck size={14} color="#F5B800" style={{ marginRight: 6 }} />
-                          <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', fontWeight: '700' }]}>
-                            Pickup Handover OTP:
-                          </Text>
-                        </View>
-                        <View style={{ backgroundColor: '#F5B800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                          <Text style={{ fontSize: 13, fontWeight: '800', color: '#000000', letterSpacing: 2 }}>
-                            {orderDetail.handoverOtp}
-                          </Text>
-                        </View>
+                  {/* Divider Line */}
+                  <View style={styles.statusCardDividerLine} />
+
+                  {/* Bottom Row: Add Delivery Instructions */}
+                  <View style={styles.statusCardBottomSection}>
+                    <TouchableOpacity
+                      style={styles.addInstructionsRow}
+                      activeOpacity={0.8}
+                      onPress={() => setShowDeliveryInstructionsModal(true)}
+                    >
+                      <Text style={styles.addInstructionsGoldText}>Add Delivery Instructions</Text>
+                      <Text style={styles.addInstructionsGoldChevron}>›</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                /* ── STAGE 2: PARTNER IS ON THE WAY (AFTER RIDER ACCEPTS) ── */
+                <View>
+                  <View style={styles.statusCardTopSection}>
+                    {/* Left Content */}
+                    <Animated.View
+                      style={[
+                        styles.statusCardLeftInfo,
+                        {
+                          opacity: statusFadeAnim,
+                          transform: [{ translateY: statusTranslateYAnim }, { scale: statusScaleAnim }],
+                        },
+                      ]}
+                    >
+                      {/* ON TIME Badge Row (Gold Checkmark & Gold Text) */}
+                      <View style={styles.onTimeBadgeRow}>
+                        <Svg width={13 * SCALE} height={13 * SCALE} viewBox="0 0 24 24" fill="none">
+                          <Path
+                            d="M20 6L9 17L4 12"
+                            stroke="#E5B842"
+                            strokeWidth="3.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </Svg>
+                        <Text style={styles.onTimeBadgeText}>{statusInfo.badge || 'ON TIME'}</Text>
                       </View>
-                    )}
-                  </Animated.View>
 
-                  {/* Right: Gold ETA Badge (Matching Screenshot) */}
-                  <View style={styles.etaGoldBadgeCard}>
-                    <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-                      <Defs>
-                        <LinearGradient id="etaGoldGradPartner" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <Stop offset="0%" stopColor="#F5BE38" />
-                          <Stop offset="100%" stopColor="#DE9E22" />
-                        </LinearGradient>
-                      </Defs>
-                      <Rect width="100%" height="100%" rx={20 * SCALE} fill="url(#etaGoldGradPartner)" />
-                    </Svg>
-                    <Text style={styles.etaNumberBlack}>{etaMinutes}</Text>
-                    <Text style={styles.etaMinsUnitBlack}>mins</Text>
+                      {/* Main Status Title: Partner is on the way */}
+                      <Text style={styles.partnerStatusTitle}>{statusInfo.title}</Text>
+
+                      {/* Subtitle Description */}
+                      <Text style={styles.partnerStatusDesc}>{statusInfo.description}</Text>
+
+                      {/* Partner Name Capsule + Kitchen Prep Mini Pill */}
+                      <View style={styles.partnerDetailsRow}>
+                        <View style={styles.partnerNameCapsule}>
+                          <View style={styles.riderOnlineDot} />
+                          <Text style={styles.partnerNameText} numberOfLines={1}>
+                            {riderDisplayName || 'Delivery Partner'}
+                          </Text>
+                        </View>
+                        {isPreparing && (
+                          <View style={styles.kitchenPrepMiniPill}>
+                            <ChefHat size={12 * SCALE} color="#F5B800" style={{ marginRight: 4 }} />
+                            <Text style={styles.kitchenPrepMiniText}>Prep: {totalKitchenPrepTime}m (~{activePrepMins}m left)</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Swiggy Handover / Delivery Pickup OTP Badge */}
+                      {orderDetail?.handoverOtp && orderDetail?.status !== 'cancelled' && orderDetail?.status !== 'served' && (
+                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#1A1811', borderColor: '#F5B800', marginTop: 6, justifyContent: 'space-between' }]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <ShieldCheck size={14} color="#F5B800" style={{ marginRight: 6 }} />
+                            <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', fontWeight: '700' }]}>
+                              Pickup Handover OTP:
+                            </Text>
+                          </View>
+                          <View style={{ backgroundColor: '#F5B800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: '#000000', letterSpacing: 2 }}>
+                              {orderDetail.handoverOtp}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                    </Animated.View>
+
+                    {/* Right: Gold ETA Badge (Matching Screenshot) */}
+                    <View style={styles.etaGoldBadgeCard}>
+                      <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                        <Defs>
+                          <LinearGradient id="etaGoldGradPartner" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <Stop offset="0%" stopColor="#F5BE38" />
+                            <Stop offset="100%" stopColor="#DE9E22" />
+                          </LinearGradient>
+                        </Defs>
+                        <Rect width="100%" height="100%" rx={20 * SCALE} fill="url(#etaGoldGradPartner)" />
+                      </Svg>
+                      <Text style={styles.etaNumberBlack}>{etaMinutes}</Text>
+                      <Text style={styles.etaMinsUnitBlack}>mins</Text>
+                    </View>
+                  </View>
+
+                  {/* Subtle Divider Line */}
+                  <View style={styles.statusCardDividerLine} />
+
+                  {/* Bottom Row: Add Delivery Instructions + Unified Action Capsule */}
+                  <View style={styles.statusCardBottomSection}>
+                    <TouchableOpacity
+                      style={styles.addInstructionsRow}
+                      activeOpacity={0.8}
+                      onPress={() => setShowDeliveryInstructionsModal(true)}
+                    >
+                      <Text style={styles.addInstructionsText} numberOfLines={1} ellipsizeMode="tail">Add Delivery Instructions</Text>
+                      <ChevronRight size={15 * SCALE} color="#9A9AA2" />
+                    </TouchableOpacity>
+
+                    {/* Right Unified Action Capsule (Call | Chat | Avatar) */}
+                    <View style={styles.unifiedActionCapsule}>
+                      {/* Call Button */}
+                      <TouchableOpacity
+                        style={styles.capsuleIconBtn}
+                        activeOpacity={0.8}
+                        onPress={handleCallRider}
+                      >
+                        <Phone size={15 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
+                      </TouchableOpacity>
+
+                      <View style={styles.capsuleDivider} />
+
+                      {/* Chat Button */}
+                      <TouchableOpacity
+                        style={styles.capsuleIconBtn}
+                        activeOpacity={0.8}
+                        onPress={() => setShowChatModal(true)}
+                      >
+                        <MessageSquare size={15 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
+                      </TouchableOpacity>
+
+                      <View style={styles.capsuleDivider} />
+
+                      {/* Delivery Partner Avatar */}
+                      <TouchableOpacity
+                        style={styles.capsuleAvatarBtn}
+                        activeOpacity={0.85}
+                        onPress={handleCallRider}
+                      >
+                        <Image
+                          source={deliveryBoyImg}
+                          style={styles.deliveryBoyExactImg}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
+              )}
+            </View>
 
-                {/* Subtle Divider Line */}
-                <View style={styles.statusCardDividerLine} />
-
-                {/* Bottom Row: Add Delivery Instructions + Unified Action Capsule */}
-                <View style={styles.statusCardBottomSection}>
-                  <TouchableOpacity
-                    style={styles.addInstructionsRow}
-                    activeOpacity={0.8}
-                    onPress={() => setShowDeliveryInstructionsModal(true)}
-                  >
-                    <Text style={styles.addInstructionsText} numberOfLines={1} ellipsizeMode="tail">Add Delivery Instructions</Text>
-                    <ChevronRight size={15 * SCALE} color="#9A9AA2" />
-                  </TouchableOpacity>
-
-                  {/* Right Unified Action Capsule (Call | Chat | Avatar) */}
-                  <View style={styles.unifiedActionCapsule}>
-                    {/* Call Button */}
-                    <TouchableOpacity
-                      style={styles.capsuleIconBtn}
-                      activeOpacity={0.8}
-                      onPress={handleCallRider}
-                    >
-                      <Phone size={15 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
-                    </TouchableOpacity>
-
-                    <View style={styles.capsuleDivider} />
-
-                    {/* Chat Button */}
-                    <TouchableOpacity
-                      style={styles.capsuleIconBtn}
-                      activeOpacity={0.8}
-                      onPress={() => setShowChatModal(true)}
-                    >
-                      <MessageSquare size={15 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
-                    </TouchableOpacity>
-
-                    <View style={styles.capsuleDivider} />
-
-                    {/* Delivery Partner Avatar */}
-                    <TouchableOpacity
-                      style={styles.capsuleAvatarBtn}
-                      activeOpacity={0.85}
-                      onPress={handleCallRider}
-                    >
-                      <Image
-                        source={deliveryBoyImg}
-                        style={styles.deliveryBoyExactImg}
-                        resizeMode="cover"
-                      />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            )}
-          </View>
-
-          {/* ══════════════════════════════════════════════════════════════════════
+            {/* ══════════════════════════════════════════════════════════════════════
               [4] SAVINGS PILL BANNER (PREMIUM EMERALD GLOW CAPSULE)
               ══════════════════════════════════════════════════════════════════════ */}
-          <View style={styles.savingsPillBanner}>
-            {/* Ambient Emerald Glass Glow Background */}
-            <View style={StyleSheet.absoluteFill} pointerEvents="none">
-              <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-                <Defs>
-                  <LinearGradient id="savingsBaseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <Stop offset="0%" stopColor="#08140B" />
-                    <Stop offset="50%" stopColor="#0E2816" />
-                    <Stop offset="100%" stopColor="#08140B" />
-                  </LinearGradient>
-                  <RadialGradient id="savingsCenterGlow" cx="50%" cy="50%" r="55%" fx="50%" fy="50%">
-                    <Stop offset="0%" stopColor="#22C55E" stopOpacity="0.22" />
-                    <Stop offset="100%" stopColor="#08140B" stopOpacity="0" />
-                  </RadialGradient>
-                </Defs>
-                <Rect width="100%" height="100%" fill="url(#savingsBaseGrad)" />
-                <Rect width="100%" height="100%" fill="url(#savingsCenterGlow)" />
+            <View style={styles.savingsPillBanner}>
+              {/* Ambient Emerald Glass Glow Background */}
+              <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                  <Defs>
+                    <LinearGradient id="savingsBaseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <Stop offset="0%" stopColor="#08140B" />
+                      <Stop offset="50%" stopColor="#0E2816" />
+                      <Stop offset="100%" stopColor="#08140B" />
+                    </LinearGradient>
+                    <RadialGradient id="savingsCenterGlow" cx="50%" cy="50%" r="55%" fx="50%" fy="50%">
+                      <Stop offset="0%" stopColor="#22C55E" stopOpacity="0.22" />
+                      <Stop offset="100%" stopColor="#08140B" stopOpacity="0" />
+                    </RadialGradient>
+                  </Defs>
+                  <Rect width="100%" height="100%" fill="url(#savingsBaseGrad)" />
+                  <Rect width="100%" height="100%" fill="url(#savingsCenterGlow)" />
+                </Svg>
+              </View>
+
+              {/* Left Glowing Diamond Star */}
+              <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
+                  fill="#34D399"
+                />
               </Svg>
+
+              {/* Banner Text with Highlighted Savings */}
+              <Text style={styles.savingsBannerText}>
+                Yay!{' '}
+                <Text style={styles.savingsAmountHighlight}>
+                  {normalizePrice(orderDetail?.discount) > 0 ? `₹${normalizePrice(orderDetail.discount)} saved` : 'FREE delivery'}
+                </Text>
+                {' '}on this order
+              </Text>
             </View>
 
-            {/* Left Glowing Diamond Star */}
-            <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
-                fill="#34D399"
-              />
-            </Svg>
-
-            {/* Banner Text with Highlighted Savings */}
-            <Text style={styles.savingsBannerText}>
-              Yay!{' '}
-              <Text style={styles.savingsAmountHighlight}>
-                {normalizePrice(orderDetail?.discount) > 0 ? `₹${normalizePrice(orderDetail.discount)} saved` : 'FREE delivery'}
-              </Text>
-              {' '}on this order
-            </Text>
-          </View>
-
-          {/* ══════════════════════════════════════════════════════════════════════
+            {/* ══════════════════════════════════════════════════════════════════════
               [5] MYQURO REAL CASHBACK PROMO CARD (WITH 3D WALLET & GOLD AURA)
               ══════════════════════════════════════════════════════════════════════ */}
-          <View style={styles.myquroCashbackCard}>
-            {/* Seamless Dark Obsidian Base with Centered Gold Aura Behind Wallet */}
-            <View style={StyleSheet.absoluteFill} pointerEvents="none">
-              <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-                <Defs>
-                  <LinearGradient id="cashbackBaseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <Stop offset="0%" stopColor="#0A0A0C" />
-                    <Stop offset="45%" stopColor="#09080A" />
-                    <Stop offset="72%" stopColor="#221806" />
-                    <Stop offset="88%" stopColor="#151004" />
-                    <Stop offset="100%" stopColor="#0A0A0C" />
-                  </LinearGradient>
-                  <RadialGradient
-                    id="walletGoldAura"
-                    cx="72%"
-                    cy="50%"
-                    r="40%"
-                    fx="72%"
-                    fy="50%"
-                  >
-                    <Stop offset="0%" stopColor="#E5B842" stopOpacity="0.45" />
-                    <Stop offset="35%" stopColor="#A37B1B" stopOpacity="0.22" />
-                    <Stop offset="70%" stopColor="#3D2B06" stopOpacity="0.06" />
-                    <Stop offset="100%" stopColor="#0A0A0C" stopOpacity="0" />
-                  </RadialGradient>
-                </Defs>
-                <Rect width="100%" height="100%" fill="url(#cashbackBaseGrad)" />
-                <Rect width="100%" height="100%" fill="url(#walletGoldAura)" />
+            <View style={styles.myquroCashbackCard}>
+              {/* Seamless Dark Obsidian Base with Centered Gold Aura Behind Wallet */}
+              <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                  <Defs>
+                    <LinearGradient id="cashbackBaseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <Stop offset="0%" stopColor="#0A0A0C" />
+                      <Stop offset="45%" stopColor="#09080A" />
+                      <Stop offset="72%" stopColor="#221806" />
+                      <Stop offset="88%" stopColor="#151004" />
+                      <Stop offset="100%" stopColor="#0A0A0C" />
+                    </LinearGradient>
+                    <RadialGradient
+                      id="walletGoldAura"
+                      cx="72%"
+                      cy="50%"
+                      r="40%"
+                      fx="72%"
+                      fy="50%"
+                    >
+                      <Stop offset="0%" stopColor="#E5B842" stopOpacity="0.45" />
+                      <Stop offset="35%" stopColor="#A37B1B" stopOpacity="0.22" />
+                      <Stop offset="70%" stopColor="#3D2B06" stopOpacity="0.06" />
+                      <Stop offset="100%" stopColor="#0A0A0C" stopOpacity="0" />
+                    </RadialGradient>
+                  </Defs>
+                  <Rect width="100%" height="100%" fill="url(#cashbackBaseGrad)" />
+                  <Rect width="100%" height="100%" fill="url(#walletGoldAura)" />
+                </Svg>
+              </View>
+
+              {/* Left Column: Heading & Subtext */}
+              <View style={styles.cashbackLeftCol}>
+                <View style={styles.cashbackTitleGroup}>
+                  <Text style={styles.cashbackTitleWhite}>Real cashback</Text>
+                  <Text style={styles.cashbackTitleGold}>on every spend</Text>
+                </View>
+
+                <Text style={styles.cashbackSubtext}>
+                  No expiring points or coupon scratching
+                </Text>
+              </View>
+
+              {/* Right Column: 3D MyQuro Wallet Asset */}
+              <View style={styles.cashbackWalletWrap}>
+                <Image
+                  source={require('../assets/wallet.png')}
+                  style={styles.cashbackWalletImg}
+                  resizeMode="contain"
+                />
+              </View>
+            </View>
+
+            {/* ══════════════════════════════════════════════════════════════════════
+              [6] ORDER DETAILS SECTION (EXACT PIXEL-BY-PIXEL DESIGN)
+              ══════════════════════════════════════════════════════════════════════ */}
+
+            {/* Section Header with Organic Gold Underline */}
+            <View style={styles.orderDetailsSectionHeader}>
+              <Text style={styles.orderDetailsSectionTitle}>ORDER DETAILS</Text>
+              {/* Organic Gold Curved Accent Underline */}
+              <Svg width={110 * SCALE} height={8 * SCALE} viewBox="0 0 110 8" fill="none" style={styles.goldUnderlineSvg}>
+                <Path
+                  d="M 2 5 Q 55 1 108 5"
+                  stroke="#DEA430"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                />
               </Svg>
             </View>
 
-            {/* Left Column: Heading & Subtext */}
-            <View style={styles.cashbackLeftCol}>
-              <View style={styles.cashbackTitleGroup}>
-                <Text style={styles.cashbackTitleWhite}>Real cashback</Text>
-                <Text style={styles.cashbackTitleGold}>on every spend</Text>
+            {/* ── CARD 1: STORE & DESTINATION ADDRESS DETAILS ── */}
+            <View style={styles.orderDetailsCard}>
+              {/* Store / Restaurant Row */}
+              <View style={styles.addressDetailRow}>
+                {/* Store Icon Pill */}
+                <View style={styles.addressIconWrap}>
+                  <ShoppingBag size={18 * SCALE} color="#E5B842" strokeWidth={2.2} />
+                </View>
+
+                {/* Store Information */}
+                <View style={styles.addressTextCol}>
+                  <Text style={styles.addressNameTitle} numberOfLines={1}>
+                    {restaurantName || 'Restaurant'}
+                  </Text>
+                  <Text style={styles.addressSubtitle} numberOfLines={2}>
+                    {orderDetail?.restaurantAddress || currentRestaurant?.address || 'Store Location'}
+                  </Text>
+                </View>
               </View>
 
-              <Text style={styles.cashbackSubtext}>
-                No expiring points or coupon scratching
+              {/* Dotted / Dashed Divider Line */}
+              <View style={styles.dashedDividerLine} />
+
+              {/* Delivery Destination Row */}
+              <View style={styles.addressDetailRow}>
+                {/* Destination Home / Pin Icon Pill */}
+                <View style={styles.addressIconWrap}>
+                  <Home size={18 * SCALE} color="#E5B842" strokeWidth={2.2} />
+                </View>
+
+                {/* Destination Information */}
+                <View style={styles.addressTextCol}>
+                  <Text style={styles.addressNameTitle} numberOfLines={1}>
+                    Delivering to Home
+                  </Text>
+                  <Text style={styles.addressSubtitle} numberOfLines={2}>
+                    {deliveryAddress || 'Your Delivery Location'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* ── CARD 2: ITEMS SUMMARY & ORDER METADATA ── */}
+            <View style={styles.orderDetailsCard}>
+              {/* Items Count Header */}
+              <Text style={styles.itemsCountHeader}>
+                {itemsCount > 0 ? itemsCount : 1} item(s)
               </Text>
-            </View>
 
-            {/* Right Column: 3D MyQuro Wallet Asset */}
-            <View style={styles.cashbackWalletWrap}>
-              <Image
-                source={require('../assets/wallet.png')}
-                style={styles.cashbackWalletImg}
-                resizeMode="contain"
-              />
-            </View>
-          </View>
+              {/* List of Ordered Items */}
+              <View style={styles.itemsListContainer}>
+                {orderItemsList.map((item: any, idx: number) => {
+                  const rawItemName = item.name || item.menuItemName || item.foodItem?.name || item.title || item.notes || 'Food Item';
+                  const variantSuffix = item.variantName && item.variantName !== 'Regular' ? ` (${item.variantName})` : '';
+                  const itemName = `${rawItemName}${variantSuffix}`;
+                  const itemQty = Math.max(1, parseInt(String(item.quantity || item.qty || 1), 10));
+                  const unitPrice = getItemPrice(item);
+                  const itemPrice = (item.totalPrice ? normalizePrice(item.totalPrice) : (unitPrice * itemQty)) || (unitPrice * itemQty);
+                  return (
+                    <View key={item.id || idx} style={styles.orderDetailItemRow}>
+                      {/* Gold Check Circle Badge */}
+                      <View style={styles.itemCheckCircleBadge}>
+                        <Check size={10 * SCALE} color="#000000" strokeWidth={3.8} />
+                      </View>
 
-          {/* ══════════════════════════════════════════════════════════════════════
-              [6] ORDER DETAILS SECTION (EXACT PIXEL-BY-PIXEL DESIGN)
-              ══════════════════════════════════════════════════════════════════════ */}
-          
-          {/* Section Header with Organic Gold Underline */}
-          <View style={styles.orderDetailsSectionHeader}>
-            <Text style={styles.orderDetailsSectionTitle}>ORDER DETAILS</Text>
-            {/* Organic Gold Curved Accent Underline */}
-            <Svg width={110 * SCALE} height={8 * SCALE} viewBox="0 0 110 8" fill="none" style={styles.goldUnderlineSvg}>
-              <Path
-                d="M 2 5 Q 55 1 108 5"
-                stroke="#DEA430"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-              />
-            </Svg>
-          </View>
+                      {/* Item Quantity and Name */}
+                      <Text style={styles.orderDetailItemName} numberOfLines={2}>
+                        {itemQty} x {itemName}
+                      </Text>
 
-          {/* ── CARD 1: STORE & DESTINATION ADDRESS DETAILS ── */}
-          <View style={styles.orderDetailsCard}>
-            {/* Store / Restaurant Row */}
-            <View style={styles.addressDetailRow}>
-              {/* Store Icon Pill */}
-              <View style={styles.addressIconWrap}>
-                <ShoppingBag size={18 * SCALE} color="#E5B842" strokeWidth={2.2} />
-              </View>
-
-              {/* Store Information */}
-              <View style={styles.addressTextCol}>
-                <Text style={styles.addressNameTitle} numberOfLines={1}>
-                  {restaurantName || 'Restaurant'}
-                </Text>
-                <Text style={styles.addressSubtitle} numberOfLines={2}>
-                  {orderDetail?.restaurantAddress || currentRestaurant?.address || 'Store Location'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Dotted / Dashed Divider Line */}
-            <View style={styles.dashedDividerLine} />
-
-            {/* Delivery Destination Row */}
-            <View style={styles.addressDetailRow}>
-              {/* Destination Home / Pin Icon Pill */}
-              <View style={styles.addressIconWrap}>
-                <Home size={18 * SCALE} color="#E5B842" strokeWidth={2.2} />
-              </View>
-
-              {/* Destination Information */}
-              <View style={styles.addressTextCol}>
-                <Text style={styles.addressNameTitle} numberOfLines={1}>
-                  Delivering to Home
-                </Text>
-                <Text style={styles.addressSubtitle} numberOfLines={2}>
-                  {deliveryAddress || 'Your Delivery Location'}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* ── CARD 2: ITEMS SUMMARY & ORDER METADATA ── */}
-          <View style={styles.orderDetailsCard}>
-            {/* Items Count Header */}
-            <Text style={styles.itemsCountHeader}>
-              {itemsCount > 0 ? itemsCount : 1} item(s)
-            </Text>
-
-            {/* List of Ordered Items */}
-            <View style={styles.itemsListContainer}>
-              {orderItemsList.map((item: any, idx: number) => {
-                const rawItemName = item.name || item.menuItemName || item.foodItem?.name || item.title || item.notes || 'Food Item';
-                const variantSuffix = item.variantName && item.variantName !== 'Regular' ? ` (${item.variantName})` : '';
-                const itemName = `${rawItemName}${variantSuffix}`;
-                const itemQty = Math.max(1, parseInt(String(item.quantity || item.qty || 1), 10));
-                const unitPrice = getItemPrice(item);
-                const itemPrice = (item.totalPrice ? normalizePrice(item.totalPrice) : (unitPrice * itemQty)) || (unitPrice * itemQty);
-                return (
-                  <View key={item.id || idx} style={styles.orderDetailItemRow}>
-                    {/* Gold Check Circle Badge */}
-                    <View style={styles.itemCheckCircleBadge}>
-                      <Check size={10 * SCALE} color="#000000" strokeWidth={3.8} />
+                      {/* Item Price */}
+                      <Text style={styles.orderDetailItemPrice}>₹{itemPrice}</Text>
                     </View>
+                  );
+                })}
+              </View>
 
-                    {/* Item Quantity and Name */}
-                    <Text style={styles.orderDetailItemName} numberOfLines={2}>
-                      {itemQty} x {itemName}
-                    </Text>
+              {/* Total Bill Row */}
+              {orderTotalAmount > 0 && (
+                <View style={[styles.orderDetailItemRow, { marginTop: 12 * SCALE, paddingTop: 10 * SCALE, borderTopWidth: 1, borderTopColor: '#1F1D17' }]}>
+                  <Text style={[styles.orderDetailItemName, { fontFamily: 'Urbanist-Bold', color: '#FFFFFF', fontSize: 14 * SCALE }]}>
+                    Total Bill
+                  </Text>
+                  <Text style={[styles.orderDetailItemPrice, { color: '#DEA430', fontSize: 15 * SCALE }]}>
+                    ₹{orderTotalAmount}
+                  </Text>
+                </View>
+              )}
 
-                    {/* Item Price */}
-                    <Text style={styles.orderDetailItemPrice}>₹{itemPrice}</Text>
-                  </View>
-                );
-              })}
-            </View>
+              {/* Dotted / Dashed Divider Line */}
+              <View style={styles.dashedDividerLine} />
 
-            {/* Total Bill Row */}
-            {orderTotalAmount > 0 && (
-              <View style={[styles.orderDetailItemRow, { marginTop: 12 * SCALE, paddingTop: 10 * SCALE, borderTopWidth: 1, borderTopColor: '#1F1D17' }]}>
-                <Text style={[styles.orderDetailItemName, { fontFamily: 'Urbanist-Bold', color: '#FFFFFF', fontSize: 14 * SCALE }]}>
-                  Total Bill
+              {/* Footer Row: Placed Time & Order ID */}
+              <View style={styles.orderMetadataFooterRow}>
+                {/* Placed At */}
+                <Text style={styles.metaLabelText}>
+                  Placed at{' '}
+                  <Text style={styles.metaValueGold}>
+                    {placedTimeFormatted || 'Just now'}
+                  </Text>
                 </Text>
-                <Text style={[styles.orderDetailItemPrice, { color: '#DEA430', fontSize: 15 * SCALE }]}>
-                  ₹{orderTotalAmount}
+
+                {/* Order ID */}
+                <Text style={styles.metaLabelText}>
+                  Order{' '}
+                  <Text style={styles.metaValueGold}>
+                    #{orderId || orderDetail?.id || orderDetail?.orderId || 'Recent'}
+                  </Text>
                 </Text>
               </View>
-            )}
-
-            {/* Dotted / Dashed Divider Line */}
-            <View style={styles.dashedDividerLine} />
-
-            {/* Footer Row: Placed Time & Order ID */}
-            <View style={styles.orderMetadataFooterRow}>
-              {/* Placed At */}
-              <Text style={styles.metaLabelText}>
-                Placed at{' '}
-                <Text style={styles.metaValueGold}>
-                  {placedTimeFormatted || 'Just now'}
-                </Text>
-              </Text>
-
-              {/* Order ID */}
-              <Text style={styles.metaLabelText}>
-                Order{' '}
-                <Text style={styles.metaValueGold}>
-                  #{orderId || orderDetail?.id || orderDetail?.orderId || 'Recent'}
-                </Text>
-              </Text>
             </View>
-          </View>
 
-          {/* Bottom iOS Home Bar Indicator */}
-          <View style={styles.bottomHomeBar} />
-          <View style={{ height: Math.max(insets.bottom, 12) }} />
-        </View>
-      </ScrollView>
-    </Animated.View>
+            {/* Bottom iOS Home Bar Indicator */}
+            <View style={styles.bottomHomeBar} />
+            <View style={{ height: Math.max(insets.bottom, 12) }} />
+          </View>
+        </ScrollView>
+      </Animated.View>
 
       {/* ════════════════════════════════════════════════════════════════════════
           [6] LIVE DRIVER CHAT MODAL
