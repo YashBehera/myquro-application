@@ -15,7 +15,7 @@
  * 6. Savings Pill Banner & Kiwi Cashback Promo Card.
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -181,24 +181,31 @@ function buildOlaMapHtml(
   const isUnassigned = !isRiderAssigned;
 
   // Active navigation route coordinates:
-  // If rider is assigned, route ALWAYS starts at the rider's exact position!
+  // Strictly use real street coordinates from Ola Maps (never draw straight lines across buildings)
   let activeCoords: [number, number][] = [];
-  if (hasRider && roadCoords && roadCoords.length > 1) {
-    let closestIdx = 0;
-    let minDist = Infinity;
-    for (let i = 0; i < roadCoords.length; i++) {
-      const d = Math.hypot(roadCoords[i][0] - riderLng!, roadCoords[i][1] - riderLat!);
-      if (d < minDist) {
-        minDist = d;
-        closestIdx = i;
+  if (roadCoords && roadCoords.length > 0) {
+    if (hasRider && roadCoords.length > 1) {
+      let closestIdx = 0;
+      let minDist = Infinity;
+      const cosLat = Math.cos(riderLat! * Math.PI / 180);
+      for (let i = 0; i < roadCoords.length; i++) {
+        const dLng = (roadCoords[i][0] - riderLng!) * cosLat;
+        const dLat = roadCoords[i][1] - riderLat!;
+        const d = Math.hypot(dLng, dLat);
+        if (d < minDist) {
+          minDist = d;
+          closestIdx = i;
+        }
       }
+      const distMeters = minDist * 111320;
+      if (distMeters <= 25) {
+        activeCoords = roadCoords.slice(closestIdx);
+      } else {
+        activeCoords = roadCoords;
+      }
+    } else {
+      activeCoords = roadCoords;
     }
-    activeCoords = [[riderLng!, riderLat!], ...roadCoords.slice(closestIdx + 1)];
-    if (activeCoords.length < 2 && roadCoords.length > 0) {
-      activeCoords = [[riderLng!, riderLat!], roadCoords[roadCoords.length - 1]];
-    }
-  } else if (roadCoords && roadCoords.length > 0) {
-    activeCoords = roadCoords;
   } else if (isGoingToPickup && hasRider) {
     activeCoords = bezier(riderLng!, riderLat!, storeLng, storeLat);
   } else if (isPickedUp && hasRider) {
@@ -355,23 +362,35 @@ function buildOlaMapHtml(
 
     var closestIdx = 0;
     var minDist = Infinity;
+    var cosLat = Math.cos(rLat * Math.PI / 180);
     for (var i = 0; i < fullRouteCoords.length; i++) {
-      var d = Math.hypot(fullRouteCoords[i][0] - rLng, fullRouteCoords[i][1] - rLat);
+      var dLng = (fullRouteCoords[i][0] - rLng) * cosLat;
+      var dLat = fullRouteCoords[i][1] - rLat;
+      var d = Math.hypot(dLng, dLat);
       if (d < minDist) {
         minDist = d;
         closestIdx = i;
       }
     }
 
+    var distMeters = minDist * 111320;
+
+    // IF RIDER IS OFF-ROUTE (> 25m away from the road corridor):
+    // Strictly DO NOT draw a straight diagonal line across buildings to the old route!
+    // Keep the street polyline as-is until the new turn-by-turn route arrives from Ola Maps.
+    if (distMeters > 25) {
+      return;
+    }
+
     maxPassedIdx = closestIdx;
 
-    // Dynamic trimming: the route line ALWAYS begins at the rider's exact marker position [rLng, rLat]
-    var newRemaining = [[rLng, rLat]];
-    for (var j = maxPassedIdx + 1; j < fullRouteCoords.length; j++) {
-      newRemaining.push(fullRouteCoords[j]);
-    }
+    // Strictly road-following: slice from the nearest street coordinate ahead
+    var newRemaining = fullRouteCoords.slice(maxPassedIdx);
     if (newRemaining.length < 2 && fullRouteCoords.length > 0) {
-      newRemaining = [[rLng, rLat], fullRouteCoords[fullRouteCoords.length - 1]];
+      newRemaining = [fullRouteCoords[maxPassedIdx], fullRouteCoords[fullRouteCoords.length - 1]];
+    }
+    if (newRemaining.length < 2 && fullRouteCoords.length > 1) {
+      newRemaining = [fullRouteCoords[0], fullRouteCoords[1]];
     }
 
     remainingRouteCoords = newRemaining;
@@ -749,22 +768,29 @@ function buildMiniOlaMapHtml(
   const isUnassigned = !isRiderAssigned;
 
   let activeCoords: [number, number][] = [];
-  if (hasRider && roadCoords && roadCoords.length > 1) {
-    let closestIdx = 0;
-    let minDist = Infinity;
-    for (let i = 0; i < roadCoords.length; i++) {
-      const d = Math.hypot(roadCoords[i][0] - riderLng!, roadCoords[i][1] - riderLat!);
-      if (d < minDist) {
-        minDist = d;
-        closestIdx = i;
+  if (roadCoords && roadCoords.length > 0) {
+    if (hasRider && roadCoords.length > 1) {
+      let closestIdx = 0;
+      let minDist = Infinity;
+      const cosLat = Math.cos(riderLat! * Math.PI / 180);
+      for (let i = 0; i < roadCoords.length; i++) {
+        const dLng = (roadCoords[i][0] - riderLng!) * cosLat;
+        const dLat = roadCoords[i][1] - riderLat!;
+        const d = Math.hypot(dLng, dLat);
+        if (d < minDist) {
+          minDist = d;
+          closestIdx = i;
+        }
       }
+      const distMeters = minDist * 111320;
+      if (distMeters <= 25) {
+        activeCoords = roadCoords.slice(closestIdx);
+      } else {
+        activeCoords = roadCoords;
+      }
+    } else {
+      activeCoords = roadCoords;
     }
-    activeCoords = [[riderLng!, riderLat!], ...roadCoords.slice(closestIdx + 1)];
-    if (activeCoords.length < 2 && roadCoords.length > 0) {
-      activeCoords = [[riderLng!, riderLat!], roadCoords[roadCoords.length - 1]];
-    }
-  } else if (roadCoords && roadCoords.length > 0) {
-    activeCoords = roadCoords;
   } else if (isGoingToPickup && hasRider) {
     activeCoords = bezier(riderLng!, riderLat!, storeLng, storeLat);
   } else if (isPickedUp && hasRider) {
@@ -862,22 +888,30 @@ function buildMiniOlaMapHtml(
 
     var closestIdx = 0;
     var minDist = Infinity;
+    var cosLat = Math.cos(rLat * Math.PI / 180);
     for (var i = 0; i < fullRouteCoords.length; i++) {
-      var d = Math.hypot(fullRouteCoords[i][0] - rLng, fullRouteCoords[i][1] - rLat);
+      var dLng = (fullRouteCoords[i][0] - rLng) * cosLat;
+      var dLat = fullRouteCoords[i][1] - rLat;
+      var d = Math.hypot(dLng, dLat);
       if (d < minDist) {
         minDist = d;
         closestIdx = i;
       }
     }
 
+    var distMeters = minDist * 111320;
+    if (distMeters > 25) {
+      return;
+    }
+
     maxPassedIdx = closestIdx;
 
-    var newRemaining = [[rLng, rLat]];
-    for (var j = maxPassedIdx + 1; j < fullRouteCoords.length; j++) {
-      newRemaining.push(fullRouteCoords[j]);
-    }
+    var newRemaining = fullRouteCoords.slice(maxPassedIdx);
     if (newRemaining.length < 2 && fullRouteCoords.length > 0) {
-      newRemaining = [[rLng, rLat], fullRouteCoords[fullRouteCoords.length - 1]];
+      newRemaining = [fullRouteCoords[maxPassedIdx], fullRouteCoords[fullRouteCoords.length - 1]];
+    }
+    if (newRemaining.length < 2 && fullRouteCoords.length > 1) {
+      newRemaining = [fullRouteCoords[0], fullRouteCoords[1]];
     }
 
     remainingRouteCoords = newRemaining;
@@ -1627,124 +1661,115 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     }
   }, [trackingData?.currentLat, trackingData?.currentLng]);
 
-  // Fetch Ola Maps Driving Directions & Dynamic Turn-by-Turn Road Route
-  useEffect(() => {
+  // ── Unified Ola Maps Turn-by-Turn Road Route & Directions Manager ──
+  const isFetchingDirectionsRef = useRef<boolean>(false);
+
+  const fetchOlaDirections = useCallback(async (forced: boolean = false) => {
     if (!restLat || !restLng || !custLat || !custLng || !OLA_MAPS_API_KEY) return;
-    let isMounted = true;
+    if (isFetchingDirectionsRef.current && !forced) return;
 
-    const fetchOlaDirections = async () => {
-      try {
-        let origin = `${restLat},${restLng}`;
-        let destination = `${custLat},${custLng}`;
+    const curRiderLat = isRiderAccepted ? (riderLat || trackingDataRef.current?.currentLat) : undefined;
+    const curRiderLng = isRiderAccepted ? (riderLng || trackingDataRef.current?.currentLng) : undefined;
 
-        const curRiderLat = isRiderAccepted ? (riderLat || trackingDataRef.current?.currentLat) : undefined;
-        const curRiderLng = isRiderAccepted ? (riderLng || trackingDataRef.current?.currentLng) : undefined;
+    let origin = `${restLat},${restLng}`;
+    let destination = `${custLat},${custLng}`;
 
-        if ((riderStatus === 'assigned' || riderStatus === 'arrived_at_store') && curRiderLat && curRiderLng) {
-          // Rider is heading to restaurant to pick up order: Rider -> Restaurant
-          origin = `${curRiderLat},${curRiderLng}`;
-          destination = `${restLat},${restLng}`;
-        } else if ((riderStatus === 'picked_up' || riderStatus === 'out_for_delivery') && curRiderLat && curRiderLng) {
-          // Rider has picked up and is heading to customer: Rider -> Customer
-          origin = `${curRiderLat},${curRiderLng}`;
-          destination = `${custLat},${custLng}`;
-        }
-
-        const url = `https://api.olamaps.io/routing/v1/directions/basic?origin=${origin}&destination=${destination}&api_key=${OLA_MAPS_API_KEY}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Request-Id': `route-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const route = data.routes?.[0];
-          if (route) {
-            const durationSec = route.legs?.[0]?.duration || route.duration || 0;
-            const transitMins = Math.max(2, Math.round(durationSec / 60));
-            if (isMounted) setOlaTransitMins(transitMins);
-
-            if (route.overview_polyline) {
-              const decoded = decodePolyline(route.overview_polyline);
-              if (decoded && decoded.length > 0 && isMounted) {
-                // Prepend rider position so the route line strictly originates at the rider marker
-                const fullRoute: [number, number][] = (curRiderLng && curRiderLat)
-                  ? [[Number(curRiderLng), Number(curRiderLat)], ...decoded]
-                  : decoded;
-                setRoadRouteCoords(fullRoute);
-                roadRouteCoordsRef.current = fullRoute;
-                const script = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(fullRoute)}); } true;`;
-                fullMapWebviewRef.current?.injectJavaScript(script);
-                miniMapWebviewRef.current?.injectJavaScript(script);
-              }
-            }
-          }
-        }
-      } catch (e) {
-        // Handled silently
-      }
-    };
-
-    fetchOlaDirections();
-    const interval = setInterval(fetchOlaDirections, 15000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [restLat, restLng, custLat, custLng, riderStatus, isRiderAccepted]);
-
-  // Re-fetch directions dynamically when rider moves significantly (>= 25 meters onto new roads)
-  useEffect(() => {
-    if (!isRiderAccepted || !riderLat || !riderLng || !restLat || !custLat || !OLA_MAPS_API_KEY) return;
-    const now = Date.now();
-    const lastPos = lastFetchedRiderPosRef.current;
-    let movedDist = Infinity;
-    if (lastPos) {
-      movedDist = calculateDistanceKm(lastPos.lat, lastPos.lng, riderLat, riderLng) * 1000;
-    }
-    // Re-fetch directions if rider moved >= 25 meters and at least 5s elapsed
-    if (movedDist >= 25 && now - lastFetchTimestampRef.current >= 5000) {
-      lastFetchedRiderPosRef.current = { lat: riderLat, lng: riderLng };
-      lastFetchTimestampRef.current = now;
-
-      let origin = `${restLat},${restLng}`;
-      let destination = `${custLat},${custLng}`;
+    if (isRiderAccepted && curRiderLat && curRiderLng) {
       if (riderStatus === 'assigned' || riderStatus === 'arrived_at_store') {
-        origin = `${riderLat},${riderLng}`;
+        origin = `${curRiderLat},${curRiderLng}`;
         destination = `${restLat},${restLng}`;
       } else {
-        origin = `${riderLat},${riderLng}`;
+        origin = `${curRiderLat},${curRiderLng}`;
         destination = `${custLat},${custLng}`;
       }
+    }
 
+    isFetchingDirectionsRef.current = true;
+    try {
       const url = `https://api.olamaps.io/routing/v1/directions/basic?origin=${origin}&destination=${destination}&api_key=${OLA_MAPS_API_KEY}`;
-      fetch(url, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Request-Id': `route-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         },
-      })
-        .then(res => res.json())
-        .then(data => {
-          const route = data.routes?.[0];
-          if (route && route.overview_polyline) {
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const route = data.routes?.[0];
+        if (route) {
+          const durationSec = route.legs?.[0]?.duration || route.duration || 0;
+          const transitMins = Math.max(2, Math.round(durationSec / 60));
+          setOlaTransitMins(transitMins);
+
+          if (route.overview_polyline) {
             const decoded = decodePolyline(route.overview_polyline);
             if (decoded && decoded.length > 0) {
-              const fullRoute: [number, number][] = [[riderLng, riderLat], ...decoded];
-              setRoadRouteCoords(fullRoute);
-              roadRouteCoordsRef.current = fullRoute;
-              const script = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(fullRoute)}); } true;`;
+              // Crucial: Use decoded road coordinates directly from Ola Maps so the line strictly follows real streets!
+              setRoadRouteCoords(decoded);
+              roadRouteCoordsRef.current = decoded;
+              if (curRiderLat && curRiderLng) {
+                lastFetchedRiderPosRef.current = { lat: curRiderLat, lng: curRiderLng };
+              }
+              lastFetchTimestampRef.current = Date.now();
+
+              const script = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(decoded)}); } true;`;
               fullMapWebviewRef.current?.injectJavaScript(script);
               miniMapWebviewRef.current?.injectJavaScript(script);
             }
           }
-        })
-        .catch(() => {});
+        }
+      }
+    } catch (e) {
+      // Handled silently
+    } finally {
+      isFetchingDirectionsRef.current = false;
     }
-  }, [riderLat, riderLng, isRiderAccepted, riderStatus, restLat, restLng, custLat, custLng]);
+  }, [restLat, restLng, custLat, custLng, isRiderAccepted, riderLat, riderLng, riderStatus]);
+
+  // Initial directions fetch on status change and background heartbeat (every 25 seconds)
+  useEffect(() => {
+    fetchOlaDirections(true);
+    const interval = setInterval(() => fetchOlaDirections(false), 25000);
+    return () => clearInterval(interval);
+  }, [restLat, restLng, custLat, custLng, riderStatus, isRiderAccepted, fetchOlaDirections]);
+
+  // Dynamic off-route detour detection: recalculates street directions when rider moves onto another street
+  useEffect(() => {
+    if (!isRiderAccepted || !riderLat || !riderLng || !restLat || !restLng || !custLat || !custLng || !OLA_MAPS_API_KEY) return;
+
+    const now = Date.now();
+    const currentCoords = roadRouteCoordsRef.current;
+
+    // Check perpendicular distance from current rider GPS to the active road route
+    let isOffRoute = false;
+    if (currentCoords && currentCoords.length > 0) {
+      let minDistSq = Infinity;
+      const cosLat = Math.cos(riderLat * Math.PI / 180);
+      for (let i = 0; i < currentCoords.length; i++) {
+        const dLng = (currentCoords[i][0] - riderLng) * cosLat;
+        const dLat = currentCoords[i][1] - riderLat;
+        const dSq = dLng * dLng + dLat * dLat;
+        if (dSq < minDistSq) minDistSq = dSq;
+      }
+      const distToRoadMeters = Math.sqrt(minDistSq) * 111320;
+      // Rider has deviated onto another street (> 25 meters off the road corridor)
+      if (distToRoadMeters >= 25) {
+        isOffRoute = true;
+      }
+    }
+
+    const lastPos = lastFetchedRiderPosRef.current;
+    let movedFromLastFetch = Infinity;
+    if (lastPos) {
+      movedFromLastFetch = calculateDistanceKm(lastPos.lat, lastPos.lng, riderLat, riderLng) * 1000;
+    }
+
+    // Trigger recalculation if rider is off-route or moved >= 40 meters (throttled to at least 3 seconds)
+    if ((isOffRoute || movedFromLastFetch >= 40) && now - lastFetchTimestampRef.current >= 3000) {
+      fetchOlaDirections(true);
+    }
+  }, [riderLat, riderLng, isRiderAccepted, riderStatus, restLat, restLng, custLat, custLng, fetchOlaDirections]);
 
   // ── Dynamic Live ETA: Exact Restaurant Preparation Time + Delivery Transit Time ──
   const basePrepMins = Number(orderDetail?.prepTimeMinutes ?? orderDetail?.prep_time_minutes) > 0
