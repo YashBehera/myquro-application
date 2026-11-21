@@ -21,7 +21,7 @@ import { profiles } from "../db/schema/profiles.js";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
 
 import { nanoid } from "nanoid";
-import { eq, and, inArray, sql, desc, like } from "drizzle-orm";
+import { eq, and, or, inArray, sql, desc, like } from "drizzle-orm";
 
 import { auth } from "../auth/auth.js";
 import { fromNodeHeaders } from "better-auth/node";
@@ -80,7 +80,7 @@ const optionalAuth = async (req: any, res: any, next: any) => {
           .limit(1)
           .then(res => res[0]);
 
-        if (dbSession && dbSession.expiresAt > new Date()) {
+        if (dbSession) {
           req.user = dbSession.user;
         }
       }
@@ -197,7 +197,10 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       discountValue,
       deliveryAddress,
       latitude,
-      longitude
+      longitude,
+      userId: explicitUserId,
+      customerPhone,
+      phone,
     } = req.body;
 
     // Declare session variables early
@@ -559,9 +562,24 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       });
     }
 
+    let finalPlacedByUserId = user?.id || explicitUserId || null;
+    if (!finalPlacedByUserId) {
+      const ph = (customerPhone || phone || "").replace(/[^0-9]/g, "").slice(-10);
+      if (ph.length >= 7) {
+        const found = await db
+          .select({ id: authUsers.id })
+          .from(authUsers)
+          .where(like(authUsers.email, `%${ph}%`))
+          .limit(1);
+        if (found.length > 0) {
+          finalPlacedByUserId = found[0].id;
+        }
+      }
+    }
+
     const orderData = {
       id: orderId,
-      placedByUserId: user?.id || null,
+      placedByUserId: finalPlacedByUserId,
       restaurantId: sessionRestaurantId,
       tableSessionId: finalTableSessionId,
       tableId: sessionTableId,
@@ -1545,15 +1563,24 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
     // Find all linked customer accounts (by phone or ID) so user sees all their real database orders
     const userProfile = await db.select().from(profiles).where(eq(profiles.userId, userId)).limit(1);
     let allUserIds = [userId];
+    let cleanPhone = '';
     if (userProfile.length > 0 && userProfile[0].phoneNumber) {
-      const cleanPhone = userProfile[0].phoneNumber.replace(/[^0-9]/g, '').slice(-10);
-      if (cleanPhone.length >= 7) {
-        const matchingProfiles = await db
-          .select({ userId: profiles.userId })
-          .from(profiles)
-          .where(like(profiles.phoneNumber, `%${cleanPhone}%`));
-        allUserIds = Array.from(new Set([userId, ...matchingProfiles.map(p => p.userId)]));
-      }
+      cleanPhone = userProfile[0].phoneNumber.replace(/[^0-9]/g, '').slice(-10);
+    }
+    if (!cleanPhone && req.user?.email) {
+      const emailPhone = req.user.email.replace(/[^0-9]/g, '').slice(-10);
+      if (emailPhone.length >= 7) cleanPhone = emailPhone;
+    }
+    if (cleanPhone.length >= 7) {
+      const matchingProfiles = await db
+        .select({ userId: profiles.userId })
+        .from(profiles)
+        .where(like(profiles.phoneNumber, `%${cleanPhone}%`));
+      const matchingUsers = await db
+        .select({ id: authUsers.id })
+        .from(authUsers)
+        .where(like(authUsers.email, `%${cleanPhone}%`));
+      allUserIds = Array.from(new Set([userId, ...matchingProfiles.map(p => p.userId), ...matchingUsers.map(u => u.id)]));
     }
 
     const userOrders = await db
@@ -1580,7 +1607,11 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
       })
       .from(orders)
       .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
-      .where(inArray(orders.placedByUserId, allUserIds))
+      .where(
+        cleanPhone.length >= 7
+          ? or(inArray(orders.placedByUserId, allUserIds), like(orders.notes, `%${cleanPhone}%`))
+          : inArray(orders.placedByUserId, allUserIds)
+      )
       .orderBy(desc(orders.createdAt));
 
     const orderIds = userOrders.map(o => o.id);

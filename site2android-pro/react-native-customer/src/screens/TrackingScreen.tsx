@@ -15,7 +15,7 @@
  * 6. Savings Pill Banner & Kiwi Cashback Promo Card.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -34,6 +34,8 @@ import {
   LayoutAnimation,
   UIManager,
   Alert,
+  PanResponder,
+  BackHandler,
 } from 'react-native';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -64,6 +66,9 @@ import {
   Clock,
   AlertCircle,
   ShieldCheck,
+  ChevronDown,
+  ChevronUp,
+  Navigation,
 } from 'lucide-react-native';
 import { DeliveredOrderView } from './DeliveredOrderView';
 import Svg, {
@@ -96,6 +101,7 @@ import {
   isTablet,
   isSmallDevice,
   SCREEN_WIDTH,
+  SCREEN_HEIGHT,
   MAX_CONTENT_WIDTH,
 } from '../utils/responsive';
 
@@ -134,8 +140,8 @@ function decodePolyline(str: string, precision = 5): [number, number][] {
 // ─── Ola Map HTML Generator for Fullscreen Interactive Map ──────────────────
 function buildOlaMapHtml(
   apiKey: string,
-  riderLat: number,
-  riderLng: number,
+  riderLat: number | undefined,
+  riderLng: number | undefined,
   storeLat: number,
   storeLng: number,
   dropLat: number,
@@ -168,9 +174,10 @@ function buildOlaMapHtml(
     return pts;
   }
 
-  const isRiderAssigned = ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
-  const isGoingToPickup = ['assigned', 'arrived_at_store'].includes(currentStatus);
-  const isPickedUp = ['picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
+  const hasRider = Boolean(riderLat && riderLng && riderLat !== 0 && riderLng !== 0);
+  const isRiderAssigned = Boolean(hasRider && ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus));
+  const isGoingToPickup = isRiderAssigned && ['assigned', 'arrived_at_store'].includes(currentStatus);
+  const isPickedUp = isRiderAssigned && ['picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
   const isUnassigned = !isRiderAssigned;
 
   // Active navigation route coordinates:
@@ -178,25 +185,55 @@ function buildOlaMapHtml(
   let activeCoords: [number, number][] = [];
   if (roadCoords && roadCoords.length > 0) {
     activeCoords = roadCoords;
-  } else if (isGoingToPickup) {
-    activeCoords = bezier(riderLng, riderLat, storeLng, storeLat);
-  } else if (isPickedUp) {
-    activeCoords = bezier(riderLng, riderLat, dropLng, dropLat);
+  } else if (isGoingToPickup && hasRider) {
+    activeCoords = bezier(riderLng!, riderLat!, storeLng, storeLat);
+  } else if (isPickedUp && hasRider) {
+    activeCoords = bezier(riderLng!, riderLat!, dropLng, dropLat);
   } else {
     activeCoords = bezier(storeLng, storeLat, dropLng, dropLat);
   }
 
   const activeCoordsJson = JSON.stringify(activeCoords);
 
-  // Bounds
+  // Calculate distance between points to determine optimal dynamic zoom
+  function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  const directDistMeters = calculateDistanceMeters(storeLat, storeLng, dropLat, dropLng);
+  let effectiveSpanMeters = directDistMeters;
+  if (hasRider) {
+    const rToStore = calculateDistanceMeters(riderLat!, riderLng!, storeLat, storeLng);
+    const rToDrop = calculateDistanceMeters(riderLat!, riderLng!, dropLat, dropLng);
+    effectiveSpanMeters = Math.max(effectiveSpanMeters, rToStore, rToDrop);
+  }
+
+  // Dynamic initial zoom based on real physical distance between pins
+  function getDynamicInitialZoom(d: number): number {
+    if (d <= 120) return 17.5;
+    if (d <= 250) return 17.1;
+    if (d <= 500) return 16.5;
+    if (d <= 1000) return 15.8;
+    if (d <= 2000) return 15.0;
+    if (d <= 4000) return 14.2;
+    if (d <= 8000) return 13.2;
+    return 12.5;
+  }
+
+  const initialZoom = getDynamicInitialZoom(effectiveSpanMeters);
+
+  // Exact bounds
   let allLats = [storeLat, dropLat];
   let allLngs = [storeLng, dropLng];
-  if (isPickedUp) {
-    allLats = [riderLat, dropLat];
-    allLngs = [riderLng, dropLng];
-  } else if (isGoingToPickup) {
-    allLats = [riderLat, storeLat];
-    allLngs = [riderLng, storeLng];
+  if (hasRider) {
+    allLats.push(riderLat!);
+    allLngs.push(riderLng!);
   }
 
   if (activeCoords.length > 0) {
@@ -206,20 +243,17 @@ function buildOlaMapHtml(
     });
   }
 
-  const minLat = Math.min(...allLats) - 0.008;
-  const maxLat = Math.max(...allLats) + 0.008;
-  const minLng = Math.min(...allLngs) - 0.008;
-  const maxLng = Math.max(...allLngs) + 0.008;
+  const rawMinLat = Math.min(...allLats);
+  const rawMaxLat = Math.max(...allLats);
+  const rawMinLng = Math.min(...allLngs);
+  const rawMaxLng = Math.max(...allLngs);
 
-  const centerLng = (minLng + maxLng) / 2;
-  const centerLat = (minLat + maxLat) / 2;
+  const centerLng = Number(((rawMinLng + rawMaxLng) / 2).toFixed(6));
+  const centerLat = Number(((rawMinLat + rawMaxLat) / 2).toFixed(6));
 
   const storeNameJson = JSON.stringify(storeName || 'Restaurant');
 
   // Route colors:
-  // - Going to pickup: Emerald Green (#059669) route to restaurant
-  // - Picked up / Out for delivery: Electric Blue (#2563EB) route to customer
-  // - Unassigned: Gold (#DEA430) dashed route
   const routeColor = isGoingToPickup ? '#059669' : (isPickedUp ? '#2563EB' : '#DEA430');
   const glowColor = isGoingToPickup ? '#10B981' : (isPickedUp ? '#3B82F6' : '#DEA430');
   const isDashed = isUnassigned;
@@ -237,25 +271,28 @@ function buildOlaMapHtml(
 
     /* Pickup / Store pill */
     .pickup-pill{
-      display:flex;align-items:center;gap:5px;
-      background:#000000;border-radius:14px;
-      padding:4px 9px 4px 4px;
-      border:1px solid #444;white-space:nowrap;
-      box-shadow:0 3px 8px rgba(0,0,0,.45);
+      display:flex;align-items:center;gap:6px;
+      background:#0B0B0E;border-radius:18px;
+      padding:4px 10px 4px 5px;
+      border:1.5px solid #F5B800;white-space:nowrap;
+      box-shadow:0 4px 14px rgba(0,0,0,.7);
     }
     .pickup-icon{
-      width:20px;height:20px;border-radius:10px;
-      background:#161616;border:1.5px solid #F2CA50;
+      width:22px;height:22px;border-radius:11px;
+      background:#1A1A1E;border:1.5px solid #F5B800;
       display:flex;align-items:center;justify-content:center;flex-shrink:0;
     }
-    .pickup-name{color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:11px;font-weight:700}
+    .pickup-name{
+      color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      font-size:11.5px;font-weight:700;letter-spacing:0.2px;
+    }
 
-    /* Customer / drop marker */
+    /* Customer delivery pin */
     .customer-pin{
-      width:24px;height:24px;border-radius:12px;
-      background:#111111;border:2px solid #FFFFFF;
+      width:28px;height:28px;border-radius:14px;
+      background:#0B0B0E;border:2px solid #FFFFFF;
       display:flex;align-items:center;justify-content:center;
-      box-shadow:0 3px 8px rgba(0,0,0,.45);
+      box-shadow:0 4px 14px rgba(0,0,0,.7);
     }
 
     /* Animated Delivery Bike Marker */
@@ -287,16 +324,19 @@ function buildOlaMapHtml(
 <body>
 <div id="map"></div>
 <script>
-  var currentRiderLng = ${riderLng};
-  var currentRiderLat = ${riderLat};
+  var currentRiderLng = ${riderLng || 0};
+  var currentRiderLat = ${riderLat || 0};
   var riderMarker = null;
   var animationFrameId = null;
+  var isRiderAssigned = ${Boolean(isRiderAssigned)};
+  var mapLoaded = false;
+  var userHasInteracted = false;
 
   var map = new maplibregl.Map({
     container:'map',
     style:'https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json',
     center:[${centerLng},${centerLat}],
-    zoom:13,
+    zoom:${initialZoom},
     attributionControl:false,
     transformRequest:function(url){return{url:url+(url.includes('?')?'&':'?')+'api_key=${apiKey}'}}
   });
@@ -311,20 +351,112 @@ function buildOlaMapHtml(
     return (brng + 360) % 360;
   }
 
-  // Smooth live animation of rider bike marker with bearing rotation
-  window.updateRiderPosition = function(targetLng, targetLat) {
-    targetLng = Number(targetLng);
-    targetLat = Number(targetLat);
-    if (isNaN(targetLng) || isNaN(targetLat)) return;
+  function computeDistanceMeters(lat1, lon1, lat2, lon2) {
+    var R = 6371000;
+    var dLat = (lat2 - lat1) * Math.PI / 180;
+    var dLon = (lon2 - lon1) * Math.PI / 180;
+    var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function getDynamicMaxZoom(d) {
+    if (d <= 120) return 17.6;
+    if (d <= 250) return 17.2;
+    if (d <= 500) return 16.6;
+    if (d <= 1000) return 15.9;
+    if (d <= 2000) return 15.1;
+    if (d <= 4000) return 14.3;
+    if (d <= 8000) return 13.3;
+    return 12.5;
+  }
+
+  var lastFittedPts = null;
+
+  function fitMapToActiveBounds(pts, duration) {
+    if (!pts || pts.length === 0) return;
+    lastFittedPts = pts;
+    var lats = pts.map(function(p){ return p[1]; });
+    var lngs = pts.map(function(p){ return p[0]; });
+    var minX = Math.min.apply(null, lngs);
+    var maxX = Math.max.apply(null, lngs);
+    var minY = Math.min.apply(null, lats);
+    var maxY = Math.max.apply(null, lats);
+
+    var dist = computeDistanceMeters(minY, minX, maxY, maxX);
+    var maxZ = getDynamicMaxZoom(dist);
+
+    if (maxX - minX < 0.0006) {
+      var midX = (minX + maxX) / 2;
+      minX = midX - 0.0004;
+      maxX = midX + 0.0004;
+    }
+    if (maxY - minY < 0.0006) {
+      var midY = (minY + maxY) / 2;
+      minY = midY - 0.0004;
+      maxY = midY + 0.0004;
+    }
+
+    try {
+      map.fitBounds([[minX, minY], [maxX, maxY]], {
+        padding: { top: 110, bottom: 220, left: 60, right: 60 },
+        maxZoom: maxZ,
+        duration: typeof duration === 'number' ? duration : 800
+      });
+    } catch(e) {}
+  }
+
+  // Ensures STRICTLY ONE single rider marker can ever exist on the map
+  function ensureSingleRiderMarker(lng, lat, bearing) {
+    if (!isRiderAssigned || isNaN(lng) || isNaN(lat) || !lng || !lat) return;
+
+    // Purge any duplicate DOM elements
+    var allDoms = document.querySelectorAll('.bike-marker');
+    if (allDoms && allDoms.length > 0) {
+      for (var i = 0; i < allDoms.length; i++) {
+        if (!riderMarker || allDoms[i] !== riderMarker.getElement()) {
+          allDoms[i].parentElement && allDoms[i].parentElement.removeChild(allDoms[i]);
+        }
+      }
+    }
 
     if (!riderMarker) {
       var bikeEl = document.createElement('div');
       bikeEl.className = 'bike-marker';
       bikeEl.id = 'rider-bike-marker';
       bikeEl.innerHTML = '<div class="bike-aura"></div><div class="bike-icon-wrapper" id="bike-icon-inner"><svg width="34" height="34" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="16" fill="#0F172A" stroke="#38BDF8" stroke-width="2.5"/><polygon points="18,3 23,10 13,10" fill="#38BDF8"/><rect x="16" y="10" width="4" height="16" rx="2" fill="#F8FAFC"/><circle cx="18" cy="12" r="2.2" fill="#0284C7"/><line x1="12" y1="12" x2="24" y2="12" stroke="#CBD5E1" stroke-width="2.2" stroke-linecap="round"/><circle cx="18" cy="23" r="2.5" fill="#0284C7"/><rect x="13" y="15" width="10" height="7.5" rx="2" fill="#F59E0B" stroke="#FFFFFF" stroke-width="1"/></svg></div>';
-      riderMarker = new maplibregl.Marker({element: bikeEl, anchor: 'center'}).setLngLat([targetLng, targetLat]).addTo(map);
+      riderMarker = new maplibregl.Marker({element: bikeEl, anchor: 'center'}).setLngLat([lng, lat]).addTo(map);
+    } else {
+      riderMarker.setLngLat([lng, lat]);
+    }
+
+    currentRiderLng = lng;
+    currentRiderLat = lat;
+
+    if (bearing !== undefined && !isNaN(bearing)) {
+      var iconEl = document.getElementById('bike-icon-inner');
+      if (iconEl) {
+        iconEl.style.transform = 'rotate(' + Math.round(bearing) + 'deg)';
+      }
+    }
+  }
+
+  // Smooth live animation of rider bike marker with bearing rotation
+  window.updateRiderPosition = function(targetLng, targetLat) {
+    targetLng = Number(targetLng);
+    targetLat = Number(targetLat);
+    if (isNaN(targetLng) || isNaN(targetLat) || !targetLng || !targetLat) return;
+    isRiderAssigned = true;
+
+    if (!mapLoaded) {
       currentRiderLng = targetLng;
       currentRiderLat = targetLat;
+      return;
+    }
+
+    if (!riderMarker) {
+      ensureSingleRiderMarker(targetLng, targetLat);
       return;
     }
 
@@ -352,7 +484,9 @@ function buildOlaMapHtml(
       var curLat = startLat + (targetLat - startLat) * ease;
       currentRiderLng = curLng;
       currentRiderLat = curLat;
-      riderMarker.setLngLat([curLng, curLat]);
+      if (riderMarker) {
+        riderMarker.setLngLat([curLng, curLat]);
+      }
 
       if (progress < 1) {
         animationFrameId = requestAnimationFrame(step);
@@ -361,103 +495,146 @@ function buildOlaMapHtml(
     animationFrameId = requestAnimationFrame(step);
   };
 
-  // Dynamic route update without map reload
+  // Dynamic route update without map reload and preserving user zoom level
+  var pendingRouteCoords = null;
   window.updateRouteCoords = function(coords) {
     try {
       var parsed = typeof coords === 'string' ? JSON.parse(coords) : coords;
-      if (map && map.getSource('route-active') && Array.isArray(parsed) && parsed.length > 0) {
+      if (!mapLoaded || !map || !map.getSource('route-active')) {
+        pendingRouteCoords = parsed;
+        return;
+      }
+      if (Array.isArray(parsed) && parsed.length > 0) {
         map.getSource('route-active').setData({
           type: 'Feature',
           geometry: { type: 'LineString', coordinates: parsed }
         });
-        var lats = parsed.map(function(pt){ return pt[1]; });
-        var lngs = parsed.map(function(pt){ return pt[0]; });
-        var minX = Math.min.apply(null, lngs) - 0.006;
-        var maxX = Math.max.apply(null, lngs) + 0.006;
-        var minY = Math.min.apply(null, lats) - 0.006;
-        var maxY = Math.max.apply(null, lats) + 0.006;
-        map.fitBounds([[minX, minY], [maxX, maxY]], {
-          padding: { top: 80, bottom: 120, left: 50, right: 50 },
-          duration: 900
-        });
+        // Never reset zoom or pan if user has zoomed into or panned the map!
+        if (!userHasInteracted) {
+          var pts = parsed.slice();
+          pts.push([${storeLng}, ${storeLat}]);
+          pts.push([${dropLng}, ${dropLat}]);
+          if (isRiderAssigned && currentRiderLng && currentRiderLat) {
+            pts.push([currentRiderLng, currentRiderLat]);
+          }
+          fitMapToActiveBounds(pts, 900);
+        }
       }
     } catch(e) {}
   };
 
+  // Re-center button action triggered by user explicitly
+  window.recenterMap = function() {
+    userHasInteracted = false;
+    var pts = [[${storeLng}, ${storeLat}], [${dropLng}, ${dropLat}]];
+    if (currentRiderLng && currentRiderLat) {
+      pts.push([currentRiderLng, currentRiderLat]);
+    }
+    if (lastFittedPts && lastFittedPts.length > 0) {
+      pts = lastFittedPts;
+    }
+    fitMapToActiveBounds(pts, 800);
+  };
+
   map.on('load',function(){
-    map.fitBounds([[${minLng},${minLat}],[${maxLng},${maxLat}]],{
-      padding:{top:80,bottom:120,left:50,right:50},duration:0
-    });
+    mapLoaded = true;
 
-    // ── Active Navigation Road Route Layer (Exact Road / Street Geometry) ──
-    map.addSource('route-active',{
-      type:'geojson',
-      data:{
-        type:'Feature',
-        geometry:{type:'LineString',coordinates:${activeCoordsJson}}
+    // Track user drag, zoom, touch, and scroll: never disrupt user when they zoom in!
+    map.on('dragstart', function() { userHasInteracted = true; });
+    map.on('zoomstart', function(e) { if (e && e.originalEvent) userHasInteracted = true; });
+    map.on('rotatestart', function() { userHasInteracted = true; });
+    map.on('pitchstart', function() { userHasInteracted = true; });
+    try {
+      var canvas = map.getCanvas();
+      if (canvas) {
+        canvas.addEventListener('touchstart', function() { userHasInteracted = true; }, { passive: true });
+        canvas.addEventListener('pointerdown', function() { userHasInteracted = true; }, { passive: true });
+        canvas.addEventListener('wheel', function() { userHasInteracted = true; }, { passive: true });
       }
-    });
+    } catch(e) {}
 
-    ${isDashed ? `
-      map.addLayer({
-        id:'route-active-line',type:'line',source:'route-active',
-        paint:{
-          'line-color':'${routeColor}',
-          'line-width':3.5,
-          'line-dasharray':[2.5,2.5]
-        },
-        layout:{'line-join':'round','line-cap':'round'}
-      });
-    ` : `
-      // Outer glow casing
-      map.addLayer({
-        id:'route-active-glow',type:'line',source:'route-active',
-        paint:{
-          'line-color':'${glowColor}',
-          'line-width':7,
-          'line-opacity':0.35
-        },
-        layout:{'line-join':'round','line-cap':'round'}
-      });
-      // Main vibrant road line
-      map.addLayer({
-        id:'route-active-core',type:'line',source:'route-active',
-        paint:{
-          'line-color':'${routeColor}',
-          'line-width':4.5
-        },
-        layout:{'line-join':'round','line-cap':'round'}
-      });
-    `}
+    // 1. ADD RESTAURANT & CUSTOMER MARKERS FIRST (Always guaranteed visible)
+    try {
+      var storeEl = document.createElement('div');
+      storeEl.className = 'pickup-pill';
+      storeEl.innerHTML = '<div class="pickup-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="#F5B800"><path d="M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z"/></svg></div><div class="pickup-name">' + ${storeNameJson} + '</div>';
+      new maplibregl.Marker({ element: storeEl, anchor: 'bottom' }).setLngLat([${storeLng}, ${storeLat}]).addTo(map);
+    } catch(err) { console.error('Store pin error:', err); }
 
-    // Pickup / Store marker (black pill with gold icon)
-    var storeEl=document.createElement('div');
-    storeEl.className='pickup-pill';
-    storeEl.innerHTML='<div class="pickup-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="#F2CA50"><path d="M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z"/></svg></div><div class="pickup-name">'+${storeNameJson}+'</div>';
-    new maplibregl.Marker({element:storeEl,anchor:'bottom'}).setLngLat([${storeLng},${storeLat}]).addTo(map);
+    try {
+      var custEl = document.createElement('div');
+      custEl.className = 'customer-pin';
+      custEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>';
+      new maplibregl.Marker({ element: custEl, anchor: 'center' }).setLngLat([${dropLng}, ${dropLat}]).addTo(map);
+    } catch(err) { console.error('Cust pin error:', err); }
 
-    // Customer delivery marker
-    var custEl=document.createElement('div');
-    custEl.className='customer-pin';
-    custEl.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>';
-    new maplibregl.Marker({element:custEl,anchor:'center'}).setLngLat([${dropLng},${dropLat}]).addTo(map);
-
-    // Live Delivery Bike Marker with directional pointer
-    if (${isRiderAssigned}) {
-      var bikeEl=document.createElement('div');
-      bikeEl.className='bike-marker';
-      bikeEl.id='rider-bike-marker';
-      bikeEl.innerHTML='<div class="bike-aura"></div><div class="bike-icon-wrapper" id="bike-icon-inner"><svg width="34" height="34" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="16" fill="#0F172A" stroke="#38BDF8" stroke-width="2.5"/><polygon points="18,3 23,10 13,10" fill="#38BDF8"/><rect x="16" y="10" width="4" height="16" rx="2" fill="#F8FAFC"/><circle cx="18" cy="12" r="2.2" fill="#0284C7"/><line x1="12" y1="12" x2="24" y2="12" stroke="#CBD5E1" stroke-width="2.2" stroke-linecap="round"/><circle cx="18" cy="23" r="2.5" fill="#0284C7"/><rect x="13" y="15" width="10" height="7.5" rx="2" fill="#F59E0B" stroke="#FFFFFF" stroke-width="1"/></svg></div>';
-      riderMarker = new maplibregl.Marker({element:bikeEl,anchor:'center'}).setLngLat([${riderLng},${riderLat}]).addTo(map);
-
-      // Initial bearing towards immediate waypoint
-      var destLat = ${isGoingToPickup ? storeLat : dropLat};
-      var destLng = ${isGoingToPickup ? storeLng : dropLng};
-      var initBearing = calculateBearing(${riderLat}, ${riderLng}, destLat, destLng);
-      var iconEl = document.getElementById('bike-icon-inner');
-      if (iconEl && !isNaN(initBearing)) {
-        iconEl.style.transform = 'rotate(' + Math.round(initBearing) + 'deg)';
+    // 2. LIVE RIDER BIKE MARKER (IF ASSIGNED)
+    try {
+      if (isRiderAssigned && currentRiderLat && currentRiderLng) {
+        var destLat = ${isGoingToPickup ? storeLat : dropLat};
+        var destLng = ${isGoingToPickup ? storeLng : dropLng};
+        var initBearing = calculateBearing(currentRiderLat, currentRiderLng, destLat, destLng);
+        ensureSingleRiderMarker(currentRiderLng, currentRiderLat, initBearing);
       }
+    } catch(err) { console.error('Rider marker error:', err); }
+
+    // 3. ACTIVE NAVIGATION ROAD ROUTE LAYER
+    var activeRouteCoords = ${activeCoordsJson};
+    try {
+      map.addSource('route-active', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: activeRouteCoords }
+        }
+      });
+
+      ${isDashed ? `
+        map.addLayer({
+          id:'route-active-line',type:'line',source:'route-active',
+          paint:{
+            'line-color':'${routeColor}',
+            'line-width':3.5,
+            'line-dasharray':[2.5,2.5]
+          },
+          layout:{'line-join':'round','line-cap':'round'}
+        });
+      ` : `
+        map.addLayer({
+          id:'route-active-glow',type:'line',source:'route-active',
+          paint:{
+            'line-color':'${glowColor}',
+            'line-width':7,
+            'line-opacity':0.35
+          },
+          layout:{'line-join':'round','line-cap':'round'}
+        });
+        map.addLayer({
+          id:'route-active-core',type:'line',source:'route-active',
+          paint:{
+            'line-color':'${routeColor}',
+            'line-width':4.5
+          },
+          layout:{'line-join':'round','line-cap':'round'}
+        });
+      `}
+    } catch(err) { console.error('Route layer error:', err); }
+
+    // 4. DYNAMIC FIT TO ACTIVE BOUNDS
+    try {
+      var initPts = [[${storeLng}, ${storeLat}], [${dropLng}, ${dropLat}]];
+      if (isRiderAssigned && currentRiderLng && currentRiderLat) {
+        initPts.push([currentRiderLng, currentRiderLat]);
+      }
+      if (activeRouteCoords && activeRouteCoords.length > 0) {
+        initPts = initPts.concat(activeRouteCoords);
+      }
+      fitMapToActiveBounds(initPts, 0);
+    } catch(err) { console.error('Fit bounds error:', err); }
+
+    // 5. APPLY ANY PENDING ROUTE COORDS
+    if (pendingRouteCoords && Array.isArray(pendingRouteCoords) && pendingRouteCoords.length > 0) {
+      window.updateRouteCoords(pendingRouteCoords);
     }
   });
 </script>
@@ -472,9 +649,9 @@ function buildMiniOlaMapHtml(
   storeLng: number,
   dropLat: number,
   dropLng: number,
-  riderLat: number,
-  riderLng: number,
-  currentStatus: string,
+  riderLat?: number,
+  riderLng?: number,
+  currentStatus: string = '',
   roadCoords: [number, number][] = [],
 ): string {
   function bezier(
@@ -500,38 +677,69 @@ function buildMiniOlaMapHtml(
     return pts;
   }
 
-  const isRiderAssigned = ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
-  const isGoingToPickup = ['assigned', 'arrived_at_store'].includes(currentStatus);
-  const isPickedUp = ['picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
+  const hasRider = Boolean(riderLat && riderLng && !isNaN(Number(riderLat)) && !isNaN(Number(riderLng)) && Number(riderLat) !== 0 && Number(riderLng) !== 0);
+  const isRiderAssigned = Boolean(hasRider && ['assigned', 'arrived_at_store', 'picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus));
+  const isGoingToPickup = isRiderAssigned && ['assigned', 'arrived_at_store'].includes(currentStatus);
+  const isPickedUp = isRiderAssigned && ['picked_up', 'out_for_delivery', 'delivered'].includes(currentStatus);
   const isUnassigned = !isRiderAssigned;
 
   let activeCoords: [number, number][] = [];
   if (roadCoords && roadCoords.length > 0) {
     activeCoords = roadCoords;
-  } else if (isGoingToPickup) {
-    activeCoords = bezier(riderLng, riderLat, storeLng, storeLat);
-  } else if (isPickedUp) {
-    activeCoords = bezier(riderLng, riderLat, dropLng, dropLat);
+  } else if (isGoingToPickup && hasRider) {
+    activeCoords = bezier(riderLng!, riderLat!, storeLng, storeLat);
+  } else if (isPickedUp && hasRider) {
+    activeCoords = bezier(riderLng!, riderLat!, dropLng, dropLat);
   } else {
     activeCoords = bezier(storeLng, storeLat, dropLng, dropLat);
   }
 
   const activeCoordsJson = JSON.stringify(activeCoords);
 
-  let allLats = [storeLat, dropLat];
-  let allLngs = [storeLng, dropLng];
-  if (isPickedUp) {
-    allLats = [riderLat, dropLat];
-    allLngs = [riderLng, dropLng];
-  } else if (isGoingToPickup) {
-    allLats = [riderLat, storeLat];
-    allLngs = [riderLng, storeLng];
+  function calcDist(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  const minLat = Math.min(...allLats) - 0.006;
-  const maxLat = Math.max(...allLats) + 0.006;
-  const minLng = Math.min(...allLngs) - 0.006;
-  const maxLng = Math.max(...allLngs) + 0.006;
+  const directDist = calcDist(storeLat, storeLng, dropLat, dropLng);
+  let effectiveMiniDist = directDist;
+  if (hasRider) {
+    const rStore = calcDist(riderLat!, riderLng!, storeLat, storeLng);
+    const rDrop = calcDist(riderLat!, riderLng!, dropLat, dropLng);
+    effectiveMiniDist = Math.max(effectiveMiniDist, rStore, rDrop);
+  }
+
+  function getMiniDynamicZoom(d: number): number {
+    if (d <= 150) return 16.5;
+    if (d <= 300) return 16.0;
+    if (d <= 600) return 15.3;
+    if (d <= 1200) return 14.6;
+    if (d <= 2500) return 13.8;
+    if (d <= 5000) return 13.0;
+    return 12.2;
+  }
+
+  const miniInitialZoom = getMiniDynamicZoom(effectiveMiniDist);
+
+  let allLats = [storeLat, dropLat];
+  let allLngs = [storeLng, dropLng];
+  if (hasRider) {
+    allLats.push(riderLat!);
+    allLngs.push(riderLng!);
+  }
+
+  const rawMinLat = Math.min(...allLats);
+  const rawMaxLat = Math.max(...allLats);
+  const rawMinLng = Math.min(...allLngs);
+  const rawMaxLng = Math.max(...allLngs);
+
+  const centerLng = Number(((rawMinLng + rawMaxLng) / 2).toFixed(6));
+  const centerLat = Number(((rawMinLat + rawMaxLat) / 2).toFixed(6));
 
   const routeColor = isGoingToPickup ? '#059669' : (isPickedUp ? '#2563EB' : '#DEA430');
   const isDashed = isUnassigned;
@@ -559,15 +767,18 @@ function buildMiniOlaMapHtml(
 <body>
 <div id="map"></div>
 <script>
-  var currentRiderLng = ${riderLng};
-  var currentRiderLat = ${riderLat};
+  var currentRiderLng = ${hasRider ? riderLng : 0};
+  var currentRiderLat = ${hasRider ? riderLat : 0};
   var riderMarker = null;
+  var mapLoaded = false;
+  var isRiderAssigned = ${Boolean(isRiderAssigned)};
+  var pendingRouteCoords = null;
 
   var map = new maplibregl.Map({
     container:'map',
     style:'https://api.olamaps.io/tiles/vector/v1/styles/default-light-standard/style.json',
-    center:[${(minLng + maxLng) / 2},${(minLat + maxLat) / 2}],
-    zoom:13,
+    center:[${centerLng},${centerLat}],
+    zoom:${miniInitialZoom},
     attributionControl:false,
     interactive:false,
     transformRequest:function(url){return{url:url+(url.includes('?')?'&':'?')+'api_key=${apiKey}'}}
@@ -583,19 +794,53 @@ function buildMiniOlaMapHtml(
     return (brng + 360) % 360;
   }
 
-  window.updateRiderPosition = function(targetLng, targetLat) {
-    targetLng = Number(targetLng);
-    targetLat = Number(targetLat);
-    if (isNaN(targetLng) || isNaN(targetLat)) return;
+  // Ensures STRICTLY ONE single mini rider marker exists on the mini map
+  function ensureSingleMiniRiderMarker(lng, lat, bearing) {
+    if (!isRiderAssigned || isNaN(lng) || isNaN(lat) || !lng || !lat) return;
 
-    if (!riderMarker) {
+    // Purge any orphan DOM elements to ensure strictly 1 marker
+    var allDoms = document.querySelectorAll('.mini-bike');
+    if (allDoms && allDoms.length > 0) {
+      for (var i = 0; i < allDoms.length; i++) {
+        if (!riderMarker || allDoms[i] !== riderMarker.getElement()) {
+          allDoms[i].parentElement && allDoms[i].parentElement.removeChild(allDoms[i]);
+        }
+      }
+    }
+
+    if (!riderMarker || !document.body.contains(riderMarker.getElement())) {
       var p3 = document.createElement('div');
       p3.className = 'mini-bike';
       p3.id = 'mini-bike-inner';
       p3.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="#38BDF8"><polygon points="12,2 20,18 12,14 4,18"/></svg>';
-      riderMarker = new maplibregl.Marker({element: p3, anchor: 'center'}).setLngLat([targetLng, targetLat]).addTo(map);
+      riderMarker = new maplibregl.Marker({element: p3, anchor: 'center'}).setLngLat([lng, lat]).addTo(map);
+    } else {
+      riderMarker.setLngLat([lng, lat]);
+    }
+
+    currentRiderLng = lng;
+    currentRiderLat = lat;
+
+    if (bearing !== undefined && !isNaN(bearing)) {
+      var iconEl = document.getElementById('mini-bike-inner');
+      if (iconEl) iconEl.style.transform = 'rotate(' + Math.round(bearing) + 'deg)';
+    }
+  }
+
+  window.updateRiderPosition = function(targetLng, targetLat) {
+    targetLng = Number(targetLng);
+    targetLat = Number(targetLat);
+    if (isNaN(targetLng) || isNaN(targetLat) || !targetLng || !targetLat) return;
+    isRiderAssigned = true;
+
+    if (!mapLoaded) {
       currentRiderLng = targetLng;
       currentRiderLat = targetLat;
+      return;
+    }
+
+    if (!riderMarker) {
+      ensureSingleMiniRiderMarker(targetLng, targetLat);
       return;
     }
 
@@ -603,7 +848,7 @@ function buildMiniOlaMapHtml(
     if (dist > 0.000015) {
       var bearing = calculateBearing(currentRiderLat, currentRiderLng, targetLat, targetLng);
       var iconEl = document.getElementById('mini-bike-inner');
-      if (iconEl) iconEl.style.transform = 'rotate(' + Math.round(bearing) + 'deg)';
+      if (iconEl && !isNaN(bearing)) iconEl.style.transform = 'rotate(' + Math.round(bearing) + 'deg)';
     }
     currentRiderLng = targetLng;
     currentRiderLat = targetLat;
@@ -613,24 +858,31 @@ function buildMiniOlaMapHtml(
   window.updateRouteCoords = function(coords) {
     try {
       var parsed = typeof coords === 'string' ? JSON.parse(coords) : coords;
-      if (map && map.getSource('route-active') && Array.isArray(parsed) && parsed.length > 0) {
+      if (!mapLoaded || !map || !map.getSource('route-active')) {
+        pendingRouteCoords = parsed;
+        return;
+      }
+      if (Array.isArray(parsed) && parsed.length > 0) {
         map.getSource('route-active').setData({
           type: 'Feature',
           geometry: { type: 'LineString', coordinates: parsed }
         });
         var lats = parsed.map(function(pt){ return pt[1]; });
         var lngs = parsed.map(function(pt){ return pt[0]; });
-        var minX = Math.min.apply(null, lngs) - 0.004;
-        var maxX = Math.max.apply(null, lngs) + 0.004;
-        var minY = Math.min.apply(null, lats) - 0.004;
-        var maxY = Math.max.apply(null, lats) + 0.004;
-        map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 20, duration: 900 });
+        lngs.push(${storeLng}, ${dropLng});
+        lats.push(${storeLat}, ${dropLat});
+        var minX = Math.min.apply(null, lngs);
+        var maxX = Math.max.apply(null, lngs);
+        var minY = Math.min.apply(null, lats);
+        var maxY = Math.max.apply(null, lats);
+        map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 18, maxZoom: ${miniInitialZoom + 0.6}, duration: 900 });
       }
     } catch(e) {}
   };
 
   map.on('load',function(){
-    map.fitBounds([[${minLng},${minLat}],[${maxLng},${maxLat}]],{padding:20,duration:0});
+    mapLoaded = true;
+    map.fitBounds([[${rawMinLng},${rawMinLat}],[${rawMaxLng},${rawMaxLat}]],{padding:18,maxZoom:${miniInitialZoom + 0.6},duration:0});
 
     map.addSource('route-active',{
       type:'geojson',
@@ -652,20 +904,15 @@ function buildMiniOlaMapHtml(
     var p2=document.createElement('div'); p2.className='cust';
     new maplibregl.Marker({element:p2,anchor:'center'}).setLngLat([${dropLng},${dropLat}]).addTo(map);
 
-    if (${isRiderAssigned}) {
-      var p3=document.createElement('div');
-      p3.className='mini-bike';
-      p3.id='mini-bike-inner';
-      p3.innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="#38BDF8"><polygon points="12,2 20,18 12,14 4,18"/></svg>';
-      riderMarker = new maplibregl.Marker({element:p3,anchor:'center'}).setLngLat([${riderLng},${riderLat}]).addTo(map);
-
+    if (isRiderAssigned && currentRiderLat && currentRiderLng) {
       var destLat = ${isGoingToPickup ? storeLat : dropLat};
       var destLng = ${isGoingToPickup ? storeLng : dropLng};
-      var initBearing = calculateBearing(${riderLat}, ${riderLng}, destLat, destLng);
-      var miniIcon = document.getElementById('mini-bike-inner');
-      if (miniIcon && !isNaN(initBearing)) {
-        miniIcon.style.transform = 'rotate(' + Math.round(initBearing) + 'deg)';
-      }
+      var initBearing = calculateBearing(currentRiderLat, currentRiderLng, destLat, destLng);
+      ensureSingleMiniRiderMarker(currentRiderLng, currentRiderLat, initBearing);
+    }
+
+    if (pendingRouteCoords && Array.isArray(pendingRouteCoords) && pendingRouteCoords.length > 0) {
+      window.updateRouteCoords(pendingRouteCoords);
     }
   });
 </script>
@@ -904,7 +1151,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   };
 
   // UI Interactive States
-  const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [isFullScreenMap, setIsFullScreenMap] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
 
@@ -923,13 +1170,153 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
   useEffect(() => {
     if (videoPlayer) {
-      if (isPlaying) {
+      if (isFullScreenMap) {
+        videoPlayer.pause();
+      } else if (isPlaying) {
         videoPlayer.play();
       } else {
         videoPlayer.pause();
       }
     }
-  }, [isPlaying, videoPlayer]);
+  }, [isFullScreenMap, isPlaying, videoPlayer]);
+
+  // ── Unified Sheet Animation for Smooth Transition between Full Details and Full Map ──
+  const sheetAnim = useRef(new Animated.Value(0)).current;
+  const isFullScreenMapRef = useRef(false);
+  const scrollOffsetRef = useRef(0);
+  const scrollViewRef = useRef<any>(null);
+
+  const openFullMap = () => {
+    setIsFullScreenMap(true);
+    isFullScreenMapRef.current = true;
+    try { videoPlayer?.pause(); } catch(e) {}
+    Animated.spring(sheetAnim, {
+      toValue: SCREEN_HEIGHT,
+      tension: 65,
+      friction: 11,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeFullMap = () => {
+    isFullScreenMapRef.current = false;
+    try { if (isPlaying) videoPlayer?.play(); } catch(e) {}
+    Animated.spring(sheetAnim, {
+      toValue: 0,
+      tension: 65,
+      friction: 11,
+      useNativeDriver: true,
+    }).start(() => {
+      setIsFullScreenMap(false);
+    });
+  };
+
+  // Interpolations for seamless synchronized transitions
+  const topBarTranslateY = sheetAnim.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.45, SCREEN_HEIGHT],
+    outputRange: [-120, -50, 0],
+    extrapolate: 'clamp',
+  });
+
+  const topBarOpacity = sheetAnim.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.35, SCREEN_HEIGHT * 0.85],
+    outputRange: [0, 0, 1],
+    extrapolate: 'clamp',
+  });
+
+  const dockedCardTranslateY = sheetAnim.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.45, SCREEN_HEIGHT],
+    outputRange: [180, 70, 0],
+    extrapolate: 'clamp',
+  });
+
+  const dockedCardOpacity = sheetAnim.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.35, SCREEN_HEIGHT * 0.85],
+    outputRange: [0, 0, 1],
+    extrapolate: 'clamp',
+  });
+
+  const headerBarOpacity = sheetAnim.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.25],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
+  const miniMapOpacity = sheetAnim.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.25],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
+  // Slide DOWN on Active Delivery Status Card to open full-screen map
+  const cardSlidePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Intercept downwards drags only when near top of scroll view
+        if (scrollOffsetRef.current > 15) return false;
+        return gestureState.dy > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3;
+      },
+      onPanResponderGrant: () => {
+        try { videoPlayer?.pause(); } catch(e) {}
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          const newPos = Math.min(SCREEN_HEIGHT, gestureState.dy * 1.35);
+          sheetAnim.setValue(newPos);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 60 || gestureState.vy > 0.35) {
+          openFullMap();
+        } else {
+          closeFullMap();
+        }
+      },
+      onPanResponderTerminate: () => {
+        closeFullMap();
+      },
+    })
+  ).current;
+
+  // Slide UP on docked bottom card to exit full-screen map and return to details
+  const dockedCardPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return gestureState.dy < -8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy < 0) {
+          const newPos = Math.max(0, SCREEN_HEIGHT + gestureState.dy * 1.35);
+          sheetAnim.setValue(newPos);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy < -40 || gestureState.vy < -0.35) {
+          closeFullMap();
+        } else {
+          openFullMap();
+        }
+      },
+      onPanResponderTerminate: () => {
+        openFullMap();
+      },
+    })
+  ).current;
+
+  // Android hardware back press listener to close fullscreen map
+  useEffect(() => {
+    const backAction = () => {
+      if (isFullScreenMapRef.current) {
+        closeFullMap();
+        return true;
+      }
+      return false;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, []);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showDeliveryInstructionsModal, setShowDeliveryInstructionsModal] = useState(false);
   const [selectedDeliveryInstructions, setSelectedDeliveryInstructions] = useState<string[]>([
@@ -1006,8 +1393,14 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     trackingData?.customerLng ||
     currentLocation?.longitude ||
     (savedAddresses.length > 0 && savedAddresses[0].longitude ? savedAddresses[0].longitude : 85.7882);
-  const riderLat = trackingData?.currentLat || (restLat * 0.4 + custLat * 0.6);
-  const riderLng = trackingData?.currentLng || (restLng * 0.4 + custLng * 0.6);
+  const hasRealRiderCoords = Boolean(
+    trackingData?.currentLat &&
+    trackingData?.currentLng &&
+    !isNaN(Number(trackingData.currentLat)) &&
+    !isNaN(Number(trackingData.currentLng))
+  );
+  const riderLat = hasRealRiderCoords ? Number(trackingData.currentLat) : undefined;
+  const riderLng = hasRealRiderCoords ? Number(trackingData.currentLng) : undefined;
 
   // 1. Restaurant / Kitchen lifecycle status from Restaurant App
   const kitchenStatus = orderDetail?.status || 'placed';
@@ -1047,6 +1440,59 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     ? effectiveRiderStatus
     : (kitchenStatus || 'placed');
 
+  // Keep live refs for webview hydration on mount/reload
+  const roadRouteCoordsRef = useRef(roadRouteCoords);
+  roadRouteCoordsRef.current = roadRouteCoords;
+
+  const trackingDataRef = useRef(trackingData);
+  trackingDataRef.current = trackingData;
+
+  // Memoize Map HTML & Source objects to guarantee WebView NEVER reloads or resets user zoom/pan
+  const fullMapHtml = useMemo(() => {
+    return buildOlaMapHtml(
+      OLA_MAPS_API_KEY,
+      isRiderAccepted ? riderLat : undefined,
+      isRiderAccepted ? riderLng : undefined,
+      restLat,
+      restLng,
+      custLat,
+      custLng,
+      restaurantName,
+      currentStatus,
+      roadRouteCoords,
+    );
+  }, [orderId, restLat, restLng, custLat, custLng, restaurantName, Boolean(isRiderAccepted)]);
+
+  const miniMapHtml = useMemo(() => {
+    return buildMiniOlaMapHtml(
+      OLA_MAPS_API_KEY,
+      restLat,
+      restLng,
+      custLat,
+      custLng,
+      isRiderAccepted ? riderLat : undefined,
+      isRiderAccepted ? riderLng : undefined,
+      currentStatus,
+      roadRouteCoords,
+    );
+  }, [orderId, restLat, restLng, custLat, custLng, Boolean(isRiderAccepted)]);
+
+  const fullMapSource = useMemo(() => ({ html: fullMapHtml }), [fullMapHtml]);
+  const miniMapSource = useMemo(() => ({ html: miniMapHtml }), [miniMapHtml]);
+
+  // Synchronize live rider GPS movements directly to WebView markers without page reload
+  useEffect(() => {
+    if (trackingData?.currentLat && trackingData?.currentLng) {
+      const lat = Number(trackingData.currentLat);
+      const lng = Number(trackingData.currentLng);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        const updateScript = `if (window.updateRiderPosition) { window.updateRiderPosition(${lng}, ${lat}); } true;`;
+        fullMapWebviewRef.current?.injectJavaScript(updateScript);
+        miniMapWebviewRef.current?.injectJavaScript(updateScript);
+      }
+    }
+  }, [trackingData?.currentLat, trackingData?.currentLng]);
+
   // Fetch Ola Maps Driving Directions & Dynamic Turn-by-Turn Road Route
   useEffect(() => {
     if (!restLat || !restLng || !custLat || !custLng || !OLA_MAPS_API_KEY) return;
@@ -1057,11 +1503,11 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         let origin = `${restLat},${restLng}`;
         let destination = `${custLat},${custLng}`;
 
-        if (riderStatus === 'assigned' || riderStatus === 'arrived_at_store') {
+        if ((riderStatus === 'assigned' || riderStatus === 'arrived_at_store') && riderLat && riderLng) {
           // Rider is heading to restaurant to pick up order: Rider -> Restaurant
           origin = `${riderLat},${riderLng}`;
           destination = `${restLat},${restLng}`;
-        } else if (riderStatus === 'picked_up' || riderStatus === 'out_for_delivery') {
+        } else if ((riderStatus === 'picked_up' || riderStatus === 'out_for_delivery') && riderLat && riderLng) {
           // Rider has picked up and is heading to customer: Rider -> Customer
           origin = `${riderLat},${riderLng}`;
           destination = `${custLat},${custLng}`;
@@ -1280,7 +1726,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       }
       return {
         title: 'Preparing your order',
-        description: `Chef at ${restaurantName} is preparing your fresh meal (${totalKitchenPrepTime} mins prep time). Finding a delivery partner nearby...`,
+        description: `Chef at ${restaurantName} is preparing your fresh meal. Finding a delivery partner nearby...`,
         badge: 'PREPARING',
       };
     }
@@ -1907,143 +2353,334 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     );
   }
 
-  const topHeaderPadding = insets.top + (Platform.OS === 'android' ? 6 : 2) * SCALE;
+  const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 0;
+  const safeTopInset = Math.max(insets.top || 0, statusBarHeight);
+  const topHeaderPadding = safeTopInset + (Platform.OS === 'android' ? 8 : 4) * SCALE;
 
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
 
       {/* ════════════════════════════════════════════════════════════════════════
-          [1] FLOATING TOP HEADER (OVERLAID AT TOP, ZERO PAGE SHIFT)
+          [A] FULLSCREEN INTERACTIVE OLA MAP VIEW (BACKGROUND BASE LAYER)
           ════════════════════════════════════════════════════════════════════════ */}
-      <View style={[styles.headerBar, { paddingTop: topHeaderPadding }]}>
-        {/* Left: Back Button */}
-        <TouchableOpacity style={styles.headerCircleBtn} activeOpacity={0.8} onPress={onBack}>
-          <ArrowLeft size={19 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
-        </TouchableOpacity>
+      <View
+        style={[styles.fullScreenMapOverlay, { zIndex: 1 }]}
+        pointerEvents={isFullScreenMap ? 'auto' : 'none'}
+      >
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-        {/* Center: Restaurant & Time Info */}
-        <View style={styles.headerCenterCol}>
-          <Text style={styles.headerRestaurantTitle} numberOfLines={1}>
-            {restaurantName}
-          </Text>
-          <View style={styles.headerSubRow}>
-            <Text style={styles.headerTimeText}>{placedTimeFormatted}</Text>
-            <Text style={styles.headerDot}>•</Text>
-            <Text style={styles.headerItemCountText}>
-              {itemsCount} {itemsCount === 1 ? 'Item' : 'Items'}
-            </Text>
-          </View>
-        </View>
+        {/* Live Interactive Fullscreen Ola Map */}
+        <WebView
+          ref={fullMapWebviewRef}
+          source={fullMapSource}
+          style={StyleSheet.absoluteFill}
+          scrollEnabled={false}
+          javaScriptEnabled
+          domStorageEnabled
+          originWhitelist={['*']}
+          onLoadEnd={() => {
+            if (roadRouteCoordsRef.current && roadRouteCoordsRef.current.length > 0) {
+              const routeScript = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(roadRouteCoordsRef.current)}); } true;`;
+              fullMapWebviewRef.current?.injectJavaScript(routeScript);
+            }
+            if (trackingDataRef.current?.currentLat && trackingDataRef.current?.currentLng) {
+              const lat = Number(trackingDataRef.current.currentLat);
+              const lng = Number(trackingDataRef.current.currentLng);
+              if (!isNaN(lat) && !isNaN(lng)) {
+                const riderScript = `if (window.updateRiderPosition) { window.updateRiderPosition(${lng}, ${lat}); } true;`;
+                fullMapWebviewRef.current?.injectJavaScript(riderScript);
+              }
+            }
+          }}
+        />
 
-        {/* Right: More Options Button */}
-        <TouchableOpacity
-          style={styles.headerCircleBtn}
-          activeOpacity={0.8}
-          onPress={() => setShowOptionsMenu(!showOptionsMenu)}
+        {/* Top Floating Controls Bar */}
+        <Animated.View
+          style={[
+            styles.fullScreenMapTopBar,
+            {
+              paddingTop: topHeaderPadding,
+              transform: [{ translateY: topBarTranslateY }],
+              opacity: topBarOpacity,
+            },
+          ]}
         >
-          <MoreHorizontal size={19 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.fullScreenMapBackBtn}
+            activeOpacity={0.8}
+            onPress={closeFullMap}
+          >
+            <ArrowLeft size={18 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
+          </TouchableOpacity>
+
+          <View style={styles.fullScreenMapHeaderTitlePill}>
+            <View style={styles.fullScreenMapLivePulsingDot} />
+            <View style={{ flex: 1, marginRight: 4 }}>
+              <Text style={styles.fullScreenMapHeaderTitle} numberOfLines={1}>
+                {isRiderAccepted ? `${riderDisplayName || 'Partner'} on the way` : `${restaurantName} • Preparing`}
+              </Text>
+              <Text style={styles.fullScreenMapHeaderSub} numberOfLines={1}>
+                Live Ola Map Tracking
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.fullScreenMapRecenterBtn}
+            activeOpacity={0.8}
+            onPress={() => {
+              fullMapWebviewRef.current?.injectJavaScript(`
+                if (window.recenterMap) {
+                  window.recenterMap();
+                }
+                true;
+              `);
+            }}
+          >
+            <Navigation size={17 * SCALE} color="#F5B800" strokeWidth={2.2} />
+          </TouchableOpacity>
+        </Animated.View>
+
+        {/* Bottom Docked Active Delivery Status Card */}
+        <Animated.View
+          style={[
+            styles.fullScreenDockedCard,
+            {
+              paddingBottom: Math.max(insets.bottom + 8 * SCALE, 20 * SCALE),
+              transform: [{ translateY: dockedCardTranslateY }],
+              opacity: dockedCardOpacity,
+            },
+          ]}
+          {...dockedCardPanResponder.panHandlers}
+        >
+          {/* Slide Up Drag Indicator Handle */}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={closeFullMap}
+            style={styles.dockedCardHeaderHandle}
+          >
+            <View style={styles.dockedHandleBar} />
+            <View style={styles.dockedHintRow}>
+              <ChevronUp size={14 * SCALE} color="#F5B800" strokeWidth={2.4} />
+              <Text style={styles.dockedHintText}>Slide up for full details</Text>
+              <ChevronUp size={14 * SCALE} color="#F5B800" strokeWidth={2.4} />
+            </View>
+          </TouchableOpacity>
+
+          {/* Delivery Status Summary Row */}
+          <View style={styles.dockedCardMainRow}>
+            <View style={styles.dockedCardLeftInfo}>
+              {/* Stage Badge */}
+              <View style={styles.dockedBadgeRow}>
+                <View style={styles.riderOnlineDot} />
+                <Text style={styles.dockedBadgeText}>
+                  {statusInfo.badge || (isRiderAccepted ? 'ON THE WAY' : 'PREPARING')}
+                </Text>
+              </View>
+
+              {/* Title */}
+              <Text style={styles.dockedCardTitle} numberOfLines={1}>
+                {statusInfo.title}
+              </Text>
+
+              {/* Subtitle / Description */}
+              <Text style={styles.dockedCardSub} numberOfLines={1}>
+                {isRiderAccepted
+                  ? `${riderDisplayName || 'Delivery Partner'} is rushing with your order`
+                  : `Chef preparing fresh meal • ~${activePrepMins}m left`}
+              </Text>
+            </View>
+
+            {/* Gold ETA Badge */}
+            <View style={styles.dockedEtaBadge}>
+              <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                <Defs>
+                  <LinearGradient id="dockedEtaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <Stop offset="0%" stopColor="#F5BE38" />
+                    <Stop offset="100%" stopColor="#DE9E22" />
+                  </LinearGradient>
+                </Defs>
+                <Rect width="100%" height="100%" rx={16 * SCALE} fill="url(#dockedEtaGrad)" />
+              </Svg>
+              <Text style={styles.dockedEtaNum}>{etaMinutes}</Text>
+              <Text style={styles.dockedEtaUnit}>mins</Text>
+            </View>
+          </View>
+
+          {/* Bottom Actions Row */}
+          <View style={styles.dockedCardActionsRow}>
+            {isRiderAccepted ? (
+              <>
+                <TouchableOpacity
+                  style={styles.dockedActionBtn}
+                  activeOpacity={0.8}
+                  onPress={handleCallRider}
+                >
+                  <Phone size={14 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
+                  <Text style={styles.dockedActionBtnText}>Call</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.dockedActionBtn}
+                  activeOpacity={0.8}
+                  onPress={() => setShowChatModal(true)}
+                >
+                  <MessageSquare size={14 * SCALE} color="#FFFFFF" strokeWidth={2.2} />
+                  <Text style={styles.dockedActionBtnText}>Chat</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.dockedActionBtn, styles.dockedDetailsBtn]}
+                  activeOpacity={0.8}
+                  onPress={closeFullMap}
+                >
+                  <Text style={styles.dockedDetailsBtnText}>Order Details</Text>
+                  <ChevronRight size={14 * SCALE} color="#F5B800" />
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={styles.dockedPrepPill}>
+                  <ChefHat size={14 * SCALE} color="#F5B800" style={{ marginRight: 6 }} />
+                  <Text style={styles.dockedPrepPillText} numberOfLines={1}>
+                    Kitchen: <Text style={{ color: '#F5B800', fontWeight: '800' }}>{totalKitchenPrepTime}m</Text> (~{activePrepMins}m left)
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.dockedActionBtn, styles.dockedDetailsBtn]}
+                  activeOpacity={0.8}
+                  onPress={closeFullMap}
+                >
+                  <Text style={styles.dockedDetailsBtnText}>Order Details</Text>
+                  <ChevronRight size={14 * SCALE} color="#F5B800" />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </Animated.View>
       </View>
 
-      <ScrollView
-        style={styles.mainScrollView}
-        contentContainerStyle={styles.mainScrollContent}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
+      {/* ════════════════════════════════════════════════════════════════════════
+          [B] FULL DETAILS SHEET (FOREGROUND LAYER, SLIDES DOWN TO REVEAL MAP)
+          ════════════════════════════════════════════════════════════════════════ */}
+      <Animated.View
+        style={[
+          styles.detailsSheetContainer,
+          {
+            transform: [{ translateY: sheetAnim }],
+            zIndex: 10,
+          },
+        ]}
+        pointerEvents={isFullScreenMap ? 'none' : 'auto'}
       >
+        {/* ════════════════════════════════════════════════════════════════════════
+            [1] FLOATING TOP HEADER (OVERLAID AT TOP, ZERO PAGE SHIFT)
+            ════════════════════════════════════════════════════════════════════════ */}
+        <Animated.View style={[styles.headerBar, { paddingTop: topHeaderPadding, opacity: headerBarOpacity }]}>
+          {/* Left: Back Button */}
+          <TouchableOpacity style={styles.headerCircleBtn} activeOpacity={0.8} onPress={onBack}>
+            <ArrowLeft size={19 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
+          </TouchableOpacity>
+
+          {/* Center: Restaurant & Time Info */}
+          <View style={styles.headerCenterCol}>
+            <Text style={styles.headerRestaurantTitle} numberOfLines={1}>
+              {restaurantName}
+            </Text>
+            <View style={styles.headerSubRow}>
+              <Text style={styles.headerTimeText}>{placedTimeFormatted}</Text>
+              <Text style={styles.headerDot}>•</Text>
+              <Text style={styles.headerItemCountText}>
+                {itemsCount} {itemsCount === 1 ? 'Item' : 'Items'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Right: More Options Button */}
+          <TouchableOpacity
+            style={styles.headerCircleBtn}
+            activeOpacity={0.8}
+            onPress={() => setShowOptionsMenu(!showOptionsMenu)}
+          >
+            <MoreHorizontal size={19 * SCALE} color="#FFFFFF" strokeWidth={2.4} />
+          </TouchableOpacity>
+        </Animated.View>
+
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.mainScrollView}
+          contentContainerStyle={[
+            styles.mainScrollContent,
+            { paddingBottom: Math.max(insets.bottom + 24 * SCALE, 36 * SCALE) },
+          ]}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          onScroll={(e) => {
+            scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
+        >
         {/* ════════════════════════════════════════════════════════════════════════
             [2] HERO MEDIA AREA (FULL HEIGHT VIDEO WITH ACCENT GRADIENTS)
             ════════════════════════════════════════════════════════════════════════ */}
         <View
           style={[
             styles.heroMediaContainer,
-            { height: isMapExpanded ? 380 * SCALE : Math.round(SCREEN_WIDTH * (912 / 576)) },
+            { height: Math.round(SCREEN_WIDTH * (912 / 576)) },
           ]}
         >
-          {isMapExpanded ? (
-            /* Live Interactive Full Ola MapView Mode (matching IncomingRequestModal UI) */
-            <View style={StyleSheet.absoluteFill}>
-              <WebView
-                ref={fullMapWebviewRef}
-                source={{
-                  html: buildOlaMapHtml(
-                    OLA_MAPS_API_KEY,
-                    riderLat,
-                    riderLng,
-                    restLat,
-                    restLng,
-                    custLat,
-                    custLng,
-                    restaurantName,
-                    currentStatus,
-                    roadRouteCoords,
-                  ),
-                }}
-                style={StyleSheet.absoluteFill}
-                scrollEnabled={false}
-                javaScriptEnabled
-                domStorageEnabled
-                originWhitelist={['*']}
-              />
+          {/* Delivery Scene with Full-Height Background Video */}
+          <View style={styles.heroSceneWrapper}>
+            {/* Full-Height Looping Background Video */}
+            <VideoView
+              player={videoPlayer}
+              style={styles.heroBgVideo}
+              contentFit="cover"
+              nativeControls={false}
+            />
 
-              {/* Ola Maps Brand Badge */}
-              <View style={styles.olaMapsBrandPill}>
-                <Text style={styles.olaMapsBrandPillText}>Ola Maps • Light Theme</Text>
-              </View>
-            </View>
-          ) : (
-            /* Delivery Scene with Full-Height Background Video */
-            <View style={styles.heroSceneWrapper}>
-              {/* Full-Height Looping Background Video */}
-              <VideoView
-                player={videoPlayer}
-                style={styles.heroBgVideo}
-                contentFit="cover"
-                nativeControls={false}
-              />
+            {/* ── TOP SUBTLE STATUS BAR SHADING (Keeps top of video crystal clear) ── */}
+            <Svg
+              width="100%"
+              height={Math.max(topHeaderPadding + 36 * SCALE, 84)}
+              style={styles.heroTopFadeGradient}
+              pointerEvents="none"
+            >
+              <Defs>
+                <LinearGradient id="heroTopGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <Stop offset="0%" stopColor="#000000" stopOpacity="0.48" />
+                  <Stop offset="60%" stopColor="#000000" stopOpacity="0.16" />
+                  <Stop offset="100%" stopColor="#000000" stopOpacity="0" />
+                </LinearGradient>
+              </Defs>
+              <Rect width="100%" height="100%" fill="url(#heroTopGrad)" />
+            </Svg>
 
-              {/* ── TOP SUBTLE STATUS BAR SHADING (Keeps top of video crystal clear) ── */}
-              <Svg
-                width="100%"
-                height={Math.max(topHeaderPadding + 24 * SCALE, 60)}
-                style={styles.heroTopFadeGradient}
-                pointerEvents="none"
-              >
-                <Defs>
-                  <LinearGradient id="heroTopGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <Stop offset="0%" stopColor="#000000" stopOpacity="0.45" />
-                    <Stop offset="60%" stopColor="#000000" stopOpacity="0.15" />
-                    <Stop offset="100%" stopColor="#000000" stopOpacity="0" />
-                  </LinearGradient>
-                </Defs>
-                <Rect width="100%" height="100%" fill="url(#heroTopGrad)" />
-              </Svg>
-
-              {/* ── BOTTOM FADE GRADIENT (Smooth transition into status card) ───── */}
-              <Svg
-                width="100%"
-                height={120 * SCALE}
-                style={styles.heroBottomFadeGradient}
-                pointerEvents="none"
-              >
-                <Defs>
-                  <LinearGradient id="heroBottomGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <Stop offset="0%" stopColor="#000000" stopOpacity="0" />
-                    <Stop offset="60%" stopColor="#000000" stopOpacity="0.65" />
-                    <Stop offset="100%" stopColor="#000000" stopOpacity="1" />
-                  </LinearGradient>
-                </Defs>
-                <Rect width="100%" height="100%" fill="url(#heroBottomGrad)" />
-              </Svg>
-            </View>
-          )}
+            {/* ── BOTTOM FADE GRADIENT (Smooth transition into status card) ───── */}
+            <Svg
+              width="100%"
+              height={120 * SCALE}
+              style={styles.heroBottomFadeGradient}
+              pointerEvents="none"
+            >
+              <Defs>
+                <LinearGradient id="heroBottomGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <Stop offset="0%" stopColor="#000000" stopOpacity="0" />
+                  <Stop offset="60%" stopColor="#000000" stopOpacity="0.65" />
+                  <Stop offset="100%" stopColor="#000000" stopOpacity="1" />
+                </LinearGradient>
+              </Defs>
+              <Rect width="100%" height="100%" fill="url(#heroBottomGrad)" />
+            </Svg>
+          </View>
 
           {/* Floating Media Action Controls (Top-Right of Hero) */}
           <View
             style={[
               styles.floatingMediaControls,
-              { top: topHeaderPadding + 44 * SCALE },
+              { top: topHeaderPadding + 48 * SCALE },
             ]}
           >
             {/* Mute Button */}
@@ -2074,65 +2711,85 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           </View>
 
           {/* ── LIVE MINIMIZED OLA MAP DISC (MATCHING INCOMING REQUEST MODAL) ── */}
-          <TouchableOpacity
-            style={[styles.floatingMiniMapDiscContainer, isMapExpanded && styles.floatingMiniMapDiscActive]}
-            activeOpacity={0.88}
-            onPress={() => setIsMapExpanded(!isMapExpanded)}
-          >
-            {/* Mini Map Canvas with Rounded Lens */}
-            <View style={styles.miniMapLensWrapper}>
-              <WebView
-                ref={miniMapWebviewRef}
-                source={{
-                  html: buildMiniOlaMapHtml(
-                    OLA_MAPS_API_KEY,
-                    restLat,
-                    restLng,
-                    custLat,
-                    custLng,
-                    riderLat,
-                    riderLng,
-                    currentStatus,
-                    roadRouteCoords,
-                  ),
-                }}
-                style={StyleSheet.absoluteFill}
-                scrollEnabled={false}
-                javaScriptEnabled
-                domStorageEnabled
-                pointerEvents="none"
-                originWhitelist={['*']}
-              />
+          <Animated.View style={{ opacity: miniMapOpacity }}>
+            <TouchableOpacity
+              style={[styles.floatingMiniMapDiscContainer, isFullScreenMap && styles.floatingMiniMapDiscActive]}
+              activeOpacity={0.88}
+              onPress={openFullMap}
+            >
+              {/* Mini Map Canvas with Rounded Lens */}
+              <View style={styles.miniMapLensWrapper}>
+                <WebView
+                  ref={miniMapWebviewRef}
+                  source={miniMapSource}
+                  style={StyleSheet.absoluteFill}
+                  scrollEnabled={false}
+                  javaScriptEnabled
+                  domStorageEnabled
+                  pointerEvents="none"
+                  originWhitelist={['*']}
+                  onLoadEnd={() => {
+                    if (roadRouteCoordsRef.current && roadRouteCoordsRef.current.length > 0) {
+                      const routeScript = `if (window.updateRouteCoords) { window.updateRouteCoords(${JSON.stringify(roadRouteCoordsRef.current)}); } true;`;
+                      miniMapWebviewRef.current?.injectJavaScript(routeScript);
+                    }
+                    if (trackingDataRef.current?.currentLat && trackingDataRef.current?.currentLng) {
+                      const lat = Number(trackingDataRef.current.currentLat);
+                      const lng = Number(trackingDataRef.current.currentLng);
+                      if (!isNaN(lat) && !isNaN(lng)) {
+                        const riderScript = `if (window.updateRiderPosition) { window.updateRiderPosition(${lng}, ${lat}); } true;`;
+                        miniMapWebviewRef.current?.injectJavaScript(riderScript);
+                      }
+                    }
+                  }}
+                />
 
-              {/* Frosted Lens Glass Overlay */}
-              <View style={styles.miniMapGlassVignette} />
+                {/* Frosted Lens Glass Overlay */}
+                <View style={styles.miniMapGlassVignette} />
 
-              {/* Centered Glowing Location Pin */}
-              <View style={styles.miniMapCenterPinBadge}>
-                <Svg width={18 * SCALE} height={22 * SCALE} viewBox="0 0 24 28" fill="none">
-                  <Path
-                    d="M12 2C7.02944 2 3 6.02944 3 11C3 16.5 12 26 12 26C12 26 21 16.5 21 11C21 6.02944 16.9706 2 12 2Z"
-                    fill="#FFFFFF"
-                    stroke="#2A2A30"
-                    strokeWidth="1.5"
-                  />
-                  <Circle cx="12" cy="11" r="4.5" fill="#149E55" />
-                </Svg>
+                {/* Centered Glowing Location Pin */}
+                <View style={styles.miniMapCenterPinBadge}>
+                  <Svg width={18 * SCALE} height={22 * SCALE} viewBox="0 0 24 28" fill="none">
+                    <Path
+                      d="M12 2C7.02944 2 3 6.02944 3 11C3 16.5 12 26 12 26C12 26 21 16.5 21 11C21 6.02944 16.9706 2 12 2Z"
+                      fill="#FFFFFF"
+                      stroke="#2A2A30"
+                      strokeWidth="1.5"
+                    />
+                    <Circle cx="12" cy="11" r="4.5" fill="#149E55" />
+                  </Svg>
+                </View>
               </View>
-            </View>
 
-            {/* Bottom Attached "MAP" Pill Badge */}
-            <View style={styles.miniMapBottomPill}>
-              <Text style={styles.miniMapPillText}>{isMapExpanded ? 'MEDIA' : 'MAP'}</Text>
-            </View>
-          </TouchableOpacity>
+              {/* Bottom Attached "MAP" Pill Badge */}
+              <View style={styles.miniMapBottomPill}>
+                <Text style={styles.miniMapPillText}>MAP</Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════
             [3] OVERLAPPING ACTIVE DELIVERY STATUS CARD (FIGMA NODE 3046:159)
             ════════════════════════════════════════════════════════════════════════ */}
         <View style={styles.overlappingCardContainer}>
-          <View style={styles.deliveryStatusCard}>
+          <View
+            style={styles.deliveryStatusCard}
+            {...cardSlidePanResponder.panHandlers}
+          >
+            {/* Slide Down Drag Indicator Bar */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={openFullMap}
+              style={styles.cardDragIndicatorArea}
+            >
+              <View style={styles.cardDragHandlePill} />
+              <View style={styles.cardDragHintRow}>
+                <ChevronDown size={13 * SCALE} color="#8A8A90" strokeWidth={2.4} />
+                <Text style={styles.cardDragHintText}>Slide down for full map</Text>
+                <ChevronDown size={13 * SCALE} color="#8A8A90" strokeWidth={2.4} />
+              </View>
+            </TouchableOpacity>
             {!isRiderAccepted ? (
               /* ── STAGE 1: ORDER RECEIVED / KITCHEN PREPARING (NO RIDER ASSIGNED YET) ── */
               <View>
@@ -2172,32 +2829,6 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                             @ To Home | {deliveryAddress}
                           </Text>
                         </View>
-                      </View>
-                    )}
-
-                    {/* Live Kitchen Preparation Time Badge / Pill */}
-                    {isPreparing && (
-                      <View style={styles.kitchenPrepPill}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
-                          <ChefHat size={14 * SCALE} color="#F5B800" style={{ marginRight: 6 }} />
-                          <Text style={styles.kitchenPrepPillText}>
-                            Kitchen Prep: <Text style={{ fontWeight: '800', color: '#F5B800' }}>{totalKitchenPrepTime}m</Text>
-                          </Text>
-                        </View>
-                        <View style={styles.kitchenPrepCountdownBadge}>
-                          <Clock size={11 * SCALE} color="#000000" style={{ marginRight: 4 }} />
-                          <Text style={styles.kitchenPrepCountdownText}>~{activePrepMins}m left</Text>
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Finding delivery partner badge (amber pill shown ONLY when rider is not accepted) */}
-                    {!isRiderAccepted && (kitchenStatus === 'preparing' || kitchenStatus === 'confirmed' || kitchenStatus === 'ready') && (
-                      <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2E2005', borderColor: '#F59E0B', marginTop: 8 }]}>
-                        <View style={styles.pulsingAmberDot} />
-                        <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', flex: 1, fontWeight: '700' }]}>
-                          Finding a delivery partner nearby...
-                        </Text>
                       </View>
                     )}
 
@@ -2642,6 +3273,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           <View style={{ height: Math.max(insets.bottom, 12) }} />
         </View>
       </ScrollView>
+    </Animated.View>
 
       {/* ════════════════════════════════════════════════════════════════════════
           [6] LIVE DRIVER CHAT MODAL
@@ -3923,5 +4555,277 @@ const styles = StyleSheet.create({
     fontSize: 11 * SCALE,
     color: GOLD,
     letterSpacing: 0.3,
+  },
+
+  // ── Details Sheet Container (Slides down to reveal map) ─────────
+  detailsSheetContainer: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: '#000000',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.75,
+    shadowRadius: 16,
+    elevation: 20,
+  },
+
+  // ── Fullscreen Interactive Ola Map ──────────────────────────────
+  fullScreenMapOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: '#000000',
+  },
+  fullScreenMapTopBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16 * SCALE,
+    paddingBottom: 12 * SCALE,
+    zIndex: 1000,
+  },
+  fullScreenMapBackBtn: {
+    width: 42 * SCALE,
+    height: 42 * SCALE,
+    borderRadius: 21 * SCALE,
+    backgroundColor: 'rgba(15, 15, 18, 0.90)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  fullScreenMapHeaderTitlePill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 15, 18, 0.92)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(245, 184, 0, 0.35)',
+    borderRadius: 24 * SCALE,
+    paddingHorizontal: 14 * SCALE,
+    paddingVertical: 7 * SCALE,
+    marginHorizontal: 10 * SCALE,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  fullScreenMapLivePulsingDot: {
+    width: 8 * SCALE,
+    height: 8 * SCALE,
+    borderRadius: 4 * SCALE,
+    backgroundColor: '#10B981',
+    marginRight: 8 * SCALE,
+  },
+  fullScreenMapHeaderTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13.5 * SCALE,
+    color: '#FFFFFF',
+  },
+  fullScreenMapHeaderSub: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 11 * SCALE,
+    color: '#F5B800',
+    marginTop: 1,
+  },
+  fullScreenMapRecenterBtn: {
+    width: 42 * SCALE,
+    height: 42 * SCALE,
+    borderRadius: 21 * SCALE,
+    backgroundColor: 'rgba(15, 15, 18, 0.90)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(245, 184, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+
+  // ── Fullscreen Docked Card at Bottom ─────────────────────────────
+  fullScreenDockedCard: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#070707',
+    borderTopLeftRadius: 28 * SCALE,
+    borderTopRightRadius: 28 * SCALE,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1.2,
+    borderRightWidth: 1.2,
+    borderColor: '#2E2E2A',
+    paddingHorizontal: 18 * SCALE,
+    paddingTop: 8 * SCALE,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.85,
+    shadowRadius: 14,
+    elevation: 16,
+    zIndex: 1000,
+  },
+  dockedCardHeaderHandle: {
+    alignItems: 'center',
+    paddingVertical: 4 * SCALE,
+    marginBottom: 6 * SCALE,
+  },
+  dockedHandleBar: {
+    width: 42 * SCALE,
+    height: 4.5 * SCALE,
+    borderRadius: 2.5 * SCALE,
+    backgroundColor: '#4B4B48',
+    marginBottom: 4 * SCALE,
+  },
+  dockedHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4 * SCALE,
+  },
+  dockedHintText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 11.5 * SCALE,
+    color: '#F5B800',
+    letterSpacing: 0.2,
+  },
+  dockedCardMainRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12 * SCALE,
+  },
+  dockedCardLeftInfo: {
+    flex: 1,
+    paddingRight: 12 * SCALE,
+  },
+  dockedBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6 * SCALE,
+    marginBottom: 3 * SCALE,
+  },
+  dockedBadgeText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11 * SCALE,
+    color: '#F5B800',
+    letterSpacing: 0.5,
+  },
+  dockedCardTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 18 * SCALE,
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+  },
+  dockedCardSub: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12.5 * SCALE,
+    color: '#A0A0A5',
+    marginTop: 2 * SCALE,
+  },
+  dockedEtaBadge: {
+    width: 66 * SCALE,
+    height: 66 * SCALE,
+    borderRadius: 18 * SCALE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#F5B800',
+    overflow: 'hidden',
+  },
+  dockedEtaNum: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 27 * SCALE,
+    color: '#000000',
+    lineHeight: 29 * SCALE,
+  },
+  dockedEtaUnit: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11.5 * SCALE,
+    color: '#1A1810',
+    marginTop: -2,
+  },
+  dockedCardActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8 * SCALE,
+    paddingTop: 8 * SCALE,
+    borderTopWidth: 1,
+    borderTopColor: '#1A1A18',
+  },
+  dockedActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6 * SCALE,
+    backgroundColor: '#1E1E24',
+    borderWidth: 1,
+    borderColor: '#33333A',
+    borderRadius: 14 * SCALE,
+    paddingHorizontal: 14 * SCALE,
+    paddingVertical: 9 * SCALE,
+  },
+  dockedActionBtnText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 12.5 * SCALE,
+    color: '#FFFFFF',
+  },
+  dockedDetailsBtn: {
+    flex: 1,
+    justifyContent: 'center',
+    backgroundColor: '#16140C',
+    borderColor: 'rgba(245, 184, 0, 0.35)',
+  },
+  dockedDetailsBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12.5 * SCALE,
+    color: '#F5B800',
+  },
+  dockedPrepPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#16140C',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 184, 0, 0.35)',
+    borderRadius: 14 * SCALE,
+    paddingHorizontal: 12 * SCALE,
+    paddingVertical: 9 * SCALE,
+  },
+  dockedPrepPillText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12 * SCALE,
+    color: '#E0E0E0',
+  },
+
+  // ── Drag Handle on Active Delivery Status Card (Normal View) ────
+  cardDragIndicatorArea: {
+    alignItems: 'center',
+    paddingBottom: 6 * SCALE,
+    marginBottom: 4 * SCALE,
+  },
+  cardDragHandlePill: {
+    width: 40 * SCALE,
+    height: 4 * SCALE,
+    borderRadius: 2 * SCALE,
+    backgroundColor: '#3E3E3A',
+    marginBottom: 3 * SCALE,
+  },
+  cardDragHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4 * SCALE,
+  },
+  cardDragHintText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 11 * SCALE,
+    color: '#8A8A90',
+    letterSpacing: 0.2,
   },
 });

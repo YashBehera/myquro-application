@@ -734,6 +734,13 @@ router.get("/rider/active-task", requireAuth, async (req: any, res) => {
       );
 
     if (list.length === 0) {
+      // Auto-heal: If rider is stuck in busy status without an active task, reset to available
+      try {
+        await db.update(deliveryRiders)
+          .set({ status: "available", updatedAt: new Date() })
+          .where(and(eq(deliveryRiders.id, user.id), eq(deliveryRiders.status, "busy")));
+      } catch (healErr) {}
+
       return res.status(200).json({ success: true, task: null });
     }
 
@@ -1573,12 +1580,24 @@ router.post("/rider/toggle-status", requireAuth, async (req: any, res) => {
     }
     const currentStatus = riderList[0].status;
 
-    // Cannot toggle if busy
+    // Cannot toggle if busy, UNLESS the rider has no actual active unfinished delivery
     if (currentStatus === "busy") {
-      return res.status(400).json({ message: "Cannot change status while on a delivery" });
+      const activeDeliveries = await db
+        .select({ id: orderDeliveries.id })
+        .from(orderDeliveries)
+        .where(
+          and(
+            eq(orderDeliveries.riderId, user.id),
+            inArray(orderDeliveries.status, ["assigned", "arrived_at_store", "picked_up", "out_for_delivery"])
+          )
+        );
+
+      if (activeDeliveries.length > 0) {
+        return res.status(400).json({ message: "Cannot change status while on an active delivery" });
+      }
     }
 
-    const nextStatus = currentStatus === "offline" ? "available" : "offline";
+    const nextStatus = (currentStatus === "available" || currentStatus === "busy") ? "offline" : "available";
 
     await db.update(deliveryRiders)
       .set({ status: nextStatus, updatedAt: new Date() })

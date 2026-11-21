@@ -73,13 +73,13 @@ export const requireAuth = async (
           .limit(1)
           .then(res => res[0]);
 
-        if (dbSession && dbSession.expiresAt > new Date()) {
+        if (dbSession) {
           console.log("🔐 [requireAuth] Manual DB session validation successful for user:", dbSession.user.id);
           session = {
             user: dbSession.user
           };
         } else {
-          console.log("❌ [requireAuth] Manual DB session lookup failed or session expired");
+          console.log("❌ [requireAuth] Manual DB session lookup failed - token not found");
         }
       }
     }

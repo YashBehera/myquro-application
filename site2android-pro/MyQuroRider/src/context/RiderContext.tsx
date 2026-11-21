@@ -293,7 +293,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const data = await res.json();
         if (data.stats) {
           if (!isTogglingRef.current) {
-            setIsOnline(data.stats.status === 'available');
+            setIsOnline(data.stats.status === 'available' || data.stats.status === 'busy');
           }
           setTodayEarnings(Math.round(Number(data.stats.todayEarnings || 0) * 100) / 100);
           setWeeklyEarnings(Math.round(Number(data.stats.weekEarnings || 0) * 100) / 100);
@@ -365,6 +365,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (data.success && data.task) {
           const trip = mapBackendTaskToTripOrder(data.task);
           setActiveTrip(trip);
+          setIsOnline(true);
           fetchChatMessages(data.task.orderId, token);
           connectSocket(data.task.orderId, token);
         } else {
@@ -473,6 +474,11 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isTogglingRef.current = true;
     const targetOnline = !isOnline;
 
+    if (activeTrip && !targetOnline) {
+      console.warn('Cannot go offline while on an active delivery');
+      return;
+    }
+
     // 1. Instant Optimistic State Flip (0ms UI latency)
     setIsOnline(targetOnline);
 
@@ -488,7 +494,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (res.ok) {
         const data = await res.json();
         if (data && data.status) {
-          setIsOnline(data.status === 'available');
+          setIsOnline(data.status === 'available' || data.status === 'busy');
         }
         // Run secondary background history / task updates
         Promise.allSettled([

@@ -234,22 +234,37 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       let remoteOrders: any[] = [];
       let userId: string | null = null;
       let sessionToken: string | null = null;
+      let userPhone: string | null = null;
 
       if (authState.type === 'Authenticated') {
         userId = (authState as any).userId || (authState as any).user?.id || (authState as any).id || null;
         sessionToken = authState.sessionToken || null;
+        const rawEmail = (authState as any).email || (authState as any).user?.email || '';
+        if (rawEmail.includes('@myquro.customer')) {
+          userPhone = rawEmail.replace('@myquro.customer', '');
+        } else if ((authState as any).phone || (authState as any).user?.phone) {
+          userPhone = (authState as any).phone || (authState as any).user?.phone;
+        }
       }
 
-      if (!userId || !sessionToken) {
+      if (!userId || !sessionToken || !userPhone) {
         try {
           const secToken = await SecureStorage.getSessionToken();
-          if (secToken) sessionToken = secToken;
+          if (secToken) sessionToken = sessionToken || secToken;
           const stored = await AsyncStorage.getItem('@auth_state');
           if (stored) {
             const parsed = JSON.parse(stored);
             if (parsed?.sessionToken) sessionToken = sessionToken || parsed.sessionToken;
             if (parsed?.userId || parsed?.user?.id || parsed?.id) {
               userId = userId || (parsed.userId || parsed.user?.id || parsed.id);
+            }
+            if (!userPhone) {
+              const rawEmail = parsed?.email || parsed?.user?.email || '';
+              if (rawEmail.includes('@myquro.customer')) {
+                userPhone = rawEmail.replace('@myquro.customer', '');
+              } else if (parsed?.phone || parsed?.user?.phone) {
+                userPhone = parsed.phone || parsed.user?.phone;
+              }
             }
           }
         } catch (e) {}
@@ -273,28 +288,91 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         }
       }
 
-      // Resilient fallback: Direct Neon PostgreSQL query if backend API had network latency or was sleeping
-      if (remoteOrders.length === 0 && userId) {
+      // Resilient fallback: Direct Neon PostgreSQL query if backend API had network latency, sleeping, or missing items
+      const cleanPhone = (userPhone || '').replace(/[^0-9]/g, '').slice(-10);
+      if ((remoteOrders.length === 0 || !remoteOrders[0]?.items) && (userId || cleanPhone)) {
         try {
-          const neonQuery = `SELECT o.id, o.restaurant_id as "restaurantId", o.notes, o.status, o.prep_time_minutes as "prepTimeMinutes", o.extended_prep_minutes as "extendedPrepMinutes", o.grand_total as "grandTotal", o.created_at as "createdAt", r.restaurant_name as "restaurantName", r.restaurant_banner as "restaurantBanner" FROM orders o LEFT JOIN restaurants r ON o.restaurant_id = r.id WHERE o.placed_by_user_id = '${userId}' ORDER BY o.created_at DESC;`;
-          const neonResp = await fetch(NEON_SQL_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Neon-Connection-String': NEON_CONN_STRING,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ query: neonQuery }),
-          });
-          if (neonResp.ok) {
-            const neonData = await neonResp.json();
-            if (neonData.rows && Array.isArray(neonData.rows)) {
-              remoteOrders = neonData.rows;
+          const conditions: string[] = [];
+          if (userId) conditions.push(`o.placed_by_user_id = '${userId}'`);
+          if (cleanPhone.length >= 7) {
+            conditions.push(`o.placed_by_user_id IN (SELECT user_id FROM profiles WHERE phone_number LIKE '%${cleanPhone}%')`);
+            conditions.push(`o.placed_by_user_id IN (SELECT id FROM auth_users WHERE email LIKE '%${cleanPhone}%')`);
+            conditions.push(`o.notes LIKE '%${cleanPhone}%'`);
+          }
+          if (conditions.length > 0) {
+            const neonQuery = `
+              SELECT 
+                o.id, 
+                o.restaurant_id as "restaurantId", 
+                o.notes, 
+                o.status, 
+                o.prep_time_minutes as "prepTimeMinutes", 
+                o.extended_prep_minutes as "extendedPrepMinutes", 
+                o.grand_total as "grandTotal", 
+                o.created_at as "createdAt", 
+                r.restaurant_name as "restaurantName", 
+                r.restaurant_banner as "restaurantBanner",
+                coalesce(
+                  json_agg(
+                    json_build_object(
+                      'id', oi.id,
+                      'orderId', oi.order_id,
+                      'menuItemId', oi.menu_item_id,
+                      'name', mi.name,
+                      'menuItemName', mi.name,
+                      'quantity', oi.quantity,
+                      'unitPrice', oi.unit_price,
+                      'totalPrice', oi.total_price,
+                      'isVeg', mi.is_veg,
+                      'imageURL', mi.image_url
+                    )
+                  ) FILTER (WHERE oi.id IS NOT NULL),
+                  '[]'::json
+                ) as items
+              FROM orders o 
+              LEFT JOIN restaurants r ON o.restaurant_id = r.id 
+              LEFT JOIN order_items oi ON o.id = oi.order_id
+              LEFT JOIN menu_items mi ON oi.menu_item_id = mi.id
+              WHERE ${conditions.join(' OR ')}
+              GROUP BY o.id, r.restaurant_name, r.restaurant_banner
+              ORDER BY o.created_at DESC;
+            `;
+            const neonResp = await fetch(NEON_SQL_ENDPOINT, {
+              method: 'POST',
+              headers: {
+                'Neon-Connection-String': NEON_CONN_STRING,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ query: neonQuery }),
+            });
+            if (neonResp.ok) {
+              const neonData = await neonResp.json();
+              if (neonData.rows && Array.isArray(neonData.rows)) {
+                remoteOrders = neonData.rows;
+              }
             }
           }
         } catch (neonErr) {
           console.warn('[MainViewModel] Error fetching user orders directly from Neon DB:', neonErr);
         }
       }
+
+      // Parse delivery address from notes if structured
+      remoteOrders = remoteOrders.map((o: any) => {
+        let deliveryAddress = o.deliveryAddress;
+        if (!deliveryAddress && o.notes && typeof o.notes === 'string') {
+          try {
+            if (o.notes.startsWith('{') && o.notes.endsWith('}')) {
+              const parsed = JSON.parse(o.notes);
+              if (parsed.address) deliveryAddress = parsed.address;
+            }
+          } catch {}
+        }
+        return {
+          ...o,
+          deliveryAddress,
+        };
+      });
 
       // Past orders MUST show strictly real database orders!
       setUserOrders(remoteOrders);
@@ -1100,7 +1178,11 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
     try {
       const token = authState.type === 'Authenticated' ? authState.sessionToken : null;
+      const currentUserId = (authState as any)?.userId || (authState as any)?.user?.id || (authState as any)?.id || undefined;
+      const currentPhone = (authState as any)?.email ? (authState as any).email.replace('@myquro.customer', '') : undefined;
       const body = {
+        userId: currentUserId,
+        customerPhone: currentPhone,
         restaurantId: itemsToUse[0].restaurantId,
         notes: notes || "",
         items: itemsToUse.map(item => ({
@@ -1134,6 +1216,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       const resData = await response.json();
       setCartItems([]);
       await AsyncStorage.removeItem('@cart_items');
+      refreshUserOrders().catch(() => {});
       return resData;
     } catch (err) {
       console.error("❌ [MainViewModel] Error during checkout:", err);

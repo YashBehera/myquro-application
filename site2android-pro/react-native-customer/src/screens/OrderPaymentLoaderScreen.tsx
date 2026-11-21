@@ -98,7 +98,7 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
   onCancel,
 }) => {
   const insets = useSafeAreaInsets();
-  const { authState, currentLocation, savedAddresses, allRestaurants } = useViewModel();
+  const { authState, currentLocation, savedAddresses, allRestaurants, refreshUserOrders } = useViewModel();
   const sessionToken = authState.type === 'Authenticated' ? authState.sessionToken : '';
 
   // Active Phase: 'verifying' | 'placing' | 'placed' | 'failed'
@@ -178,7 +178,12 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
           : '') ||
         'D2nCXr-XW_De3z7yBYeVc';
 
+      const resolvedUserId = (authState as any)?.userId || (authState as any)?.user?.id || (authState as any)?.id || undefined;
+      const resolvedPhone = (authState as any)?.email ? (authState as any).email.replace('@myquro.customer', '') : undefined;
+
       const payload = {
+        userId: resolvedUserId,
+        customerPhone: resolvedPhone,
         idempotencyKey: idempotencyKeyRef.current,
         restaurantId: resolvedRestId,
         notes: cookingInstruction || '',
@@ -248,6 +253,11 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
       try {
         await AsyncStorage.multiRemove(['@placed_orders_history', '@order_history']);
       } catch (saveErr) {}
+
+      // Refresh live orders from database so past orders and reorder tab update immediately
+      if (refreshUserOrders) {
+        refreshUserOrders().catch(() => {});
+      }
 
       // Phase 1 - Step 3 after 1900ms
       const step2Timer = setTimeout(() => {

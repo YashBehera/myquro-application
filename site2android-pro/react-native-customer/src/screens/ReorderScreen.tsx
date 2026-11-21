@@ -12,6 +12,7 @@ import {
   StatusBar,
   ToastAndroid,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKEND_URL } from '../config';
@@ -102,8 +103,22 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
   const [itemQuantities, setItemQuantities] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const orders = userOrders || [];
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      if (refreshUserOrders) {
+        await refreshUserOrders();
+      }
+    } catch (err) {
+      console.warn('[ReorderScreen] Error refreshing:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const showToast = (msg: string) => {
     if (Platform.OS === 'android') {
@@ -296,6 +311,14 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         stickyHeaderIndices={[0]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#D4AF37"
+            colors={['#D4AF37']}
+          />
+        }
       >
         {/* ─── [2 - STICKY] SEARCH & FILTER PILLS ─── (node 3043:184, 3043:196) */}
         <View style={styles.stickySearchAndFiltersWrapper}>

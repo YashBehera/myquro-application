@@ -482,11 +482,12 @@ const MainAppContent: React.FC = () => {
   return (
     <SafeAreaView
       style={[styles.mainContainer, { backgroundColor: '#000000' }]}
-      edges={['top', 'left', 'right']}
+      edges={activeScreen === 'tracking' ? ['left', 'right'] : ['top', 'left', 'right']}
     >
       <StatusBar
         barStyle="light-content"
-        backgroundColor="#000000"
+        backgroundColor={activeScreen === 'tracking' ? 'transparent' : '#000000'}
+        translucent={activeScreen === 'tracking'}
       />
 
       {/* Screen Viewport with Smooth Native Transition */}

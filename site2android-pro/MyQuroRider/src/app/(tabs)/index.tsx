@@ -281,6 +281,20 @@ export default function DashboardScreen() {
   }, [isOnline]);
 
   const toggleOnline = async () => {
+    if (activeTrip) {
+      showAlertModal({
+        type: 'error',
+        title: 'Active Delivery in Progress',
+        subtitle: 'You cannot change status while completing an active delivery.',
+        primaryButtonText: 'View Task',
+        onPrimaryPress: () => {
+          hideAlertModal();
+        },
+        secondaryButtonText: 'Dismiss',
+      });
+      return;
+    }
+
     if (isOnline) {
       // Instant offline switch (0ms latency!)
       toggleOnlineStatus();
@@ -423,7 +437,7 @@ export default function DashboardScreen() {
           style={styles.statusPill}
         >
           <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-          <Text style={styles.statusText}>{isOnline ? 'Online' : 'Offline'}</Text>
+          <Text style={styles.statusText}>{isOnline ? (activeTrip ? 'On Duty' : 'Online') : 'Offline'}</Text>
         </TouchableOpacity>
 
         {/* Right Controls: ZONE, HELP & SOS */}

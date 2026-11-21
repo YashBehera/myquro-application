@@ -10,6 +10,7 @@ import {
   Platform,
   StatusBar,
   ToastAndroid,
+  RefreshControl,
 } from 'react-native';
 import {
   ArrowLeft,
@@ -123,10 +124,30 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
   // Orders list state strictly reflecting real database orders
   const [ordersList, setOrdersList] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     setOrdersList(userOrders);
   }, [userOrders]);
+
+  useEffect(() => {
+    if (refreshUserOrders) {
+      refreshUserOrders().catch(() => {});
+    }
+  }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      if (refreshUserOrders) {
+        await refreshUserOrders();
+      }
+    } catch (err) {
+      console.warn('[ProfileScreen] Error refreshing orders:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Interactive Ratings state per order
   const [ratings, setRatings] = useState<Record<string, { food: number; delivery: number }>>({});
@@ -634,6 +655,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#D4AF37"
+            colors={['#D4AF37']}
+          />
+        }
       >
         {/* ─── [2] USER INFO BANNER (WITH GOLD SPIRAL ARTWORK) ─── */}
         <View style={styles.userBannerContainer}>

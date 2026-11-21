@@ -163,6 +163,8 @@ export const HomeScreen = ({
     toggleFavourite,
     favouriteRestaurantsList,
     foodItems = [],
+    userOrders = [],
+    refreshUserOrders,
   } = useViewModel();
 
   const [showLocationSheet, setShowLocationSheet] = useState(false);
@@ -292,8 +294,11 @@ export const HomeScreen = ({
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
+    if (refreshUserOrders) {
+      refreshUserOrders().catch(() => {});
+    }
     setTimeout(() => setRefreshing(false), 600);
-  }, []);
+  }, [refreshUserOrders]);
 
   const onSelectRestaurant = (id: string) => {
     if (onNavigateToRestaurant) {
@@ -374,11 +379,22 @@ export const HomeScreen = ({
         .filter((r) => r.deliveryTime && r.deliveryTime <= 25)
         .slice(0, 5);
     }
-    // Reorder: Favorite and highly rated places
+    // Reorder: Prioritize restaurants from real past orders in database!
+    if (userOrders && userOrders.length > 0) {
+      const orderedRestIds = Array.from(new Set(userOrders.map((o: any) => o.restaurantId).filter(Boolean)));
+      const orderedRestaurants = orderedRestIds
+        .map(id => sourceRestaurants.find(r => r.id === id))
+        .filter(Boolean) as Restaurant[];
+      const otherPlaces = sourceRestaurants.filter(
+        r => !orderedRestIds.includes(r.id) && (isFav(r.id) || r.rating >= 4.0)
+      );
+      return [...orderedRestaurants, ...otherPlaces].slice(0, 5);
+    }
+    // Fallback: Favorite and highly rated places
     return sourceRestaurants
       .filter((r) => isFav(r.id) || r.rating >= 4.0)
       .slice(0, 5);
-  }, [sourceRestaurants, activeSegment, favouriteRestaurantsList, isFav]);
+  }, [sourceRestaurants, activeSegment, favouriteRestaurantsList, isFav, userOrders]);
 
   const handleHeroBannerPress = () => {
     if (onNavigateToDelightfulDeals) {
