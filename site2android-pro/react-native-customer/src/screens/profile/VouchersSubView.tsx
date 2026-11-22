@@ -8,8 +8,10 @@ import {
   Image,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, ChevronLeft } from 'lucide-react-native';
 import { COLORS } from '../../theme/Theme';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface VouchersSubViewProps {
   isDarkMode: boolean;
@@ -24,11 +26,12 @@ export const VouchersSubView: React.FC<VouchersSubViewProps> = ({
   onBack,
   showToast,
 }) => {
+  const insets = useSafeAreaInsets();
   if (vouchers.length === 0) {
     return (
       <View style={styles.profileFigmaVouchersScreenContainer}>
         {/* Header */}
-        <View style={styles.profileFigmaVouchersHeader}>
+        <View style={[styles.profileFigmaVouchersHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
           <TouchableOpacity onPress={onBack} style={styles.profileFigmaVouchersHeaderBackBtn}>
             <ArrowLeft size={22} color="#eae1d4" />
           </TouchableOpacity>
@@ -73,7 +76,7 @@ export const VouchersSubView: React.FC<VouchersSubViewProps> = ({
   return (
     <View style={[styles.container, isDarkMode && styles.containerDark]}>
       {/* Header */}
-      <View style={styles.standardHeader}>
+      <View style={[styles.standardHeader, { paddingTop: getSafeTopPadding(insets.top, 8), height: undefined, minHeight: 56 + getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <ChevronLeft size={24} color="#1A1A1A" />
         </TouchableOpacity>
@@ -81,7 +84,7 @@ export const VouchersSubView: React.FC<VouchersSubViewProps> = ({
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={[styles.scrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 40) }]}>
         <View style={{ padding: 16, gap: 16 }}>
           {vouchers.map(v => {
             const isFlat = v.voucherType === 'flat';

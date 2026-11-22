@@ -10,9 +10,11 @@ import {
   Platform,
   Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { User, Mail, Phone, ArrowLeft } from 'lucide-react-native';
 import { scale } from './profileUtils';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface EditProfileSubViewProps {
   isDarkMode: boolean;
@@ -39,10 +41,11 @@ export const EditProfileSubView: React.FC<EditProfileSubViewProps> = ({
   handleSaveProfile,
   onBack,
 }) => {
+  const insets = useSafeAreaInsets();
   return (
     <View style={styles.favContainer}>
       {/* Header */}
-      <View style={styles.favHeader}>
+      <View style={[styles.favHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity onPress={onBack} style={styles.favHeaderBackBtn}>
           <ArrowLeft size={22} color="#eae1d4" />
         </TouchableOpacity>
@@ -58,7 +61,7 @@ export const EditProfileSubView: React.FC<EditProfileSubViewProps> = ({
         <ScrollView
           style={{ flex: 1 }}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 40 }}
+          contentContainerStyle={{ paddingBottom: getSafeBottomPadding(insets.bottom, 40) }}
         >
 
           {/* Floating Sparkle Decorative Row */}

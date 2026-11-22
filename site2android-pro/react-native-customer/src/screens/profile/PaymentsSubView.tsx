@@ -13,6 +13,8 @@ import {
   StatusBar,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 import Svg, { Path, Rect, Circle, Line, G } from 'react-native-svg';
 import {
   ArrowLeft,
@@ -160,6 +162,7 @@ export const PaymentsSubView: React.FC<PaymentsSubViewProps> = ({
   onBack,
   showToast,
 }) => {
+  const insets = useSafeAreaInsets();
   // Tabs: 'MyQuro' (Delivery) vs 'Mart' (Instamart / Dining)
   const [activeTab, setActiveTab] = useState<'myquro' | 'mart'>('myquro');
 
@@ -292,7 +295,7 @@ export const PaymentsSubView: React.FC<PaymentsSubViewProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ─── TOP HEADER ─── */}
-      <View style={styles.headerRow}>
+      <View style={[styles.headerRow, { paddingTop: getSafeTopPadding(insets.top, 10) }]}>
         <TouchableOpacity
           onPress={onBack}
           activeOpacity={0.7}
@@ -332,7 +335,7 @@ export const PaymentsSubView: React.FC<PaymentsSubViewProps> = ({
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 40) }]}
         showsVerticalScrollIndicator={false}
       >
         {/* ══════════════════════════════════════════════════════════════════════

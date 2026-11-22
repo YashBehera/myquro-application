@@ -70,6 +70,7 @@ import {
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
   isTablet,
+  getSafeTopPadding,
 } from '../utils/responsive';
 
 const quroBadgeImg = require('../assets/images/quro_badge.png');
@@ -496,7 +497,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
         style={[
           styles.headerContainer,
           {
-            paddingTop: isScrolled ? 10 * SCALE : 8 * SCALE,
+            paddingTop: getSafeTopPadding(insets.top, isScrolled ? 10 : 8),
           },
           isScrolled && styles.headerContainerScrolled,
         ]}
@@ -558,7 +559,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
           ══════════════════════════════════════════════════════════════════════ */}
       <ScrollView
         style={styles.scrollContent}
-        contentContainerStyle={styles.scrollInner}
+        contentContainerStyle={[styles.scrollInner, { paddingBottom: 120 * SCALE + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         bounces={false}
         onScroll={handleScroll}

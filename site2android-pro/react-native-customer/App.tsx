@@ -93,6 +93,7 @@ const MainAppContent: React.FC = () => {
     checkoutRestaurantId?: string | null;
     activeMoodKey?: DiningMoodKey;
     searchQuery?: string;
+    targetDishName?: string | null;
   }
 
   const [navStack, setNavStack] = useState<NavigationFrame[]>([
@@ -108,6 +109,7 @@ const MainAppContent: React.FC = () => {
   const checkoutRestaurantId = currentNav.checkoutRestaurantId || null;
   const activeMoodKey = currentNav.activeMoodKey || 'ROOFTOP';
   const searchQuery = currentNav.searchQuery || '';
+  const targetDishName = currentNav.targetDishName || null;
 
   const pushScreen = (screen: ScreenId, extra?: Partial<NavigationFrame>) => {
     setNavStack(prev => [...prev, { screen, ...extra }]);
@@ -204,11 +206,12 @@ const MainAppContent: React.FC = () => {
     checkAppInit();
   }, []);
 
-  const navigateToRestaurant = (id: string, orderId?: string | null, openCheckout?: boolean) => {
+  const navigateToRestaurant = (id: string, orderId?: string | null, openCheckout?: boolean, dishName?: string | null) => {
     pushScreen('restaurant-detail', {
       selectedRestaurantId: id,
       activeOrderId: orderId || null,
       autoOpenCheckout: !!openCheckout,
+      targetDishName: dishName || null,
     });
   };
 
@@ -314,6 +317,8 @@ const MainAppContent: React.FC = () => {
             onNavigateToTracking={(orderId) => {
               navigateToTracking(orderId);
             }}
+            onNavigateToCart={() => pushScreen('cart')}
+            onNavigateToRestaurant={navigateToRestaurant}
           />
         );
       case 'search':
@@ -322,6 +327,7 @@ const MainAppContent: React.FC = () => {
             initialQuery={searchQuery}
             onBack={goBack}
             onNavigateToRestaurant={navigateToRestaurant}
+            onNavigateToCart={() => pushScreen('cart')}
           />
         );
       case 'restaurant-detail':
@@ -331,6 +337,8 @@ const MainAppContent: React.FC = () => {
             onBack={goBack}
             initialActiveOrderId={activeOrderId}
             initialAutoOpenCheckout={autoOpenCheckout}
+            initialSearchQuery={targetDishName || undefined}
+            targetDishName={targetDishName || undefined}
             onNavigateToTracking={navigateToTracking}
             onNavigateToCheckout={navigateToCheckout}
           />
@@ -482,12 +490,12 @@ const MainAppContent: React.FC = () => {
   return (
     <SafeAreaView
       style={[styles.mainContainer, { backgroundColor: '#000000' }]}
-      edges={activeScreen === 'tracking' ? ['left', 'right'] : ['top', 'left', 'right']}
+      edges={['left', 'right']}
     >
       <StatusBar
         barStyle="light-content"
-        backgroundColor={activeScreen === 'tracking' ? 'transparent' : '#000000'}
-        translucent={activeScreen === 'tracking'}
+        backgroundColor="transparent"
+        translucent
       />
 
       {/* Screen Viewport with Smooth Native Transition */}

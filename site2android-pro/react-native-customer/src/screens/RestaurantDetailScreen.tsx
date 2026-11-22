@@ -65,6 +65,8 @@ import {
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
   MAX_CONTENT_WIDTH,
+  getSafeTopPadding,
+  getSafeBottomPadding,
 } from '../utils/responsive';
 
 // ─── Figma Node 3026:889 Assets ───────────────────────────────────────────────
@@ -144,6 +146,8 @@ interface RestaurantDetailScreenProps {
   onBack: () => void;
   initialActiveOrderId?: string | null;
   initialAutoOpenCheckout?: boolean;
+  initialSearchQuery?: string;
+  targetDishName?: string;
   onNavigateToTracking?: (orderId: string) => void;
   onNavigateToCheckout?: (cartItems: SimCartItem[], restaurantId: string) => void;
   navigation?: any;
@@ -213,6 +217,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
   onBack,
   initialActiveOrderId,
   initialAutoOpenCheckout,
+  initialSearchQuery,
+  targetDishName,
   onNavigateToTracking,
   onNavigateToCheckout,
   navigation,
@@ -227,6 +233,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
     toggleFavourite,
     favouriteRestaurantsList,
     currentLocation,
+    foodItems: globalFoodItems = [],
   } = useViewModel();
 
   // Dynamic Restaurant Resolution with backend fetch fallback
@@ -301,7 +308,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
   const [cart, setCart] = useState<SimCartItem[]>([]);
   const [foodItems, setFoodItems] = useState<SimFoodItem[]>([]);
   const [isMenuLoading, setIsMenuLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery || targetDishName || '');
   const [selectedDiet, setSelectedDiet] = useState<'all' | 'veg' | 'nonveg' | 'eatright'>('all');
   const [isRatingsFilterActive, setIsRatingsFilterActive] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -319,6 +326,29 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
   const [modalQuantity, setModalQuantity] = useState<number>(1);
 
   const scrollRef = useRef<ScrollViewInstance>(null);
+
+  // Synchronize target dish search & auto-scroll into view
+  useEffect(() => {
+    const target = initialSearchQuery || targetDishName;
+    if (target) {
+      setSearchQuery(target);
+      const timer = setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: 340, animated: true });
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [initialSearchQuery, targetDishName]);
+
+  // When food items finish loading, ensure view is centered on the target dish
+  useEffect(() => {
+    const target = initialSearchQuery || targetDishName;
+    if (target && !isMenuLoading && foodItems.length > 0) {
+      const timer = setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: 340, animated: true });
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+  }, [isMenuLoading, foodItems.length, initialSearchQuery, targetDishName]);
 
   // Sync Cart from global ViewModel
   useEffect(() => {
@@ -448,10 +478,48 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
             await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
           }
         } else {
-          setFoodItems([]);
+          setFoodItems((prev) => {
+            if (prev.length > 0) return prev;
+            return globalFoodItems
+              .filter((f) => String(f.restaurantId) === String(restaurantId))
+              .map((f) => ({
+                id: f.id,
+                name: f.name,
+                price: f.price || 199,
+                rating: Number(f.rating) || 4.5,
+                ratingCount: 20,
+                category: f.categoryName || 'Dishes',
+                isVeg: f.isVeg !== undefined ? f.isVeg : true,
+                isEatRight: false,
+                image: f.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600',
+                description: f.description || '',
+                mrp: Math.round((f.price || 199) * 1.25),
+                bestseller: true,
+                variants: [],
+              }));
+          });
         }
       } catch (err) {
-        setFoodItems([]);
+        setFoodItems((prev) => {
+          if (prev.length > 0) return prev;
+          return globalFoodItems
+            .filter((f) => String(f.restaurantId) === String(restaurantId))
+            .map((f) => ({
+              id: f.id,
+              name: f.name,
+              price: f.price || 199,
+              rating: Number(f.rating) || 4.5,
+              ratingCount: 20,
+              category: f.categoryName || 'Dishes',
+              isVeg: f.isVeg !== undefined ? f.isVeg : true,
+              isEatRight: false,
+              image: f.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600',
+              description: f.description || '',
+              mrp: Math.round((f.price || 199) * 1.25),
+              bestseller: true,
+              variants: [],
+            }));
+        });
       } finally {
         setIsMenuLoading(false);
       }
@@ -518,8 +586,15 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
     return foodItems.filter((item) => {
       // 1. Search Query
       if (searchQuery.trim().length > 0) {
-        const q = searchQuery.toLowerCase();
-        if (!item.name.toLowerCase().includes(q) && !item.category.toLowerCase().includes(q)) {
+        const q = searchQuery.toLowerCase().trim();
+        const itemName = item.name.toLowerCase();
+        const itemCat = item.category.toLowerCase();
+        const directMatch = itemName.includes(q) || itemCat.includes(q);
+
+        const words = q.split(/\s+/).filter((w) => w.length > 2);
+        const wordMatch = words.length > 0 && words.some((w) => itemName.includes(w) || itemCat.includes(w));
+
+        if (!directMatch && !wordMatch) {
           return false;
         }
       }
@@ -711,7 +786,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
       {/* ════════════════════════════════════════════════════════════════════════
           [1] TOP NAVIGATION BAR (Fixed at the very top)
           ════════════════════════════════════════════════════════════════════════ */}
-      <View style={styles.topNavBar}>
+      <View style={[styles.topNavBar, { paddingTop: getSafeTopPadding(insets.top, 6) }]}>
         <TouchableOpacity
           style={styles.navBackBtn}
           activeOpacity={0.7}
@@ -859,6 +934,15 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                 value={searchQuery}
                 onChangeText={setSearchQuery}
               />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setSearchQuery('')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ marginRight: 8, padding: 2 }}
+                >
+                  <X size={16} color="#8E8A80" />
+                </TouchableOpacity>
+              )}
               <Image source={imgBackground2} style={styles.searchDividerImg} />
               <TouchableOpacity
                 activeOpacity={0.8}
@@ -1320,12 +1404,18 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
 
                   {cat.items.map((item, idx) => {
                     const qty = getQuantityInCart(item.id);
+                    const isTargetDish = Boolean(
+                      targetDishName &&
+                      (item.name.toLowerCase().includes(targetDishName.toLowerCase().trim()) ||
+                       targetDishName.toLowerCase().trim().includes(item.name.toLowerCase()))
+                    );
                     return (
                       <View
                         key={item.id}
                         style={[
                           styles.foodItemCard,
                           idx < cat.items.length - 1 && styles.foodItemCardBorder,
+                          isTargetDish && styles.targetDishHighlightCard,
                         ]}
                       >
                         {/* Left: Info */}
@@ -1338,6 +1428,12 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                             {item.bestseller && (
                               <View style={styles.bestsellerTag}>
                                 <Text style={styles.bestsellerTagText}>BESTSELLER</Text>
+                              </View>
+                            )}
+                            {isTargetDish && (
+                              <View style={styles.selectedFromSearchBadge}>
+                                <Sparkles size={10} color="#000000" />
+                                <Text style={styles.selectedFromSearchBadgeText}>SEARCH MATCH</Text>
                               </View>
                             )}
                           </View>
@@ -1638,7 +1734,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
             </ScrollView>
 
             {/* Bottom Sticky Action Row: Quantity Stepper + Add Item Button */}
-            <View style={styles.customModalBottomBar}>
+            <View style={[styles.customModalBottomBar, { paddingBottom: getSafeBottomPadding(insets.bottom, 16) }]}>
               {/* Stepper (- 1 +) */}
               <View style={styles.modalStepperBox}>
                 <TouchableOpacity
@@ -3168,5 +3264,30 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Regular',
     fontSize: 11 * SCALE,
     color: '#555555',
+  },
+  targetDishHighlightCard: {
+    backgroundColor: '#18150F',
+    borderWidth: 1.5,
+    borderColor: '#DEA430',
+    borderRadius: 14,
+    padding: 8,
+    marginVertical: 4,
+  },
+  selectedFromSearchBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DEA430',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 6,
+  },
+  selectedFromSearchBadgeText: {
+    fontSize: 9.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#000000',
+    letterSpacing: 0.3,
   },
 });

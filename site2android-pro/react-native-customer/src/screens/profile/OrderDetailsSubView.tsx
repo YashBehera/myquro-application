@@ -14,6 +14,7 @@ import {
   Platform,
   Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft,
   Headphones,
@@ -25,6 +26,7 @@ import {
   RotateCcw,
   Navigation,
 } from 'lucide-react-native';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface OrderDetailsSubViewProps {
   order: any;
@@ -41,10 +43,11 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
   onReorder,
   onNavigateToTracking,
 }) => {
+  const insets = useSafeAreaInsets();
   if (!order) {
     return (
       <View style={styles.root}>
-        <View style={styles.topHeader}>
+        <View style={[styles.topHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
           <TouchableOpacity style={styles.backBtnCircle} onPress={onBack}>
             <ArrowLeft size={20} color="#FFFFFF" />
           </TouchableOpacity>
@@ -228,7 +231,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
   return (
     <View style={styles.root}>
       {/* ─── [1] TOP BRAND & HELP HEADER ─── */}
-      <View style={styles.topHeader}>
+      <View style={[styles.topHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity
           style={styles.helpBtn}
           activeOpacity={0.8}
@@ -241,7 +244,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 40) }]}
         showsVerticalScrollIndicator={false}
       >
         {/* ─── [2] TOP CARD: ORDER HEADER & ROUTE TIMELINE (Figma Node 3029:1600) ─── */}

@@ -11,9 +11,11 @@ import {
   Platform,
   Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { ChevronRight, ArrowLeft, Phone, Mail, Search, X } from 'lucide-react-native';
 import { scale } from './profileUtils';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface HelpSubViewProps {
   isDarkMode: boolean;
@@ -21,6 +23,7 @@ interface HelpSubViewProps {
 }
 
 export const HelpSubView: React.FC<HelpSubViewProps> = ({ isDarkMode, onBack }) => {
+  const insets = useSafeAreaInsets();
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -58,7 +61,7 @@ export const HelpSubView: React.FC<HelpSubViewProps> = ({ isDarkMode, onBack }) 
   return (
     <View style={styles.favContainer}>
       {/* Header */}
-      <View style={styles.favHeader}>
+      <View style={[styles.favHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity onPress={onBack} style={styles.favHeaderBackBtn}>
           <ArrowLeft size={22} color="#eae1d4" />
         </TouchableOpacity>
@@ -69,7 +72,7 @@ export const HelpSubView: React.FC<HelpSubViewProps> = ({ isDarkMode, onBack }) 
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: getSafeBottomPadding(insets.bottom, 40) }}
       >
         {/* Branding Row */}
         <View style={styles.favLogoRow}>

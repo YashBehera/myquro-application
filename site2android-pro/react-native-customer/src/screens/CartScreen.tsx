@@ -39,6 +39,8 @@ import {
   isSmallDevice,
   SCREEN_WIDTH,
   MAX_CONTENT_WIDTH,
+  getSafeTopPadding,
+  getSafeBottomPadding,
 } from '../utils/responsive';
 
 interface CartScreenProps {
@@ -251,7 +253,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
   if (cartItems.length === 0 && !showOrderLoader) {
     return (
       <View style={[styles.emptyContainer, { backgroundColor: theme.background }]}>
-        <View style={styles.emptyHeaderRow}>
+        <View style={[styles.emptyHeaderRow, { paddingTop: getSafeTopPadding(insets.top, 8), height: undefined, minHeight: 64 + getSafeTopPadding(insets.top, 8) }]}>
           <TouchableOpacity onPress={onBack} style={styles.backButtonCircle}>
             <ArrowLeft size={24} color={isDarkMode ? '#FFF' : '#1A1A1A'} />
           </TouchableOpacity>
@@ -278,7 +280,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
     <View style={[styles.container, { backgroundColor: isDarkMode ? '#121212' : '#F4F6F8' }]}>
 
       {/* ─── 1. HEADER ROW (Red background) ─── */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <View style={styles.headerTop}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <ArrowLeft size={24} color="#FFFFFF" />
@@ -293,7 +295,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 150 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
         {/* ─── 2. DELIVER TO ADDRESS CARD ─── */}
@@ -516,7 +518,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
       </ScrollView>
 
       {/* ─── 7. STICKY BOTTOM CHECKOUT BAR ─── */}
-      <View style={[styles.checkoutBar, isDarkMode && styles.checkoutBarDark, { bottom: Math.max(insets.bottom, 12) }]}>
+      <View style={[styles.checkoutBar, isDarkMode && styles.checkoutBarDark, { bottom: 38 + insets.bottom }]}>
 
         {/* Left Side: Pricing details */}
         <View style={styles.checkoutLeft}>
@@ -545,7 +547,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
       </View>
 
       {/* Badges footer row */}
-      <View style={[styles.badgesRow, isDarkMode && styles.badgesRowDark]}>
+      <View style={[styles.badgesRow, isDarkMode && styles.badgesRowDark, { paddingBottom: insets.bottom, height: 38 + insets.bottom }]}>
         <View style={styles.badgeItem}>
           <ShieldCheck size={14} color="#6B7280" />
           <Text style={styles.badgeLabel}>100% Safe Payments</Text>

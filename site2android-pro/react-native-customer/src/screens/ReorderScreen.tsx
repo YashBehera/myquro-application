@@ -15,6 +15,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BACKEND_URL } from '../config';
 import {
   X,
@@ -33,6 +34,8 @@ import {
   isSmallDevice,
   SCREEN_WIDTH,
   MAX_CONTENT_WIDTH,
+  getSafeTopPadding,
+  getSafeBottomPadding,
 } from '../utils/responsive';
 
 // ─── Direct Figma Assets from Node 3043:106 ─────────────────────────────────
@@ -86,6 +89,7 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
   onNavigateToCheckout,
   onNavigateToHome,
 }) => {
+  const insets = useSafeAreaInsets();
   const {
     addToCart,
     removeFromCart,
@@ -290,7 +294,7 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ─── [1] TOP HEADER ─── (node 3043:202) */}
-      <View style={styles.topHeader}>
+      <View style={[styles.topHeader, { paddingTop: getSafeTopPadding(insets.top, 4) }]}>
         <TouchableOpacity
           style={styles.backBtn}
           activeOpacity={0.7}
@@ -308,7 +312,7 @@ export const ReorderScreen: React.FC<ReorderScreenProps> = ({
 
       <ScrollView
         style={styles.root}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         stickyHeaderIndices={[0]}
         refreshControl={

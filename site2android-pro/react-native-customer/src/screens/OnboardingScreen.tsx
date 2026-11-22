@@ -9,7 +9,7 @@ import {
   Animated,
   Easing,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, {
   Path,
   Circle,
@@ -100,6 +100,7 @@ const LogoSmall: React.FC = () => (
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   onFinished,
 }) => {
+  const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [subHeaderType, setSubHeaderType] = useState<"noodle" | "salad">(
     "noodle",
@@ -357,10 +358,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
         </View>
 
         {/* Header Logo at x=57, y=35 */}
-        <Logo style={styles.logoAbsolute} />
+        <Logo style={[styles.logoAbsolute, { top: Math.max(50 * scale, insets.top + 10) }]} />
 
         {/* Skip Button */}
-        <TouchableOpacity onPress={handleSkip} style={styles.skipAbsolute}>
+        <TouchableOpacity
+          onPress={handleSkip}
+          style={[styles.skipAbsolute, { top: Math.max(50 * scale, insets.top + 10) }]}
+        >
           <Text style={styles.skipText}>Skip</Text>
         </TouchableOpacity>
 
@@ -523,7 +527,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
         </Animated.View>
 
         {/* Footer rights */}
-        <View style={styles.footerRightsAbsolute}>
+        <View style={[styles.footerRightsAbsolute, { bottom: Math.max(insets.bottom, 16) + 12 }]}>
           <Text style={styles.rightsText}>Rights reserved by </Text>
           <LogoSmall />
         </View>
@@ -800,7 +804,6 @@ const styles = StyleSheet.create({
   footerRightsAbsolute: {
     position: "absolute",
     left: 44 * scale,
-    top: 900 * scale,
     flexDirection: "row",
     alignItems: "center",
   },

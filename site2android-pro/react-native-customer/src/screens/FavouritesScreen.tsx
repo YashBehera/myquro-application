@@ -27,6 +27,7 @@ import {
   Frown,
   ChevronRight,
 } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   SCALE,
   scale,
@@ -35,6 +36,8 @@ import {
   isSmallDevice,
   SCREEN_WIDTH,
   MAX_CONTENT_WIDTH,
+  getSafeTopPadding,
+  getSafeBottomPadding,
 } from '../utils/responsive';
 
 interface FavouritesScreenProps {
@@ -46,6 +49,7 @@ export const FavouritesScreen: React.FC<FavouritesScreenProps> = ({
   onNavigateToExplore,
   onNavigateToRestaurant,
 }) => {
+  const insets = useSafeAreaInsets();
   const { isDarkMode, favouriteRestaurantsList, toggleFavourite } = useViewModel();
   const theme = isDarkMode ? THEME.dark : THEME.light;
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -55,9 +59,16 @@ export const FavouritesScreen: React.FC<FavouritesScreenProps> = ({
   };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: theme.background }]}
+      contentContainerStyle={{
+        paddingTop: getSafeTopPadding(insets.top, 8),
+        paddingBottom: getSafeBottomPadding(insets.bottom, 40),
+      }}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Title Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 8 }]}>
         <Text style={styles.screenTag}>Saved dining bookmarks</Text>
         <Text style={[styles.screenTitle, { color: theme.text }]}>My Favorites</Text>
       </View>

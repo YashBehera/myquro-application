@@ -23,6 +23,7 @@ import { Restaurant } from '../types';
 import { getOptimizedImageUrl } from '../utils/imageUtils';
 import { LazyImage } from '../components/LazyImage';
 import { SkeletonLoader } from '../components/SkeletonLoader';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   SCALE,
   scale,
@@ -31,6 +32,8 @@ import {
   isSmallDevice,
   SCREEN_WIDTH,
   MAX_CONTENT_WIDTH,
+  getSafeTopPadding,
+  getSafeBottomPadding,
 } from '../utils/responsive';
 import {
   Search,
@@ -49,6 +52,7 @@ interface ExploreScreenProps {
 }
 
 export const ExploreScreen: React.FC<ExploreScreenProps> = ({ onNavigateToDining }) => {
+  const insets = useSafeAreaInsets();
   const {
     isDarkMode,
     categories,
@@ -73,9 +77,16 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({ onNavigateToDining
   const tabs = ['Overall', 'Fine Dining', 'Cafe'];
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: theme.background }]}
+      contentContainerStyle={{
+        paddingTop: getSafeTopPadding(insets.top, 8),
+        paddingBottom: getSafeBottomPadding(insets.bottom, 40),
+      }}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Top Banner Card */}
-      <View style={styles.topCard}>
+      <View style={[styles.topCard, { marginTop: 8 }]}>
         <Text style={styles.topBadge}>Curated Fine Selections</Text>
         <Text style={styles.topTitle}>Find Your Next{"\n"}Favorite Spot</Text>
         <Text style={styles.topDesc}>

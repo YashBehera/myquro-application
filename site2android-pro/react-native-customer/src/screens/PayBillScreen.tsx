@@ -50,6 +50,7 @@ import {
   SCALE,
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
+  getSafeTopPadding,
 } from '../utils/responsive';
 
 interface PayBillScreenProps {
@@ -328,7 +329,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
         <View
           style={[
             styles.checkoutHeaderContainer,
-            { paddingTop: 10 * SCALE },
+            { paddingTop: getSafeTopPadding(insets.top, 8) },
           ]}
         >
           {/* Back Button */}
@@ -717,7 +718,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
         <View
           style={[
             styles.topBarContainer,
-            { top: 10 * SCALE },
+            { top: getSafeTopPadding(insets.top, 8) },
           ]}
         >
           <TouchableOpacity
@@ -734,7 +735,7 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
           style={styles.scrollContent}
           contentContainerStyle={[
             styles.scrollInner,
-            { paddingTop: 58 * SCALE },
+            { paddingTop: getSafeTopPadding(insets.top, 8) + 48 },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"

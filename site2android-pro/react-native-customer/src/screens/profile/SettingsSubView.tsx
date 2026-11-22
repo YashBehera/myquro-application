@@ -9,9 +9,11 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ArrowLeft, ChevronRight } from 'lucide-react-native';
 import { scale } from './profileUtils';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface SettingsSubViewProps {
   onBack: () => void;
@@ -26,6 +28,7 @@ export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
   logout,
   deleteAccount,
 }) => {
+  const insets = useSafeAreaInsets();
   const [settingsWhatsappEnabled, setSettingsWhatsappEnabled] = useState(true);
   const [settingsCacheSize, setSettingsCacheSize] = useState('2.41 MB');
   const [isDeleting, setIsDeleting] = useState(false);
@@ -76,7 +79,7 @@ export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
   return (
     <View style={styles.favContainer}>
       {/* Header */}
-      <View style={styles.favHeader}>
+      <View style={[styles.favHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity
           onPress={onBack}
           style={styles.favHeaderBackBtn}
@@ -92,7 +95,7 @@ export const SettingsSubView: React.FC<SettingsSubViewProps> = ({
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: getSafeBottomPadding(insets.bottom, 40) }}
       >
         {/* Group 1: Recommendations & Reminders */}
         <Text style={styles.settingsSectionTitleMain}>RECOMMENDATIONS & REMINDERS</Text>

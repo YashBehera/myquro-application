@@ -38,7 +38,7 @@ import Svg, {
   Text as SvgText,
 } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SCALE } from '../utils/responsive';
+import { SCALE, getSafeTopPadding, getSafeBottomPadding } from '../utils/responsive';
 
 export interface BookingConfirmationScreenProps {
   bookingDetails: {
@@ -203,7 +203,7 @@ export const BookingConfirmationScreen: React.FC<BookingConfirmationScreenProps>
       <View
         style={[
           styles.headerRow,
-          { paddingTop: 10 * SCALE },
+          { paddingTop: getSafeTopPadding(insets.top, 8) },
         ]}
       >
         <View style={{ flex: 1 }} />
@@ -220,7 +220,7 @@ export const BookingConfirmationScreen: React.FC<BookingConfirmationScreenProps>
       {/* ─── SCROLLABLE CONFIRMATION CONTENT ─── */}
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 40) }]}
         showsVerticalScrollIndicator={false}
       >
         {/* ─── HERO CELEBRATION: GLOWING CHECKMARK ─── */}

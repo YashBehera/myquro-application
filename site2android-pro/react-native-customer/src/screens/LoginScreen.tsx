@@ -14,7 +14,7 @@ import {
   Keyboard,
   StatusBar,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, {
   Path,
   Circle,
@@ -33,11 +33,15 @@ import {
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
   MAX_CONTENT_WIDTH,
+  getSafeTopPadding,
+  getSafeBottomPadding,
 } from "../utils/responsive";
 
 const scale = SCALE;
 
 export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  const insets = useSafeAreaInsets();
+  const topSafeOffset = getSafeTopPadding(insets.top, 16);
   const { login, sendOtp, verifyOtp, setAuthenticatedState } = useViewModel();
   const [authMode, setAuthMode] = useState<"phone" | "otp" | "verified">(
     "phone",
@@ -296,7 +300,7 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
       {/* Absolute Back Button outside ScrollView for direct touch response */}
       {authMode === "otp" && (
-        <TouchableOpacity style={styles.backArrowAbsolute} onPress={onBack}>
+        <TouchableOpacity style={[styles.backArrowAbsolute, { top: topSafeOffset }]} onPress={onBack}>
           <BackArrowIcon />
         </TouchableOpacity>
       )}
@@ -305,15 +309,16 @@ export const LoginScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         style={styles.root}
         bounces={false}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 40) }]}
       >
         {/* Header section with logo positioned absolutely */}
         <View
-          style={
+          style={[
             authMode === "otp"
               ? styles.logoAbsoluteRight
-              : styles.logoAbsoluteLeft
-          }
+              : styles.logoAbsoluteLeft,
+            { top: topSafeOffset },
+          ]}
         >
           <Text style={styles.logoMy}>My</Text>
           <View style={styles.logoQuroClip}>
@@ -638,8 +643,8 @@ const styles = StyleSheet.create({
     marginBottom: 16 * scale,
   },
   illustrationImg: {
-    width: 373 * scale,
-    height: 373 * scale,
+    width: Math.min(373 * scale, SCREEN_WIDTH - 32),
+    height: Math.min(373 * scale, SCREEN_WIDTH - 32),
   },
   textContent: {
     alignItems: "center",

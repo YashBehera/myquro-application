@@ -26,7 +26,7 @@ import {
   MoreVertical,
 } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
-import { SCREEN_WIDTH } from '../utils/responsive';
+import { SCREEN_WIDTH, getSafeTopPadding } from '../utils/responsive';
 
 // Local hero banner asset containing 3D "MINIMUM ₹200 OFF"
 const min200OffHeroImg = require('../assets/home/min_200_off_hero.png');
@@ -162,7 +162,7 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ── TOP FLOATING HEADER ── */}
-      <View style={[styles.headerRow, { paddingTop: 10 }]}>
+      <View style={[styles.headerRow, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <View style={styles.headerLeftWrap}>
           {/* Gold Border Circular Back Button */}
           <TouchableOpacity

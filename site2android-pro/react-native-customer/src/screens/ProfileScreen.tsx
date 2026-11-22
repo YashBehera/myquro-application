@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
   View,
   Text,
   ScrollView,
   TouchableOpacity,
+  TextInput,
+  Clipboard,
   Image,
   Alert,
   Platform,
@@ -32,11 +34,24 @@ import {
   Clock,
   ShoppingBag,
   ChevronDown,
+  ChevronUp,
+  ChevronRight,
+  Search,
+  X,
+  Copy,
+  Receipt,
+  Headphones,
+  Sparkles,
+  Tag,
+  AlertCircle,
+  Utensils,
+  Check,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BACKEND_URL, NEON_SQL_ENDPOINT, NEON_CONN_STRING } from '../config';
 import { useViewModel } from '../state/MainViewModel';
-import { isTablet } from '../utils/responsive';
+import { isTablet, getSafeTopPadding, getSafeBottomPadding } from '../utils/responsive';
 
 import { EditProfileSubView } from './profile/EditProfileSubView';
 import { AddressesSubView } from './profile/AddressesSubView';
@@ -72,9 +87,17 @@ const orderResAsiaSeven      = require('../assets/profile/orderResAsiaSeven.png'
 interface ProfileScreenProps {
   onBackToHome?: () => void;
   onNavigateToTracking?: (orderId: string) => void;
+  onNavigateToCart?: () => void;
+  onNavigateToRestaurant?: (restaurantId: string) => void;
 }
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNavigateToTracking }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({
+  onBackToHome,
+  onNavigateToTracking,
+  onNavigateToCart,
+  onNavigateToRestaurant,
+}) => {
+  const insets = useSafeAreaInsets();
   const {
     isDarkMode,
     authState,
@@ -151,6 +174,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
   // Interactive Ratings state per order
   const [ratings, setRatings] = useState<Record<string, { food: number; delivery: number }>>({});
+  const [searchOrderQuery, setSearchOrderQuery] = useState('');
+  const [orderFilterTab, setOrderFilterTab] = useState<'all' | 'active' | 'delivered' | 'cancelled'>('all');
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
+  const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
+  const [reorderSuccessPill, setReorderSuccessPill] = useState<{ visible: boolean; restaurantName: string; count: number } | null>(null);
+  const [ratingCompliments, setRatingCompliments] = useState<Record<string, string[]>>({});
 
   const normalizePrice = (raw: any): number => {
     if (raw === undefined || raw === null || raw === '') return 0;
@@ -377,6 +406,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
         addMultipleToCart(itemsToAdd);
         const totalItemsCount = itemsToAdd.reduce((sum, item) => sum + item.quantity, 0);
         showToast(`Added ${totalItemsCount} item${totalItemsCount > 1 ? 's' : ''} from ${restName} to your cart!`);
+        setReorderSuccessPill({
+          visible: true,
+          restaurantName: restName,
+          count: totalItemsCount,
+        });
+        setTimeout(() => {
+          setReorderSuccessPill(null);
+        }, 5000);
       } else {
         showToast(`No items could be added to cart.`);
       }
@@ -384,6 +421,111 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
       showToast(`No items found in this order to reorder.`);
     }
   };
+
+  const handleCopyOrderId = (idStr: string) => {
+    Clipboard.setString(idStr);
+    setCopiedOrderId(idStr);
+    showToast(`Order #${String(idStr).slice(-8).toUpperCase()} copied!`);
+    setTimeout(() => {
+      setCopiedOrderId(null);
+    }, 2000);
+  };
+
+  const toggleExpandOrder = (id: string) => {
+    setExpandedOrderIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const handleComplimentTag = (orderId: string, tag: string) => {
+    setRatingCompliments((prev) => {
+      const current = prev[orderId] || [];
+      const updated = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag];
+      return { ...prev, [orderId]: updated };
+    });
+    showToast(`Added compliment: ${tag}`);
+  };
+
+  const formatOrderDate = (rawDate: any): string => {
+    if (!rawDate) return 'Recently';
+    try {
+      const d = new Date(rawDate);
+      if (isNaN(d.getTime())) return String(rawDate);
+      return d.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch (e) {
+      return String(rawDate);
+    }
+  };
+
+  // Counts for filter tabs
+  const activeOrdersCount = useMemo(() => {
+    return ordersList.filter((o) => {
+      const statusStr = (o.status || 'placed').toLowerCase();
+      const delStatusStr = (o.deliveryStatus || o.delivery?.status || '').toLowerCase();
+      const isCancelled = statusStr === 'cancelled' || statusStr === 'rejected' || delStatusStr === 'cancelled';
+      const isDelivered = delStatusStr === 'delivered' || statusStr === 'delivered' || (statusStr === 'served' || statusStr === 'completed');
+      return !isCancelled && !isDelivered;
+    }).length;
+  }, [ordersList]);
+
+  const deliveredOrdersCount = useMemo(() => {
+    return ordersList.filter((o) => {
+      const statusStr = (o.status || 'placed').toLowerCase();
+      const delStatusStr = (o.deliveryStatus || o.delivery?.status || '').toLowerCase();
+      const isCancelled = statusStr === 'cancelled' || statusStr === 'rejected' || delStatusStr === 'cancelled';
+      const isDelivered = delStatusStr === 'delivered' || statusStr === 'delivered' || (statusStr === 'served' || statusStr === 'completed');
+      return isDelivered && !isCancelled;
+    }).length;
+  }, [ordersList]);
+
+  const cancelledOrdersCount = useMemo(() => {
+    return ordersList.filter((o) => {
+      const statusStr = (o.status || 'placed').toLowerCase();
+      const delStatusStr = (o.deliveryStatus || o.delivery?.status || '').toLowerCase();
+      return statusStr === 'cancelled' || statusStr === 'rejected' || delStatusStr === 'cancelled';
+    }).length;
+  }, [ordersList]);
+
+  const displayOrders = useMemo(() => {
+    return ordersList.filter((order) => {
+      const statusStr = (order.status || 'placed').toLowerCase();
+      const delStatusStr = (order.deliveryStatus || order.delivery?.status || '').toLowerCase();
+      const isCancelled = statusStr === 'cancelled' || statusStr === 'rejected' || delStatusStr === 'cancelled';
+      const isDelivered = delStatusStr === 'delivered' || statusStr === 'delivered' || (statusStr === 'served' || statusStr === 'completed');
+      const isActive = !isCancelled && !isDelivered;
+
+      if (orderFilterTab === 'active' && !isActive) return false;
+      if (orderFilterTab === 'delivered' && !isDelivered) return false;
+      if (orderFilterTab === 'cancelled' && !isCancelled) return false;
+
+      if (searchOrderQuery.trim().length > 0) {
+        const q = searchOrderQuery.toLowerCase().trim();
+        const resName = (order.restaurantName || '').toLowerCase();
+        const orderIdStr = String(order.id || order.orderId || '').toLowerCase();
+
+        let itemsArr: any[] = [];
+        if (Array.isArray(order.items)) itemsArr = order.items;
+        else if (typeof order.items === 'string') {
+          try { itemsArr = JSON.parse(order.items); } catch (e) {}
+        }
+        const itemMatch = itemsArr.some((it: any) =>
+          (it.name || it.menuItemName || it.itemName || '').toLowerCase().includes(q)
+        );
+
+        if (!resName.includes(q) && !orderIdStr.includes(q) && !itemMatch) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [ordersList, orderFilterTab, searchOrderQuery]);
 
   const handleSaveProfile = async () => {
     setIsLoading(true);
@@ -397,8 +539,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
       setIsLoading(false);
     }
   };
-
-  const displayOrders = ordersList;
 
   // ─── SUB-VIEWS ROUTING ───
 
@@ -574,7 +714,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent={false} />
 
       {/* ─── [1] TOP HEADER ROW (NO LOGO, CLEAN BACK ARROW + HELP & HAMBURGER) ─── */}
-      <View style={styles.headerRow}>
+      <View style={[styles.headerRow, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <View style={styles.headerLeft}>
           {onBackToHome && (
             <TouchableOpacity onPress={onBackToHome} activeOpacity={0.7} style={styles.backBtn}>
@@ -606,7 +746,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
       {/* ─── QUICK ACCOUNT OPTIONS POPUP MODAL ─── */}
       {showMenuOptions && (
-        <View style={styles.menuDropdownOverlay}>
+        <View style={[styles.menuDropdownOverlay, { top: getSafeTopPadding(insets.top, 8) + 44 }]}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             onPress={() => setShowMenuOptions(false)}
@@ -653,7 +793,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 30 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -822,31 +962,246 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
           </TouchableOpacity>
         </View>
 
-        {/* ─── [7] PAST ORDERS SECTION (FIGMA NODE 3029:1729) ─── */}
+        {/* ─── [7] PAST ORDERS SECTION (FIGMA NODE 3029:1729 - ELEVATED PAST ORDERS) ─── */}
         <View style={styles.pastOrdersHeaderRow}>
-          <Text style={styles.pastOrdersSectionTitle}>PAST ORDERS</Text>
-          {displayOrders.length > 0 && (
-            <Text style={styles.pastOrdersCountBadge}>
-              {displayOrders.length} {displayOrders.length === 1 ? 'Order' : 'Orders'}
+          <View style={styles.pastOrdersTitleCol}>
+            <View style={styles.pastOrdersTitleBadgeRow}>
+              <Text style={styles.pastOrdersSectionTitle}>PAST ORDERS</Text>
+              {ordersList.length > 0 && (
+                <View style={styles.pastOrdersTotalCountPill}>
+                  <Text style={styles.pastOrdersTotalCountText}>{ordersList.length}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.pastOrdersSubtitle}>
+              Reorder in 1 tap, track live orders & view receipts
             </Text>
-          )}
+          </View>
         </View>
 
+        {/* Search & Status Filter Controls */}
+        {ordersList.length > 0 && (
+          <View style={styles.ordersControlsCard}>
+            {/* Search Input */}
+            <View style={styles.orderSearchInputRow}>
+              <Search size={16} color="#888888" style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.orderSearchInput}
+                placeholder="Search dish, restaurant or order ID..."
+                placeholderTextColor="#666666"
+                value={searchOrderQuery}
+                onChangeText={setSearchOrderQuery}
+                returnKeyType="search"
+                clearButtonMode="while-editing"
+              />
+              {searchOrderQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setSearchOrderQuery('')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ padding: 4 }}
+                >
+                  <X size={15} color="#AAAAAA" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Filter Tabs */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.orderFilterTabsRow}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.orderFilterTabChip,
+                  orderFilterTab === 'all' && styles.orderFilterTabChipActive,
+                ]}
+                activeOpacity={0.75}
+                onPress={() => setOrderFilterTab('all')}
+              >
+                <Text
+                  style={[
+                    styles.orderFilterTabText,
+                    orderFilterTab === 'all' && styles.orderFilterTabTextActive,
+                  ]}
+                >
+                  All
+                </Text>
+                <View
+                  style={[
+                    styles.orderFilterCountBadge,
+                    orderFilterTab === 'all' && styles.orderFilterCountBadgeActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.orderFilterCountText,
+                      orderFilterTab === 'all' && styles.orderFilterCountTextActive,
+                    ]}
+                  >
+                    {ordersList.length}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {activeOrdersCount > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.orderFilterTabChip,
+                    styles.orderFilterTabChipLive,
+                    orderFilterTab === 'active' && styles.orderFilterTabChipActive,
+                  ]}
+                  activeOpacity={0.75}
+                  onPress={() => setOrderFilterTab('active')}
+                >
+                  <View style={styles.liveGreenPillDot} />
+                  <Text
+                    style={[
+                      styles.orderFilterTabText,
+                      orderFilterTab === 'active' && styles.orderFilterTabTextActive,
+                      { color: '#DEA430' },
+                    ]}
+                  >
+                    Live Active
+                  </Text>
+                  <View
+                    style={[
+                      styles.orderFilterCountBadge,
+                      orderFilterTab === 'active' && styles.orderFilterCountBadgeActive,
+                      { backgroundColor: '#3A2B0E' },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.orderFilterCountText,
+                        orderFilterTab === 'active' && styles.orderFilterCountTextActive,
+                        { color: '#DEA430' },
+                      ]}
+                    >
+                      {activeOrdersCount}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.orderFilterTabChip,
+                  orderFilterTab === 'delivered' && styles.orderFilterTabChipActive,
+                ]}
+                activeOpacity={0.75}
+                onPress={() => setOrderFilterTab('delivered')}
+              >
+                <Text
+                  style={[
+                    styles.orderFilterTabText,
+                    orderFilterTab === 'delivered' && styles.orderFilterTabTextActive,
+                  ]}
+                >
+                  Delivered
+                </Text>
+                <View
+                  style={[
+                    styles.orderFilterCountBadge,
+                    orderFilterTab === 'delivered' && styles.orderFilterCountBadgeActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.orderFilterCountText,
+                      orderFilterTab === 'delivered' && styles.orderFilterCountTextActive,
+                    ]}
+                  >
+                    {deliveredOrdersCount}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {cancelledOrdersCount > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.orderFilterTabChip,
+                    orderFilterTab === 'cancelled' && styles.orderFilterTabChipActive,
+                  ]}
+                  activeOpacity={0.75}
+                  onPress={() => setOrderFilterTab('cancelled')}
+                >
+                  <Text
+                    style={[
+                      styles.orderFilterTabText,
+                      orderFilterTab === 'cancelled' && styles.orderFilterTabTextActive,
+                    ]}
+                  >
+                    Cancelled
+                  </Text>
+                  <View
+                    style={[
+                      styles.orderFilterCountBadge,
+                      orderFilterTab === 'cancelled' && styles.orderFilterCountBadgeActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.orderFilterCountText,
+                        orderFilterTab === 'cancelled' && styles.orderFilterCountTextActive,
+                      ]}
+                    >
+                      {cancelledOrdersCount}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Order Cards Preview */}
-        {displayOrders.length === 0 ? (
+        {ordersList.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconCircle}>
               <ShoppingBag size={34} color="#D4AF37" />
             </View>
             <Text style={styles.emptyTitle}>No Orders Yet</Text>
             <Text style={styles.emptySubtitle}>
-              Your placed food and dining orders will appear here in real-time.
+              You haven't placed any food or dining orders yet. Explore our top restaurants!
             </Text>
+            {onBackToHome && (
+              <TouchableOpacity
+                style={styles.emptyExploreBtn}
+                activeOpacity={0.8}
+                onPress={onBackToHome}
+              >
+                <Utensils size={15} color="#000000" style={{ marginRight: 6 }} />
+                <Text style={styles.emptyExploreBtnText}>Explore Restaurants</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : displayOrders.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyIconCircle}>
+              <Search size={30} color="#DEA430" />
+            </View>
+            <Text style={styles.emptyTitle}>No Matching Orders</Text>
+            <Text style={styles.emptySubtitle}>
+              We couldn't find any orders matching "{searchOrderQuery || orderFilterTab}". Try a different keyword or reset filters.
+            </Text>
+            <TouchableOpacity
+              style={styles.resetFiltersBtnModern}
+              activeOpacity={0.8}
+              onPress={() => {
+                setSearchOrderQuery('');
+                setOrderFilterTab('all');
+              }}
+            >
+              <RotateCcw size={14} color="#DEA430" style={{ marginRight: 6 }} />
+              <Text style={styles.resetFiltersBtnModernText}>Reset Filters</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <>
             {displayOrders.slice(0, visibleOrdersCount).map((order, orderIdx) => {
-              const orderId = order.id || order.orderId || `order_${orderIdx}`;
+              const orderId = String(order.id || order.orderId || `order_${orderIdx}`);
+              const shortId = orderId.length > 8 ? orderId.slice(-8).toUpperCase() : orderId.toUpperCase();
               const currentRating = ratings[orderId] || { food: 0, delivery: 0 };
               const resImage = typeof order.image === 'string'
                 ? { uri: order.image }
@@ -883,12 +1238,38 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                 displayStatusText = 'Order Placed';
               }
 
+              // Extract parsed items safely
+              let itemsListSafe: any[] = [];
+              if (Array.isArray(order.items)) {
+                itemsListSafe = order.items;
+              } else if (typeof order.items === 'string') {
+                try {
+                  const parsed = JSON.parse(order.items);
+                  if (Array.isArray(parsed)) itemsListSafe = parsed;
+                } catch (e) {}
+              }
+
+              const isExpanded = !!expandedOrderIds[orderId];
+              const visibleItems = (itemsListSafe.length > 2 && !isExpanded)
+                ? itemsListSafe.slice(0, 2)
+                : itemsListSafe;
+              const hasHiddenItems = itemsListSafe.length > 2;
+
               const handleCardPress = () => {
                 if (isActive && onNavigateToTracking) {
                   onNavigateToTracking(orderId);
                 } else {
                   setSelectedOrderForDetails(order);
                   setCurrentView('order_details');
+                }
+              };
+
+              const handleRestaurantPress = () => {
+                const restId = order.restaurantId || order.restaurant_id;
+                if (restId && onNavigateToRestaurant) {
+                  onNavigateToRestaurant(restId);
+                } else {
+                  handleCardPress();
                 }
               };
 
@@ -901,43 +1282,90 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                       activeOpacity={0.85}
                       onPress={() => onNavigateToTracking && onNavigateToTracking(orderId)}
                     >
-                      <View style={styles.livePulseDot} />
-                      <Text style={styles.activeTrackingBannerText}>ORDER IS LIVE — TAP TO TRACK</Text>
-                      <Navigation size={14} color="#000000" />
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                        <View style={styles.livePulseDot} />
+                        <Text style={styles.activeTrackingBannerText}>
+                          LIVE: {displayStatusText.toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#000000', marginRight: 4 }}>
+                          TRACK
+                        </Text>
+                        <Navigation size={13} color="#000000" />
+                      </View>
                     </TouchableOpacity>
                   )}
 
                   {/* Card Header (Image + Name + Loc + Status) */}
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={handleCardPress}
-                    style={styles.cardHeader}
-                  >
-                    <Image source={resImage} style={styles.restaurantThumb} />
+                  <View style={styles.cardHeader}>
+                    <TouchableOpacity activeOpacity={0.8} onPress={handleRestaurantPress}>
+                      <Image source={resImage} style={styles.restaurantThumb} />
+                    </TouchableOpacity>
 
-                    <View style={styles.restaurantInfo}>
-                      <Text style={styles.restaurantName} numberOfLines={1}>
-                        {order.restaurantName || 'Restaurant'}
-                      </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={handleRestaurantPress}
+                      style={styles.restaurantInfo}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={styles.restaurantName} numberOfLines={1}>
+                          {order.restaurantName || 'Restaurant'}
+                        </Text>
+                        <ChevronRight size={14} color="#DEA430" style={{ marginLeft: 2 }} />
+                      </View>
                       <View style={styles.locationRow}>
-                        <MapPin size={12} color="#747474" style={{ marginRight: 4 }} />
+                        <MapPin size={11} color="#747474" style={{ marginRight: 4 }} />
                         <Text style={styles.locationText} numberOfLines={1}>
                           {order.location || order.restaurantAddress || order.city || order.deliveryAddress || 'Bhubaneswar'}
                         </Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
 
-                    <View style={[styles.statusBadge, isActive && styles.statusBadgeActive]}>
-                      <Text style={[styles.statusText, isActive && styles.statusTextActive]}>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        isActive && styles.statusBadgeActive,
+                        isCancelled && styles.statusBadgeCancelled,
+                      ]}
+                    >
+                      {isActive ? (
+                        <Clock size={12} color="#DEA430" style={{ marginRight: 4 }} />
+                      ) : isCancelled ? (
+                        <AlertCircle size={12} color="#E57373" style={{ marginRight: 4 }} />
+                      ) : (
+                        <CheckCircle2 size={13} color="#468152" style={{ marginRight: 4 }} />
+                      )}
+                      <Text
+                        style={[
+                          styles.statusText,
+                          isActive && styles.statusTextActive,
+                          isCancelled && styles.statusTextCancelled,
+                        ]}
+                      >
                         {displayStatusText}
                       </Text>
-                      {isActive ? (
-                        <Clock size={14} color="#D4AF37" style={{ marginLeft: 4 }} />
-                      ) : (
-                        <CheckCircle2 size={15} color="#468152" style={{ marginLeft: 5 }} />
-                      )}
                     </View>
-                  </TouchableOpacity>
+                  </View>
+
+                  {/* Order Meta Bar (Order ID + 1-Tap Copy + Date) */}
+                  <View style={styles.orderMetaBar}>
+                    <TouchableOpacity
+                      style={styles.orderIdBadge}
+                      activeOpacity={0.7}
+                      onPress={() => handleCopyOrderId(orderId)}
+                    >
+                      <Text style={styles.orderIdText}>#{shortId}</Text>
+                      <Copy size={11} color={copiedOrderId === orderId ? '#46C263' : '#888888'} style={{ marginLeft: 4 }} />
+                    </TouchableOpacity>
+
+                    <View style={styles.orderDateRow}>
+                      <Clock size={11} color="#696969" style={{ marginRight: 4 }} />
+                      <Text style={styles.orderedDateText}>
+                        {formatOrderDate(order.createdAt || order.date)}
+                      </Text>
+                    </View>
+                  </View>
 
                   {/* Items List */}
                   <View style={styles.divider} />
@@ -946,18 +1374,44 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                     onPress={handleCardPress}
                     style={styles.itemsList}
                   >
-                    {order.items && order.items.length > 0 ? (
-                      order.items.map((it: any, itIdx: number) => {
+                    {visibleItems.length > 0 ? (
+                      visibleItems.map((it: any, itIdx: number) => {
                         const itPrice = getItemPrice(it);
                         const itQty = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+                        const isVeg = it.isVeg ?? it.is_veg ?? false;
+
                         return (
                           <View key={itIdx} style={styles.itemRow}>
+                            {/* Veg / Non-Veg Icon */}
+                            <View
+                              style={[
+                                styles.vegSquareSmall,
+                                { borderColor: isVeg ? '#34A853' : '#EA4335' },
+                              ]}
+                            >
+                              <View
+                                style={[
+                                  styles.vegCircleSmall,
+                                  { backgroundColor: isVeg ? '#34A853' : '#EA4335' },
+                                ]}
+                              />
+                            </View>
+
                             <View style={styles.qtyBadge}>
                               <Text style={styles.qtyText}>{itQty}x</Text>
                             </View>
-                            <Text style={styles.itemName} numberOfLines={1}>
-                              {it.name || it.menuItemName || it.itemName || 'Food Item'}
-                            </Text>
+
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.itemName} numberOfLines={1}>
+                                {it.name || it.menuItemName || it.itemName || 'Food Item'}
+                              </Text>
+                              {it.customization || it.variantName ? (
+                                <Text style={styles.itemCustomizationText} numberOfLines={1}>
+                                  {it.variantName || it.customization}
+                                </Text>
+                              ) : null}
+                            </View>
+
                             {itPrice > 0 && (
                               <Text style={styles.itemPriceText}>
                                 {formatOrderAmount(itPrice * itQty)}
@@ -974,25 +1428,77 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                         <Text style={styles.itemName}>Order Summary</Text>
                       </View>
                     )}
+
+                    {/* Expand/Collapse Items Toggle */}
+                    {hasHiddenItems && (
+                      <TouchableOpacity
+                        style={styles.expandItemsBtn}
+                        activeOpacity={0.7}
+                        onPress={() => toggleExpandOrder(orderId)}
+                      >
+                        <Text style={styles.expandItemsBtnText}>
+                          {isExpanded
+                            ? 'Show less items'
+                            : `+ ${itemsListSafe.length - 2} more items`}
+                        </Text>
+                        {isExpanded ? (
+                          <ChevronUp size={13} color="#DEA430" style={{ marginLeft: 3 }} />
+                        ) : (
+                          <ChevronDown size={13} color="#DEA430" style={{ marginLeft: 3 }} />
+                        )}
+                      </TouchableOpacity>
+                    )}
                   </TouchableOpacity>
 
-                  {/* Active Track Button or Delivered Rating */}
-                  {isActive ? (
+                  {/* Bill Summary & Payment Method Bar */}
+                  <View style={styles.billSummaryBar}>
+                    <View style={styles.billTotalRow}>
+                      <Text style={styles.billTotalLabel}>Bill Total: </Text>
+                      <Text style={styles.billTotalAmount}>
+                        {formatOrderAmount(getOrderTotalAmount(order))}
+                      </Text>
+                    </View>
+
+                    <View style={styles.paymentMethodPill}>
+                      <CreditCard size={12} color="#DEA430" style={{ marginRight: 5 }} />
+                      <Text style={styles.paymentMethodPillText}>
+                        {order.paymentMethod || order.paymentMode || (order.paymentStatus === 'completed' ? 'Paid Online' : 'Paid')}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Card Actions Row: Reorder + Help */}
+                  <View style={styles.cardActionsRow}>
                     <TouchableOpacity
-                      style={styles.trackOrderBtn}
-                      activeOpacity={0.85}
-                      onPress={() => onNavigateToTracking && onNavigateToTracking(orderId)}
+                      style={styles.reorderBtnModern}
+                      activeOpacity={0.8}
+                      onPress={() => handleReorder(order)}
                     >
-                      <Navigation size={16} color="#000000" />
-                      <Text style={styles.trackOrderBtnText}>Track Live Order</Text>
+                      <RotateCcw size={14} color="#000000" strokeWidth={2.5} style={{ marginRight: 6 }} />
+                      <Text style={styles.reorderBtnModernText}>Reorder</Text>
                     </TouchableOpacity>
-                  ) : (
-                    <>
-                      <View style={styles.divider} />
+
+                    <TouchableOpacity
+                      style={styles.helpBtnModern}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setSelectedOrderForDetails(order);
+                        setCurrentView('help');
+                      }}
+                    >
+                      <Headphones size={13} color="#999999" style={{ marginRight: 5 }} />
+                      <Text style={styles.helpBtnModernText}>Help</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Interactive Star Ratings & Compliment Chips for Delivered Orders */}
+                  {isDelivered && (
+                    <View style={styles.ratingSectionWrap}>
+                      <View style={styles.dividerThin} />
                       <View style={styles.ratingsRow}>
                         {/* Food Rating */}
                         <View style={styles.ratingCol}>
-                          <Text style={styles.ratingLabel}>Food Rating</Text>
+                          <Text style={styles.ratingLabel}>Rate Food</Text>
                           <View style={styles.starsRow}>
                             {[1, 2, 3, 4, 5].map((starVal) => {
                               const isFilled = starVal <= currentRating.food;
@@ -1004,9 +1510,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                                   style={{ padding: 2 }}
                                 >
                                   <Star
-                                    size={18}
-                                    color="#D4AF37"
-                                    fill={isFilled ? '#D4AF37' : 'transparent'}
+                                    size={17}
+                                    color="#DEA430"
+                                    fill={isFilled ? '#DEA430' : 'transparent'}
                                   />
                                 </TouchableOpacity>
                               );
@@ -1018,7 +1524,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
 
                         {/* Delivery Rating */}
                         <View style={styles.ratingCol}>
-                          <Text style={styles.ratingLabel}>Delivery Rating</Text>
+                          <Text style={styles.ratingLabel}>Rate Delivery</Text>
                           <View style={styles.starsRow}>
                             {[1, 2, 3, 4, 5].map((starVal) => {
                               const isFilled = starVal <= currentRating.delivery;
@@ -1030,9 +1536,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                                   style={{ padding: 2 }}
                                 >
                                   <Star
-                                    size={18}
-                                    color="#D4AF37"
-                                    fill={isFilled ? '#D4AF37' : 'transparent'}
+                                    size={17}
+                                    color="#DEA430"
+                                    fill={isFilled ? '#DEA430' : 'transparent'}
                                   />
                                 </TouchableOpacity>
                               );
@@ -1041,45 +1547,52 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBackToHome, onNa
                         </View>
                       </View>
 
-                      {/* Reorder Button */}
-                      <TouchableOpacity
-                        style={styles.reorderBtn}
-                        activeOpacity={0.8}
-                        onPress={() => handleReorder(order)}
-                      >
-                        <RotateCcw size={16} color="#A88733" />
-                        <Text style={styles.reorderText}>Reorder</Text>
-                      </TouchableOpacity>
-
-                      {onNavigateToTracking && (
-                        <TouchableOpacity
-                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, marginTop: 4 }}
-                          activeOpacity={0.8}
-                          onPress={() => onNavigateToTracking(orderId)}
-                        >
-                          <Navigation size={13} color="#D4AF37" style={{ marginRight: 6 }} />
-                          <Text style={{ fontSize: 13, fontWeight: '600', color: '#D4AF37' }}>View Tracking Details</Text>
-                        </TouchableOpacity>
+                      {/* Compliments Chips Row */}
+                      {(currentRating.food > 0 || currentRating.delivery > 0) && (
+                        <View style={styles.complimentsContainer}>
+                          <Text style={styles.complimentsPromptText}>What did you love most?</Text>
+                          <View style={styles.complimentsChipsRow}>
+                            {['Delicious 😋', 'Super Fast ⚡', 'Hot & Fresh ♨️', 'Neat Packaging 🛍️', 'Great Value 🌟'].map((tag) => {
+                              const isSelected = (ratingCompliments[orderId] || []).includes(tag);
+                              return (
+                                <TouchableOpacity
+                                  key={tag}
+                                  style={[
+                                    styles.complimentChip,
+                                    isSelected && styles.complimentChipSelected,
+                                  ]}
+                                  activeOpacity={0.7}
+                                  onPress={() => handleComplimentTag(orderId, tag)}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.complimentChipText,
+                                      isSelected && styles.complimentChipTextSelected,
+                                    ]}
+                                  >
+                                    {tag}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
                       )}
-                    </>
+                    </View>
                   )}
 
-                  {/* Order Footer (Ordered Date & Total) */}
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={handleCardPress}
-                    style={styles.orderFooter}
-                  >
-                    <Text style={styles.orderedDateText}>
-                      Ordered: {order.date || (order.createdAt ? new Date(order.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Recently')}
-                    </Text>
-                    <View style={styles.billTotalRow}>
-                      <Text style={styles.billTotalLabel}>Bill Total: </Text>
-                      <Text style={styles.billTotalAmount}>
-                        {formatOrderAmount(getOrderTotalAmount(order))}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
+                  {/* Active Order Large Track Button */}
+                  {isActive && (
+                    <TouchableOpacity
+                      style={styles.trackOrderBtnLarge}
+                      activeOpacity={0.85}
+                      onPress={() => onNavigateToTracking && onNavigateToTracking(orderId)}
+                    >
+                      <Navigation size={15} color="#000000" style={{ marginRight: 6 }} />
+                      <Text style={styles.trackOrderBtnLargeText}>Track Live Order on Map</Text>
+                      <ChevronRight size={15} color="#000000" />
+                    </TouchableOpacity>
+                  )}
                 </View>
               );
             })}
@@ -1749,5 +2262,427 @@ const styles = StyleSheet.create({
     color: '#BA9237',
     marginRight: 6,
     letterSpacing: 0.3,
+  },
+
+  // ─── ELEVATED PAST ORDERS (BETTER THAN SWIGGY) ───
+  pastOrdersTitleCol: {
+    flex: 1,
+  },
+  pastOrdersTitleBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  pastOrdersSubtitle: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12.5,
+    color: '#777777',
+    marginTop: 2,
+  },
+  pastOrdersTotalCountPill: {
+    backgroundColor: '#211806',
+    borderWidth: 1,
+    borderColor: '#48350F',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    marginLeft: 8,
+  },
+  pastOrdersTotalCountText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11.5,
+    color: '#DEA430',
+  },
+
+  // Controls card
+  ordersControlsCard: {
+    backgroundColor: '#0A0A0A',
+    borderWidth: 1,
+    borderColor: '#1D1D1D',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 16,
+  },
+  orderSearchInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#141414',
+    borderWidth: 1,
+    borderColor: '#262626',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 42,
+    marginBottom: 10,
+  },
+  orderSearchInput: {
+    flex: 1,
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 13.5,
+    color: '#FFFFFF',
+    paddingVertical: 0,
+  },
+  orderFilterTabsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 2,
+  },
+  orderFilterTabChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#141414',
+    borderWidth: 1,
+    borderColor: '#242424',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  orderFilterTabChipActive: {
+    backgroundColor: '#211806',
+    borderColor: '#DEA430',
+  },
+  orderFilterTabChipLive: {
+    borderColor: '#3A2E12',
+  },
+  liveGreenPillDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#34A853',
+    marginRight: 6,
+  },
+  orderFilterTabText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 12.5,
+    color: '#888888',
+    marginRight: 6,
+  },
+  orderFilterTabTextActive: {
+    color: '#DEA430',
+    fontWeight: '700',
+  },
+  orderFilterCountBadge: {
+    backgroundColor: '#242424',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  orderFilterCountBadgeActive: {
+    backgroundColor: '#3A2B0E',
+  },
+  orderFilterCountText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11,
+    color: '#888888',
+  },
+  orderFilterCountTextActive: {
+    color: '#DEA430',
+  },
+
+  // Status badges
+  statusBadgeCancelled: {
+    backgroundColor: '#2A1414',
+    borderColor: '#4A2222',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  statusTextCancelled: {
+    color: '#E57373',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+
+  // Meta row
+  orderMetaBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#141414',
+  },
+  orderIdBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#121212',
+    borderWidth: 1,
+    borderColor: '#222222',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  orderIdText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11.5,
+    color: '#888888',
+    letterSpacing: 0.5,
+  },
+  orderDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  // Veg / Non-veg
+  vegSquareSmall: {
+    width: 14,
+    height: 14,
+    borderWidth: 1.5,
+    borderRadius: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  vegCircleSmall: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  itemCustomizationText: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#9E8850',
+    marginTop: 1,
+  },
+
+  // Expand items
+  expandItemsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    marginTop: 2,
+  },
+  expandItemsBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12.5,
+    color: '#DEA430',
+  },
+
+  // Bill summary & savings
+  billSummaryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0D0D0D',
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 12,
+  },
+  paymentMethodPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#16140A',
+    borderWidth: 1,
+    borderColor: '#3D3110',
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  paymentMethodPillText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 11.5,
+    color: '#DEA430',
+  },
+
+  // Card action buttons
+  cardActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  reorderBtnModern: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DEA430',
+    borderRadius: 12,
+    height: 42,
+  },
+  reorderBtnModernText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14,
+    color: '#000000',
+  },
+  helpBtnModern: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#121212',
+    borderWidth: 1,
+    borderColor: '#262626',
+    borderRadius: 12,
+    height: 42,
+    paddingHorizontal: 16,
+  },
+  helpBtnModernText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 13,
+    color: '#999999',
+  },
+
+  // Ratings & compliments
+  ratingSectionWrap: {
+    marginTop: 4,
+  },
+  dividerThin: {
+    height: 1,
+    backgroundColor: '#141414',
+    marginVertical: 10,
+  },
+  complimentsContainer: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#141414',
+  },
+  complimentsPromptText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 12,
+    color: '#888888',
+    marginBottom: 6,
+  },
+  complimentsChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  complimentChip: {
+    backgroundColor: '#141414',
+    borderWidth: 1,
+    borderColor: '#242424',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  complimentChipSelected: {
+    backgroundColor: '#2B200A',
+    borderColor: '#DEA430',
+  },
+  complimentChipText: {
+    fontFamily: 'Urbanist-Medium',
+    fontSize: 11.5,
+    color: '#A0A0A0',
+  },
+  complimentChipTextSelected: {
+    color: '#DEA430',
+    fontWeight: '700',
+  },
+
+  // Large Track Button
+  trackOrderBtnLarge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DEA430',
+    borderRadius: 12,
+    height: 44,
+    marginTop: 12,
+  },
+  trackOrderBtnLargeText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13.5,
+    color: '#000000',
+  },
+
+  // Empty & Filter Reset buttons
+  emptyExploreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DEA430',
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    marginTop: 14,
+  },
+  emptyExploreBtnText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13.5,
+    color: '#000000',
+  },
+  resetFiltersBtnModern: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#171408',
+    borderWidth: 1,
+    borderColor: '#382D10',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    marginTop: 14,
+  },
+  resetFiltersBtnModernText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13,
+    color: '#DEA430',
+  },
+
+  // Floating Toast
+  reorderFloatingPill: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 16,
+    backgroundColor: '#14120A',
+    borderWidth: 1.5,
+    borderColor: '#DEA430',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 12,
+  },
+  reorderFloatingLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  reorderFloatingCheckCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#DEA430',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  reorderFloatingTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
+  reorderFloatingSubtitle: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 11.5,
+    color: '#A0A0A0',
+  },
+  reorderViewCartBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DEA430',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  reorderViewCartText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12,
+    color: '#000000',
+    letterSpacing: 0.5,
   },
 });

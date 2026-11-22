@@ -9,9 +9,11 @@ import {
   Modal,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { ArrowLeft, Heart, Star, MapPin, MoreVertical, X, ChevronDown } from 'lucide-react-native';
 import { scale } from './profileUtils';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface FavouritesSubViewProps {
   isDarkMode: boolean;
@@ -26,6 +28,7 @@ export const FavouritesSubView: React.FC<FavouritesSubViewProps> = ({
   toggleFavourite,
   onBack,
 }) => {
+  const insets = useSafeAreaInsets();
   const favPlateImg = require('../../assets/favorite_plate.png');
   const favQuroImg = require('../../assets/favorite_quro.png');
   const favBannerBowl = require('../../assets/fav_banner_bowl.png');
@@ -126,7 +129,7 @@ export const FavouritesSubView: React.FC<FavouritesSubViewProps> = ({
     return (
       <View style={styles.favContainer}>
         {/* Header */}
-        <View style={styles.favHeader}>
+        <View style={[styles.favHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
           <TouchableOpacity onPress={onBack} style={styles.favHeaderBackBtn}>
             <ArrowLeft size={22} color="#eae1d4" />
           </TouchableOpacity>
@@ -136,7 +139,7 @@ export const FavouritesSubView: React.FC<FavouritesSubViewProps> = ({
 
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ flexGrow: 1 }}
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: getSafeBottomPadding(insets.bottom, 20) }}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.favLogoRow}>
@@ -264,7 +267,7 @@ export const FavouritesSubView: React.FC<FavouritesSubViewProps> = ({
   return (
     <View style={styles.favContainer}>
       {/* Header */}
-      <View style={styles.favHeader}>
+      <View style={[styles.favHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity onPress={onBack} style={styles.favHeaderBackBtn}>
           <ArrowLeft size={22} color="#eae1d4" />
         </TouchableOpacity>
@@ -275,7 +278,7 @@ export const FavouritesSubView: React.FC<FavouritesSubViewProps> = ({
       <ScrollView
         style={{ flex: 1 }}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 24 }}
+        contentContainerStyle={{ paddingBottom: getSafeBottomPadding(insets.bottom, 24) }}
       >
         {/* Hero Banner div (Figma 233-364 Rectangle 851 copy) */}
         <View style={styles.favHeroBanner}>
@@ -629,7 +632,7 @@ export const FavouritesSubView: React.FC<FavouritesSubViewProps> = ({
               </ScrollView>
             </View>
 
-            <View style={styles.filterModalFooter}>
+            <View style={[styles.filterModalFooter, { paddingBottom: getSafeBottomPadding(insets.bottom, 18) }]}>
               <TouchableOpacity
                 style={styles.filterClearBtn}
                 onPress={() => {

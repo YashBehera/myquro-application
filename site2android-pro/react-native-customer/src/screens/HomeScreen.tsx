@@ -300,11 +300,11 @@ export const HomeScreen = ({
     setTimeout(() => setRefreshing(false), 600);
   }, [refreshUserOrders]);
 
-  const onSelectRestaurant = (id: string) => {
+  const onSelectRestaurant = (id: string, targetDishName?: string) => {
     if (onNavigateToRestaurant) {
-      onNavigateToRestaurant(id);
+      onNavigateToRestaurant(id, null, false, targetDishName);
     } else if (navigation?.navigate) {
-      navigation.navigate('RestaurantDetail', { id });
+      navigation.navigate('RestaurantDetail', { id, targetDishName });
     }
   };
 
@@ -449,7 +449,7 @@ export const HomeScreen = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent={false} />
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         stickyHeaderIndices={[7]}
         refreshControl={
@@ -469,6 +469,7 @@ export const HomeScreen = ({
           style={[
             styles.header,
             {
+              paddingTop: safeTopPadding,
               opacity: headerAnim,
               transform: [
                 {
@@ -1227,8 +1228,8 @@ export const HomeScreen = ({
       <TopSearchSheetOverlay
         visible={isSearchSheetOpen}
         onClose={() => setIsSearchSheetOpen(false)}
-        onSelectRestaurant={(id) => {
-          onSelectRestaurant(id);
+        onSelectRestaurant={(id, targetDishName) => {
+          onSelectRestaurant(id, targetDishName);
           setIsSearchSheetOpen(false);
         }}
         onNavigateToSearchScreen={(q) => {

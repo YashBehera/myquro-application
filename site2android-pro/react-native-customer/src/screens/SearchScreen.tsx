@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,7 +8,10 @@ import {
   TouchableOpacity,
   Platform,
   ActivityIndicator,
-  Alert,
+  Animated,
+  Modal,
+  TouchableWithoutFeedback,
+  Dimensions,
 } from 'react-native';
 import { useViewModel } from '../state/MainViewModel';
 import { Restaurant } from '../types';
@@ -23,26 +26,59 @@ import {
   ChevronDown,
   RotateCcw,
   Tag,
+  Flame,
+  Clock,
+  Sparkles,
+  Zap,
+  Plus,
+  Minus,
+  Volume2,
+  ShoppingBag,
 } from 'lucide-react-native';
 import { getOptimizedImageUrl } from '../utils/imageUtils';
 import { LazyImage } from '../components/LazyImage';
-import { SCREEN_WIDTH } from '../utils/responsive';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SCREEN_WIDTH, isTablet, getSafeTopPadding, getSafeBottomPadding } from '../utils/responsive';
+import {
+  getStoredRecentSearches,
+  addStoredRecentSearch,
+  removeStoredRecentSearch,
+  clearStoredRecentSearches,
+  DEFAULT_RECENT_SEARCHES,
+} from '../utils/recentSearches';
 
 interface SearchScreenProps {
   onBack: () => void;
-  onNavigateToRestaurant: (id: string) => void;
+  onNavigateToRestaurant: (id: string, targetDishName?: string) => void;
+  onNavigateToCart?: () => void;
   initialQuery?: string;
 }
 
-const DEFAULT_RECENT_SEARCHES = [
-  'Biryani',
-  'Pizzas',
-  'Burgers',
-  'Rolls',
-  'Momos',
-  'North Indian',
-  'Chinese',
-  'South Indian',
+const TRENDING_SEARCHES = [
+  { label: 'Hyderabadi Biryani', tag: '🔥 Trending' },
+  { label: 'Farmhouse Pizza', tag: '🔥 Popular' },
+  { label: 'Crispy Smash Burger', tag: '✨ Craving' },
+  { label: 'Butter Naan & Dal', tag: '🍛 Best Rated' },
+  { label: 'Steamed Momos', tag: '🥟 Quick Bite' },
+  { label: 'Cold Brew Coffee', tag: '☕ Drinks' },
+];
+
+const POPULAR_CUISINES = [
+  { name: 'Biryani', image: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=300' },
+  { name: 'Pizzas', image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=300' },
+  { name: 'Burgers', image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=300' },
+  { name: 'Rolls', image: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=300' },
+  { name: 'Chinese', image: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=300' },
+  { name: 'Desserts', image: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=300' },
+];
+
+const PLACEHOLDERS = [
+  "Search 'Hyderabadi Dum Biryani'...",
+  "Search 'Truffle Mushroom Pizza'...",
+  "Search 'Crispy Chicken Burger'...",
+  "Search 'Paneer Butter Masala'...",
+  "Search 'Cold Brew & Desserts'...",
+  "Search 'Steamed Dimsums & Momos'...",
 ];
 
 // Helper function to render text with matching query highlighted in bold gold
@@ -73,62 +109,115 @@ const renderBoldedText = (text: string, query: string) => {
   );
 };
 
-export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateToRestaurant, initialQuery = '' }) => {
-  const { allRestaurants, foodItems, categories, addToCart, cartItems } = useViewModel();
+export const SearchScreen: React.FC<SearchScreenProps> = ({
+  onBack,
+  onNavigateToRestaurant,
+  onNavigateToCart,
+  initialQuery = '',
+}) => {
+  const insets = useSafeAreaInsets();
+  const { allRestaurants, foodItems, categories, addToCart, updateCartQuantity, cartItems } = useViewModel();
 
   const [query, setQuery] = useState(initialQuery);
   const [isSubmitted, setIsSubmitted] = useState(!!initialQuery);
   const [activeTab, setActiveTab] = useState<'Restaurants' | 'Dishes'>('Restaurants');
+  
+  // Filter States
   const [vegOnly, setVegOnly] = useState(false);
-  const [selectedSubPill, setSelectedSubPill] = useState<string | null>(null);
-  const [is99Store, setIs99Store] = useState(false);
   const [nonVegOnly, setNonVegOnly] = useState(false);
+  const [ratingFilter, setRatingFilter] = useState(false);
+  const [fastDeliveryFilter, setFastDeliveryFilter] = useState(false);
+  const [under199Filter, setUnder199Filter] = useState(false);
+  const [offersOnlyFilter, setOffersOnlyFilter] = useState(false);
+  const [selectedSubPill, setSelectedSubPill] = useState<string | null>(null);
+
   const [isLoadingResults, setIsLoadingResults] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>(DEFAULT_RECENT_SEARCHES);
   const [savedHearts, setSavedHearts] = useState<{ [key: string]: boolean }>({});
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const [isVoiceModalVisible, setIsVoiceModalVisible] = useState(false);
+
+  // Voice Wave Animations
+  const wave1 = useRef(new Animated.Value(0.3)).current;
+  const wave2 = useRef(new Animated.Value(0.6)).current;
+  const wave3 = useRef(new Animated.Value(0.4)).current;
+  const wave4 = useRef(new Animated.Value(0.8)).current;
+  const wave5 = useRef(new Animated.Value(0.5)).current;
+
+  // Placeholder rotation
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDERS.length);
+    }, 2800);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Voice wave loop animation
+  useEffect(() => {
+    if (isVoiceModalVisible) {
+      const animateWave = (anim: Animated.Value, to: number, dur: number) => {
+        return Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, {
+              toValue: to,
+              duration: dur,
+              useNativeDriver: true,
+            }),
+            Animated.timing(anim, {
+              toValue: 0.2,
+              duration: dur,
+              useNativeDriver: true,
+            }),
+          ])
+        );
+      };
+
+      const w1 = animateWave(wave1, 1, 400);
+      const w2 = animateWave(wave2, 0.9, 320);
+      const w3 = animateWave(wave3, 1.1, 480);
+      const w4 = animateWave(wave4, 0.85, 360);
+      const w5 = animateWave(wave5, 1, 420);
+
+      w1.start();
+      w2.start();
+      w3.start();
+      w4.start();
+      w5.start();
+
+      return () => {
+        w1.stop();
+        w2.stop();
+        w3.stop();
+        w4.stop();
+        w5.stop();
+      };
+    }
+  }, [isVoiceModalVisible]);
 
   const toggleHeart = (id: string) => {
     setSavedHearts(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
+    getStoredRecentSearches().then(setRecentSearches);
+  }, []);
+
+  useEffect(() => {
     if (initialQuery && initialQuery.trim().length > 0) {
-      const cleanQ = initialQuery.trim();
-      setQuery(cleanQ);
-      setIsSubmitted(true);
-      setIsLoadingResults(true);
-
-      const qLower = cleanQ.toLowerCase();
-      const isRestMatch = allRestaurants.some(r => r.name.toLowerCase().includes(qLower));
-      const isDishMatch = foodItems.some(f => 
-        (f.name && f.name.toLowerCase().includes(qLower)) || 
-        (f.categoryName && f.categoryName.toLowerCase().includes(qLower)) ||
-        (f.category && f.category.toLowerCase().includes(qLower))
-      );
-
-      if (isRestMatch && !isDishMatch) {
-        setActiveTab('Restaurants');
-      } else {
-        setActiveTab('Restaurants');
-      }
-
-      const timer = setTimeout(() => {
-        setIsLoadingResults(false);
-      }, 200);
-      return () => clearTimeout(timer);
+      triggerSearch(initialQuery.trim());
     }
-  }, [initialQuery, allRestaurants, foodItems]);
+  }, [initialQuery]);
 
-  // ─── AUTOCOMPLETE SUGGESTIONS LOGIC (Requires minimum 3 letters) ───
+  // ─── INSTANT AUTOCOMPLETE (Starts at 1 character!) ───
   const firstSuggestion = useMemo(() => {
-    if (query.trim().length < 3) return null;
+    if (query.trim().length < 1) return null;
     const q = query.toLowerCase().trim();
     
     const cat = categories.find(c => c.name.toLowerCase().includes(q));
     if (cat) {
       return {
         name: cat.name,
-        type: 'Dish',
+        type: 'Cuisine',
         image: cat.imageUrl || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400',
         isCategory: true,
       };
@@ -150,6 +239,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
       return {
         name: food.name,
         type: 'Dish',
+        price: food.price,
         image: food.image,
         isDish: true,
         foodObj: food,
@@ -163,9 +253,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     };
   }, [query, categories, allRestaurants, foodItems]);
 
-  // Restaurants relevant for query
+  // Matching Restaurants for suggestions
   const relevantRestaurants = useMemo(() => {
-    if (query.trim().length < 3) return [];
+    if (query.trim().length < 1) return [];
     const q = query.toLowerCase().trim();
     
     const matches = allRestaurants.filter((res: Restaurant) => {
@@ -185,9 +275,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     return filtered.slice(0, 5);
   }, [query, allRestaurants, firstSuggestion]);
 
-  // More results matching query (dishes)
+  // Matching Dishes for suggestions
   const moreResults = useMemo(() => {
-    if (query.trim().length < 3) return [];
+    if (query.trim().length < 1) return [];
     const q = query.toLowerCase().trim();
     
     const matchedDishes = foodItems.filter((food: any) =>
@@ -197,7 +287,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     return matchedDishes.slice(0, 8);
   }, [query, foodItems]);
 
-  // ─── DYNAMIC SEARCH MATCHING LOGIC ───
+  // ─── FILTERED SEARCH RESULTS (When submitted or browsing) ───
   const searchMatchedRestaurants = useMemo(() => {
     if (!query.trim()) return allRestaurants;
     const lowerQuery = query.toLowerCase().trim();
@@ -210,24 +300,32 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
           : '';
       const nameMatch = res.name.toLowerCase().includes(lowerQuery) || cuisineStr.toLowerCase().includes(lowerQuery);
       
-      const hasMatchingDish = foodItems.some(
-        (food: any) => {
-          const fRestId = String(food.restaurantId || food.restaurant_id || '');
-          const isSameRest = fRestId === String(res.id) || (food.restaurantName && food.restaurantName.toLowerCase() === res.name.toLowerCase());
-          return isSameRest && (
-            (food.name && food.name.toLowerCase().includes(lowerQuery)) ||
-            (food.categoryName && food.categoryName.toLowerCase().includes(lowerQuery)) ||
-            (food.category && food.category.toLowerCase().includes(lowerQuery)) ||
-            (food.description && food.description.toLowerCase().includes(lowerQuery))
-          );
-        }
-      );
+      const hasMatchingDish = foodItems.some((food: any) => {
+        const fRestId = String(food.restaurantId || food.restaurant_id || '');
+        const isSameRest = fRestId === String(res.id) || (food.restaurantName && food.restaurantName.toLowerCase() === res.name.toLowerCase());
+        return isSameRest && (
+          (food.name && food.name.toLowerCase().includes(lowerQuery)) ||
+          (food.categoryName && food.categoryName.toLowerCase().includes(lowerQuery)) ||
+          (food.category && food.category.toLowerCase().includes(lowerQuery)) ||
+          (food.description && food.description.toLowerCase().includes(lowerQuery))
+        );
+      });
 
-      return nameMatch || hasMatchingDish;
+      if (!nameMatch && !hasMatchingDish) return false;
+
+      // Apply Filters
+      if (ratingFilter && (Number(res.rating) || 0) < 4.0) return false;
+      if (offersOnlyFilter && !res.offer) return false;
+      if (fastDeliveryFilter) {
+        const timeVal = typeof res.deliveryTime === 'number' ? res.deliveryTime : parseInt(String(res.deliveryTime || '40'), 10);
+        if (timeVal > 30) return false;
+      }
+
+      return true;
     });
-  }, [query, allRestaurants, foodItems]);
+  }, [query, allRestaurants, foodItems, ratingFilter, offersOnlyFilter, fastDeliveryFilter]);
 
-  // Primary matched restaurant card
+  // Primary restaurant
   const primaryRestaurant = useMemo(() => {
     if (searchMatchedRestaurants.length === 0) return allRestaurants[0] || null;
     const directMatch = searchMatchedRestaurants.find(
@@ -246,7 +344,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     return restList;
   }, [searchMatchedRestaurants, allRestaurants, primaryRestaurant]);
 
-  // Dynamic promo banners derived from actual restaurants
+  // Dynamic promo banners
   const dynamicPromoBanners = useMemo(() => {
     return allRestaurants.slice(0, 4).map((res, idx) => ({
       id: res.id,
@@ -259,7 +357,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     }));
   }, [allRestaurants]);
 
-  // Dishes matching query or from primary restaurant
+  // Dishes matching query & all active filters
   const searchMatchedDishes = useMemo(() => {
     if (!query.trim()) return foodItems;
     const lowerQuery = query.toLowerCase().trim();
@@ -267,17 +365,19 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     return foodItems.filter((food: any) => {
       if (vegOnly && !food.isVeg) return false;
       if (nonVegOnly && food.isVeg) return false;
-      if (is99Store && food.price > 99) return false;
+      if (under199Filter && (Number(food.price) || 0) > 199) return false;
+
       const nameMatch = food.name && food.name.toLowerCase().includes(lowerQuery);
       const descMatch = food.description && food.description.toLowerCase().includes(lowerQuery);
       const catMatch = (food.categoryName && food.categoryName.toLowerCase().includes(lowerQuery)) ||
                        (food.category && food.category.toLowerCase().includes(lowerQuery));
       const restMatch = primaryRestaurant && (String(food.restaurantId) === String(primaryRestaurant.id) || (food.restaurantName && food.restaurantName.toLowerCase() === primaryRestaurant.name.toLowerCase()));
+      
       return nameMatch || descMatch || catMatch || restMatch;
     });
-  }, [query, foodItems, vegOnly, nonVegOnly, is99Store, primaryRestaurant]);
+  }, [query, foodItems, vegOnly, nonVegOnly, under199Filter, primaryRestaurant]);
 
-  // Related dishes for the horizontal carousel in primary card
+  // Related dishes for primary carousel
   const relatedDishes = useMemo(() => {
     let dishes = searchMatchedDishes;
     if (primaryRestaurant) {
@@ -289,14 +389,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     return dishes.slice(0, 8);
   }, [searchMatchedDishes, foodItems, primaryRestaurant]);
 
-  // Dynamic Subcategory Pills derived from categories
-  const dynamicSubCategoryPills = useMemo(() => {
-    const pillNames = categories.map(c => c.name).filter(Boolean);
-    if (pillNames.length > 0) return pillNames;
-    return ['Burgers', 'Pizzas', 'Biryani', 'Rolls', 'Momos', 'Chinese', 'Desserts'];
-  }, [categories]);
-
-  // ─── DISHES TAB GROUPING BY REAL RESTAURANTS ───
+  // Dishes grouped by restaurant
   const dishesGroupedByRestaurant = useMemo(() => {
     let dishes = searchMatchedDishes;
     if (selectedSubPill) {
@@ -331,7 +424,6 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
       groups[key].dishes.push(food);
     });
 
-    // If matching dishes couldn't be grouped, associate from real restaurants
     if (Object.keys(groups).length === 0 && allRestaurants.length > 0) {
       allRestaurants.slice(0, 3).forEach((res) => {
         const sampleDishes = foodItems.filter(f => String(f.restaurantId) === String(res.id)).slice(0, 5);
@@ -351,23 +443,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     setIsSubmitted(true);
     setIsLoadingResults(true);
 
-    setRecentSearches(prev => {
-      const filtered = prev.filter(s => s.toLowerCase() !== cleanQ.toLowerCase());
-      return [cleanQ, ...filtered].slice(0, 8);
-    });
-
-    const qLower = cleanQ.toLowerCase();
-    const isRestMatch = allRestaurants.some(r => r.name.toLowerCase().includes(qLower));
-    const isDishMatch = foodItems.some(f => 
-      (f.name && f.name.toLowerCase().includes(qLower)) || 
-      (f.categoryName && f.categoryName.toLowerCase().includes(qLower))
-    );
-
-    if (isRestMatch && !isDishMatch) {
-      setActiveTab('Restaurants');
-    } else {
-      setActiveTab('Restaurants');
-    }
+    addStoredRecentSearch(cleanQ).then(setRecentSearches);
 
     setTimeout(() => {
       setIsLoadingResults(false);
@@ -380,11 +456,28 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
     setIsSubmitted(false);
   };
 
+  const handleRemoveRecent = (term: string) => {
+    removeStoredRecentSearch(term).then(setRecentSearches);
+  };
+
+  const handleClearAllRecent = () => {
+    clearStoredRecentSearches().then(setRecentSearches);
+  };
+
+  // Cart summary for floating mini cart bar
+  const totalCartQty = useMemo(() => {
+    return cartItems.reduce((acc, item) => acc + (item.quantity || 1), 0);
+  }, [cartItems]);
+
+  const totalCartPrice = useMemo(() => {
+    return cartItems.reduce((acc, item) => acc + ((item.price || 0) * (item.quantity || 1)), 0);
+  }, [cartItems]);
+
   return (
     <View style={styles.container}>
       
-      {/* ─── TOP HEADER INPUT BLOCK (Fixed downward shift & Title) ─── */}
-      <View style={styles.headerContainer}>
+      {/* ─── TOP HEADER INPUT BLOCK ─── */}
+      <View style={[styles.headerContainer, { paddingTop: getSafeTopPadding(insets.top, 4) }]}>
         
         {/* 1. TOP HEADER TITLE ROW */}
         <View style={styles.topHeaderRow}>
@@ -392,6 +485,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
             style={styles.backBtn}
             onPress={onBack}
             activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <ArrowLeft size={22} color="#DEA430" strokeWidth={2.4} />
           </TouchableOpacity>
@@ -400,13 +494,21 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
             Search for dishes & restaurants
           </Text>
 
-          <View style={{ width: 36 }} />
+          <TouchableOpacity
+            onPress={() => setIsVoiceModalVisible(true)}
+            style={styles.voiceTopBtn}
+            activeOpacity={0.7}
+          >
+            <Mic size={18} color="#DEA430" />
+          </TouchableOpacity>
         </View>
 
         {/* 2. SEARCH BAR & VEG TOGGLE ROW */}
         <View style={styles.searchBarRow}>
-          {/* Gold Outline Input Box */}
+          {/* Search Input Box */}
           <View style={styles.inputInnerRow}>
+            <SearchIcon size={18} color="#DEA430" style={{ marginRight: 8 }} />
+            
             <TextInput
               style={styles.textInput}
               value={query}
@@ -414,7 +516,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                 setQuery(text);
                 setIsSubmitted(false);
               }}
-              placeholder="Search for dishes & restaurants"
+              placeholder={query.length === 0 ? PLACEHOLDERS[placeholderIndex] : ''}
               placeholderTextColor="#78716C"
               returnKeyType="search"
               onSubmitEditing={() => triggerSearch(query)}
@@ -432,7 +534,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
               <View style={styles.micDivider} />
               <TouchableOpacity 
                 style={styles.micBtn} 
-                onPress={() => Alert.alert('Voice Search', 'Speak now...')}
+                onPress={() => setIsVoiceModalVisible(true)}
                 activeOpacity={0.7}
               >
                 <Mic size={20} color="#DEA430" strokeWidth={2.2} />
@@ -443,7 +545,10 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
           {/* VEG Toggle Button */}
           <TouchableOpacity 
             style={[styles.vegToggleCard, vegOnly && styles.vegToggleCardActive]} 
-            onPress={() => setVegOnly(!vegOnly)}
+            onPress={() => {
+              setVegOnly(!vegOnly);
+              if (!vegOnly) setNonVegOnly(false);
+            }}
             activeOpacity={0.8}
           >
             <Text style={styles.vegToggleLabel}>VEG</Text>
@@ -462,7 +567,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
               activeOpacity={0.8}
             >
               <Text style={[styles.tabText, activeTab === 'Restaurants' ? styles.tabTextActive : styles.tabTextInactive]}>
-                Restaurants
+                Restaurants ({searchMatchedRestaurants.length})
               </Text>
               {activeTab === 'Restaurants' && <View style={styles.tabActiveIndicator} />}
             </TouchableOpacity>
@@ -473,81 +578,193 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
               activeOpacity={0.8}
             >
               <Text style={[styles.tabText, activeTab === 'Dishes' ? styles.tabTextActive : styles.tabTextInactive]}>
-                Dishes
+                Dishes ({searchMatchedDishes.length})
               </Text>
               {activeTab === 'Dishes' && <View style={styles.tabActiveIndicator} />}
             </TouchableOpacity>
           </View>
         )}
 
+        {/* 4. QUICK FILTER PILLS ROW (When search results are shown) */}
+        {isSubmitted && query.trim().length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterPillsScroll}
+            contentContainerStyle={styles.filterPillsContent}
+          >
+            <TouchableOpacity
+              style={[styles.filterPill, ratingFilter && styles.filterPillActive]}
+              onPress={() => setRatingFilter(!ratingFilter)}
+              activeOpacity={0.75}
+            >
+              <Star size={12} color={ratingFilter ? '#000000' : '#DEA430'} fill={ratingFilter ? '#000000' : '#DEA430'} style={{ marginRight: 4 }} />
+              <Text style={[styles.filterPillText, ratingFilter && styles.filterPillTextActive]}>Rating 4.0+</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.filterPill, fastDeliveryFilter && styles.filterPillActive]}
+              onPress={() => setFastDeliveryFilter(!fastDeliveryFilter)}
+              activeOpacity={0.75}
+            >
+              <Zap size={12} color={fastDeliveryFilter ? '#000000' : '#F97316'} style={{ marginRight: 4 }} />
+              <Text style={[styles.filterPillText, fastDeliveryFilter && styles.filterPillTextActive]}>Fast Delivery</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.filterPill, nonVegOnly && styles.filterPillActive]}
+              onPress={() => {
+                setNonVegOnly(!nonVegOnly);
+                if (!nonVegOnly) setVegOnly(false);
+              }}
+              activeOpacity={0.75}
+            >
+              <View style={[styles.nonVegDot, nonVegOnly && { backgroundColor: '#000000' }]} />
+              <Text style={[styles.filterPillText, nonVegOnly && styles.filterPillTextActive]}>Non-Veg</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.filterPill, under199Filter && styles.filterPillActive]}
+              onPress={() => setUnder199Filter(!under199Filter)}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.filterPillText, under199Filter && styles.filterPillTextActive]}>Under ₹199</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.filterPill, offersOnlyFilter && styles.filterPillActive]}
+              onPress={() => setOffersOnlyFilter(!offersOnlyFilter)}
+              activeOpacity={0.75}
+            >
+              <Tag size={12} color={offersOnlyFilter ? '#000000' : '#DEA430'} style={{ marginRight: 4 }} />
+              <Text style={[styles.filterPillText, offersOnlyFilter && styles.filterPillTextActive]}>Offers</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
+
       </View>
 
       {/* ─── BODY VIEWPORT ─── */}
       <ScrollView 
-        contentContainerStyle={styles.bodyContent} 
+        contentContainerStyle={[styles.bodyContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 80) }]} 
         nestedScrollEnabled={true}
         showsVerticalScrollIndicator={false}
       >
         
-        {/* 0. INITIAL DEFAULT VIEW (When query < 3 chars and not submitted) */}
-        {!isSubmitted && query.trim().length < 3 && (
+        {/* 0. INITIAL DEFAULT VIEW (When query is empty and not submitted) */}
+        {!isSubmitted && query.trim().length === 0 && (
           <View style={styles.initialContainer}>
             {/* Recent Searches */}
             {recentSearches.length > 0 && (
               <View style={styles.initialSection}>
                 <View style={styles.initialSectionHeaderRow}>
-                  <Text style={styles.initialSectionTitle}>Recent Searches</Text>
-                  <TouchableOpacity onPress={() => setRecentSearches([])}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Clock size={13} color="#DEA430" />
+                    <Text style={styles.initialSectionTitle}>Recent Searches</Text>
+                  </View>
+                  <TouchableOpacity onPress={handleClearAllRecent} activeOpacity={0.7}>
                     <Text style={styles.clearAllText}>Clear All</Text>
                   </TouchableOpacity>
                 </View>
                 <View style={styles.recentChipsWrap}>
                   {recentSearches.map((term, idx) => (
-                    <TouchableOpacity
-                      key={`recent_${idx}_${term}`}
-                      style={styles.recentChip}
-                      activeOpacity={0.75}
-                      onPress={() => triggerSearch(term)}
-                    >
-                      <RotateCcw size={12} color="#DEA430" strokeWidth={2.2} />
-                      <Text style={styles.recentChipText}>{term}</Text>
-                    </TouchableOpacity>
+                    <View key={`recent_${idx}_${term}`} style={styles.recentChip}>
+                      <TouchableOpacity
+                        style={styles.recentChipTouchPart}
+                        activeOpacity={0.75}
+                        onPress={() => triggerSearch(term)}
+                      >
+                        <RotateCcw size={11} color="#DEA430" strokeWidth={2.2} />
+                        <Text style={styles.recentChipText}>{term}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleRemoveRecent(term)}
+                        style={styles.recentDeleteBtn}
+                        hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}
+                      >
+                        <X size={11} color="#8E8A80" />
+                      </TouchableOpacity>
+                    </View>
                   ))}
                 </View>
               </View>
             )}
 
-            {/* Popular Cuisines / Categories */}
-            {categories.length > 0 && (
-              <View style={styles.initialSection}>
-                <Text style={styles.initialSectionTitle}>Popular Cuisines</Text>
-                <View style={styles.cuisineGrid}>
-                  {categories.slice(0, 8).map((cat, idx) => (
-                    <TouchableOpacity
-                      key={`cat_${cat.name}_${idx}`}
-                      style={styles.cuisineCard}
-                      activeOpacity={0.8}
-                      onPress={() => triggerSearch(cat.name)}
-                    >
-                      <LazyImage source={{ uri: cat.imageUrl }} style={styles.cuisineCardImg} />
-                      <View style={styles.cuisineCardOverlay} />
-                      <Text style={styles.cuisineCardText}>{cat.name}</Text>
-                    </TouchableOpacity>
-                  ))}
+            {/* 🔥 Trending Searches */}
+            <View style={styles.initialSection}>
+              <View style={styles.initialSectionHeaderRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Flame size={14} color="#F97316" />
+                  <Text style={styles.initialSectionTitle}>Trending Cravings</Text>
                 </View>
               </View>
-            )}
+              <View style={styles.recentChipsWrap}>
+                {TRENDING_SEARCHES.map((item, idx) => (
+                  <TouchableOpacity
+                    key={`trending_${idx}`}
+                    style={styles.trendingSearchChip}
+                    activeOpacity={0.8}
+                    onPress={() => triggerSearch(item.label)}
+                  >
+                    <Text style={styles.trendingSearchChipText}>{item.label}</Text>
+                    <Text style={styles.trendingTag}>{item.tag}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* 🍽️ Popular Cuisines Visual Discovery */}
+            <View style={styles.initialSection}>
+              <View style={styles.initialSectionHeaderRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Sparkles size={13} color="#DEA430" />
+                  <Text style={styles.initialSectionTitle}>Explore by Cuisine</Text>
+                </View>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.cuisineRowContent}
+              >
+                {POPULAR_CUISINES.map((c, idx) => (
+                  <TouchableOpacity
+                    key={`cui_main_${idx}`}
+                    style={styles.cuisineColCard}
+                    activeOpacity={0.8}
+                    onPress={() => triggerSearch(c.name)}
+                  >
+                    <LazyImage source={{ uri: c.image }} style={styles.cuisineColImg} />
+                    <Text style={styles.cuisineColLabel} numberOfLines={1}>{c.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
           </View>
         )}
 
-        {/* 1. AUTOCOMPLETE SUGGESTIONS VIEW (typing, min 3 chars, not submitted) */}
-        {!isSubmitted && query.trim().length >= 3 && (
+        {/* 1. AUTOCOMPLETE SUGGESTIONS VIEW (When typing, instant >= 1 char!) */}
+        {!isSubmitted && query.trim().length >= 1 && (
           <View style={styles.suggestionsContainer}>
             {firstSuggestion && (
               <TouchableOpacity
                 onPress={() => {
                   if (firstSuggestion.isRestaurant && firstSuggestion.resObj) {
                     onNavigateToRestaurant(firstSuggestion.resObj.id);
+                  } else if (firstSuggestion.isDish && firstSuggestion.foodObj) {
+                    const food = firstSuggestion.foodObj;
+                    const targetRest = allRestaurants.find(
+                      (r) =>
+                        String(r.id) === String(food.restaurantId) ||
+                        (food.restaurantName && r.name.toLowerCase() === food.restaurantName.toLowerCase()) ||
+                        (food.restaurantName && r.name.toLowerCase().includes(food.restaurantName.toLowerCase()))
+                    );
+                    const targetRestId = targetRest ? targetRest.id : food.restaurantId;
+                    if (targetRestId) {
+                      addStoredRecentSearch(firstSuggestion.name).then(setRecentSearches);
+                      onNavigateToRestaurant(String(targetRestId), firstSuggestion.name);
+                    } else {
+                      triggerSearch(firstSuggestion.name);
+                    }
                   } else {
                     triggerSearch(firstSuggestion.name);
                   }
@@ -558,7 +775,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                 <LazyImage source={{ uri: getOptimizedImageUrl(firstSuggestion.image, 400) }} style={styles.suggestionCircularImg} />
                 <View style={{ flex: 1, marginLeft: 14 }}>
                   {renderBoldedText(firstSuggestion.name, query)}
-                  <Text style={styles.suggestionType}>{firstSuggestion.type}</Text>
+                  <Text style={styles.suggestionType}>
+                    {firstSuggestion.type} {firstSuggestion.isDish && firstSuggestion.price ? `• ₹${firstSuggestion.price}` : ''}
+                  </Text>
                 </View>
                 <SearchIcon size={18} color="#DEA430" />
               </TouchableOpacity>
@@ -567,7 +786,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
             {relevantRestaurants.length > 0 && (
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionHeaderText}>Restaurants relevant for '{query}'</Text>
+                  <Text style={styles.sectionHeaderText}>Restaurants matching '{query}'</Text>
                   <View style={styles.sectionHeaderLine} />
                 </View>
                 {relevantRestaurants.map((res: Restaurant) => (
@@ -593,26 +812,57 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
             {moreResults.length > 0 && (
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionHeaderText}>More results matching your query</Text>
+                  <Text style={styles.sectionHeaderText}>Dishes matching '{query}'</Text>
                   <View style={styles.sectionHeaderLine} />
                 </View>
                 {moreResults.map((food: any) => (
                   <TouchableOpacity
                     key={food.id}
-                    onPress={() => triggerSearch(food.name)}
+                    onPress={() => {
+                      const targetRest = allRestaurants.find(
+                        (r) =>
+                          String(r.id) === String(food.restaurantId) ||
+                          (food.restaurantName && r.name.toLowerCase() === food.restaurantName.toLowerCase()) ||
+                          (food.restaurantName && r.name.toLowerCase().includes(food.restaurantName.toLowerCase()))
+                      );
+                      const targetRestId = targetRest ? targetRest.id : food.restaurantId;
+                      if (targetRestId) {
+                        addStoredRecentSearch(food.name).then(setRecentSearches);
+                        onNavigateToRestaurant(String(targetRestId), food.name);
+                      } else {
+                        triggerSearch(food.name);
+                      }
+                    }}
                     style={styles.suggestionItem}
                     activeOpacity={0.8}
                   >
                     <LazyImage source={{ uri: getOptimizedImageUrl(food.image, 400) }} style={styles.suggestionCircularImg} />
                     <View style={{ flex: 1, marginLeft: 14 }}>
-                      {renderBoldedText(food.name, query)}
-                      <Text style={styles.suggestionType}>Dish</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={[styles.vegSquareSmall, { borderColor: food.isVeg ? '#16A34A' : '#DC2626' }]}>
+                          <View style={[styles.vegCircleSmall, { backgroundColor: food.isVeg ? '#16A34A' : '#DC2626' }]} />
+                        </View>
+                        {renderBoldedText(food.name, query)}
+                      </View>
+                      <Text style={styles.suggestionType}>
+                        ₹{food.price} {food.restaurantName ? `• in ${food.restaurantName}` : ''}
+                      </Text>
                     </View>
                     <ChevronRight size={18} color="#DEA430" />
                   </TouchableOpacity>
                 ))}
               </View>
             )}
+
+            {/* Tap to execute full search button */}
+            <TouchableOpacity
+              style={styles.seeAllSuggestionsBtn}
+              onPress={() => triggerSearch(query)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.seeAllSuggestionsText}>See all results for "{query}"</Text>
+              <ChevronRight size={18} color="#000000" strokeWidth={2.4} />
+            </TouchableOpacity>
           </View>
         )}
 
@@ -622,6 +872,34 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#DEA430" style={{ marginTop: 40 }} />
               <Text style={styles.loadingText}>Searching for "{query}"...</Text>
+            </View>
+          ) : searchMatchedRestaurants.length === 0 && searchMatchedDishes.length === 0 ? (
+            /* ─── ZERO RESULTS FALLBACK (BETTER THAN SWIGGY) ─── */
+            <View style={styles.zeroResultsContainer}>
+              <View style={styles.zeroIconWrap}>
+                <SearchIcon size={38} color="#DEA430" />
+              </View>
+              <Text style={styles.zeroTitle}>No matches found for "{query}"</Text>
+              <Text style={styles.zeroSubtitle}>
+                We couldn't find any dishes or restaurants. Try checking the spelling or explore popular cravings:
+              </Text>
+
+              <View style={styles.zeroChipsWrap}>
+                {['Biryani', 'Pizza', 'Burgers', 'Momos', 'Desserts', 'Rolls'].map((term) => (
+                  <TouchableOpacity
+                    key={term}
+                    style={styles.zeroChip}
+                    onPress={() => triggerSearch(term)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.zeroChipText}>{term}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity style={styles.zeroResetBtn} onPress={handleClear} activeOpacity={0.8}>
+                <Text style={styles.zeroResetBtnText}>Reset Search</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.resultsContainer}>
@@ -717,12 +995,12 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                     </TouchableOpacity>
                   )}
 
-                  {/* 3. "BECAUSE YOU SEARCHED FOR ..." DISHES CAROUSEL */}
+                  {/* 3. DISHES CAROUSEL WITH STEPPER */}
                   {relatedDishes.length > 0 && (
                     <View style={styles.becauseSearchedSection}>
                       <View style={styles.sectionHeaderRow}>
                         <Text style={styles.sectionHeaderText}>
-                          BECAUSE YOU SEARCHED FOR "{query.toUpperCase()}"
+                          POPULAR DISHES MATCHING "{query.toUpperCase()}"
                         </Text>
                         <View style={styles.sectionHeaderLine} />
                       </View>
@@ -734,20 +1012,42 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                         contentContainerStyle={styles.becauseDishesContent}
                       >
                         {relatedDishes.map((food: any) => {
-                          const isAdded = cartItems.some(i => i.id === food.id);
+                          const cartItem = cartItems.find((i: any) => String(i.id) === String(food.id));
+                          const qty = cartItem ? cartItem.quantity : 0;
+
                           return (
                             <View key={`dish_card_${food.id}`} style={styles.dishMiniCard}>
                               <View style={styles.dishMiniImageWrap}>
                                 <LazyImage source={{ uri: getOptimizedImageUrl(food.image, 400) }} style={styles.dishMiniImage} />
-                                <TouchableOpacity
-                                  style={[styles.dishMiniAddBtn, isAdded && styles.dishMiniAddBtnActive]}
-                                  onPress={() => addToCart(food)}
-                                  activeOpacity={0.8}
-                                >
-                                  <Text style={[styles.dishMiniAddPlus, isAdded && styles.dishMiniAddPlusActive]}>
-                                    {isAdded ? '✓' : '+'}
-                                  </Text>
-                                </TouchableOpacity>
+                                
+                                {/* Stepper or Add button right on the card! */}
+                                {qty > 0 ? (
+                                  <View style={styles.dishMiniStepperWrap}>
+                                    <TouchableOpacity
+                                      style={styles.miniStepperBtn}
+                                      onPress={() => updateCartQuantity(food.id, qty - 1)}
+                                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                    >
+                                      <Minus size={11} color="#000000" strokeWidth={3} />
+                                    </TouchableOpacity>
+                                    <Text style={styles.miniStepperQty}>{qty}</Text>
+                                    <TouchableOpacity
+                                      style={styles.miniStepperBtn}
+                                      onPress={() => updateCartQuantity(food.id, qty + 1)}
+                                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                    >
+                                      <Plus size={11} color="#000000" strokeWidth={3} />
+                                    </TouchableOpacity>
+                                  </View>
+                                ) : (
+                                  <TouchableOpacity
+                                    style={styles.dishMiniAddBtn}
+                                    onPress={() => addToCart(food)}
+                                    activeOpacity={0.8}
+                                  >
+                                    <Text style={styles.dishMiniAddPlus}>+</Text>
+                                  </TouchableOpacity>
+                                )}
                               </View>
 
                               <View style={styles.dishMiniDetails}>
@@ -766,13 +1066,11 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                     </View>
                   )}
 
-                  {/* 4. "MORE RESULTS LIKE THIS" / "FEATURED RESTAURANTS" SECTION */}
+                  {/* 4. MORE RESTAURANTS */}
                   {secondaryRestaurants.length > 0 && (
                     <View style={styles.moreResultsLikeThisSection}>
-                      <Text style={styles.moreResultsHeading}>More results like this</Text>
-                      
                       <View style={styles.sectionHeaderRow}>
-                        <Text style={styles.sectionHeaderText}>FEATURED RESTAURANTS</Text>
+                        <Text style={styles.sectionHeaderText}>ALL MATCHING RESTAURANTS</Text>
                         <View style={styles.sectionHeaderLine} />
                       </View>
 
@@ -815,12 +1113,6 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                               </View>
 
                               <View style={styles.featuredCardDetails}>
-                                <View style={styles.featuredBadgeRow}>
-                                  <Text style={styles.featuredBadgeText}>
-                                    {index === 0 ? '🏅 Best Rated' : '⚡ Bolt Delivery'}
-                                  </Text>
-                                </View>
-
                                 <Text style={styles.featuredCardName} numberOfLines={1}>
                                   {res.name}
                                 </Text>
@@ -860,140 +1152,6 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
               {/* ─── DISHES TAB ACTIVE ─── */}
               {activeTab === 'Dishes' && (
                 <View style={styles.dishesTabWrapper}>
-                  
-                  {/* 1. FILTER PILLS: TWO ROWS */}
-                  <View style={styles.dishesFiltersWrapper}>
-                    {/* Row 1: Sort By, 99 store, Veg Dishes, Non-Veg */}
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.filtersRowScroll}
-                      contentContainerStyle={styles.filtersRowContent}
-                    >
-                      <TouchableOpacity 
-                        style={styles.filterChip}
-                        onPress={() => Alert.alert('Sort By', 'Options: Popularity, Rating, Delivery Time, Price')}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={styles.filterChipText}>Sort By</Text>
-                        <ChevronDown size={14} color="#FFFFFF" style={{ marginLeft: 4 }} />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity 
-                        style={[styles.filterChip, is99Store && styles.filterChipActive]}
-                        onPress={() => setIs99Store(!is99Store)}
-                        activeOpacity={0.75}
-                      >
-                        <View style={styles.store99Badge}>
-                          <Text style={styles.store99BadgeText}>99</Text>
-                        </View>
-                        <Text style={[styles.filterChipText, { color: '#DEA430', fontWeight: '800' }]}>store</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity 
-                        style={[styles.filterChip, vegOnly && styles.filterChipActive]}
-                        onPress={() => {
-                          setVegOnly(!vegOnly);
-                          if (!vegOnly) setNonVegOnly(false);
-                        }}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={[styles.filterChipText, vegOnly && styles.filterChipTextActive]}>Veg Dishes</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity 
-                        style={[styles.filterChip, nonVegOnly && styles.filterChipActive]}
-                        onPress={() => {
-                          setNonVegOnly(!nonVegOnly);
-                          if (!nonVegOnly) setVegOnly(false);
-                        }}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={[styles.filterChipText, nonVegOnly && styles.filterChipTextActive]}>Non-Veg</Text>
-                      </TouchableOpacity>
-                    </ScrollView>
-
-                    {/* Row 2: Sub-category chips derived dynamically */}
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.filtersRowScroll}
-                      contentContainerStyle={styles.filtersRowContent}
-                    >
-                      {dynamicSubCategoryPills.map((subCategory) => {
-                        const isSubActive = selectedSubPill === subCategory;
-                        return (
-                          <TouchableOpacity
-                            key={`sub_${subCategory}`}
-                            style={[
-                              styles.filterChip,
-                              isSubActive && styles.subCategoryChipActive,
-                            ]}
-                            onPress={() => setSelectedSubPill(isSubActive ? null : subCategory)}
-                            activeOpacity={0.75}
-                          >
-                            <Text style={[
-                              styles.filterChipText,
-                              isSubActive ? styles.subCategoryChipTextActive : styles.filterChipText,
-                            ]}>
-                              {subCategory}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-
-                  {/* 2. HORIZONTAL PROMO BANNERS */}
-                  {dynamicPromoBanners.length > 0 && (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.promoBannersScroll}
-                      contentContainerStyle={styles.promoBannersContent}
-                    >
-                      {dynamicPromoBanners.map((banner) => (
-                        <TouchableOpacity
-                          key={`dish_banner_${banner.id}`}
-                          style={styles.promoBannerCard}
-                          activeOpacity={0.9}
-                          onPress={() => onNavigateToRestaurant(banner.id)}
-                        >
-                          <LazyImage source={{ uri: banner.image }} style={styles.promoBannerImage} />
-                          <View style={styles.promoBannerOverlay} />
-                          
-                          <View style={styles.promoBannerTopRow}>
-                            <View style={styles.promoDealBadge}>
-                              <Text style={styles.promoDealBadgeText}>{banner.deal}</Text>
-                            </View>
-                            {banner.ad && (
-                              <View style={styles.promoAdBadge}>
-                                <Text style={styles.promoAdBadgeText}>AD</Text>
-                              </View>
-                            )}
-                          </View>
-
-                          <View style={styles.promoBannerBottomDetails}>
-                            <Text style={styles.promoBannerName} numberOfLines={1}>{banner.name}</Text>
-                            <View style={styles.promoBannerMetaRow}>
-                              <Star size={11} color="#DEA430" fill="#DEA430" style={{ marginRight: 3 }} />
-                              <Text style={styles.promoBannerRating}>{banner.rating}</Text>
-                              <Text style={styles.metaDot}>•</Text>
-                              <Text style={styles.promoBannerTime}>{banner.deliveryTime}</Text>
-                            </View>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  )}
-
-                  {/* 3. FEATURED RESTAURANTS TITLE WITH TRAILING GOLD LINE */}
-                  <View style={styles.sectionHeaderRow}>
-                    <Text style={styles.sectionHeaderText}>FEATURED RESTAURANTS</Text>
-                    <View style={styles.sectionHeaderLine} />
-                  </View>
-
-                  {/* 4. RESTAURANT GROUPS WITH HORIZONTAL DISH CAROUSEL */}
                   <View style={styles.dishesGroupedList}>
                     {dishesGroupedByRestaurant.map((group, groupIdx) => {
                       const res = group.restaurant;
@@ -1023,26 +1181,12 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                               <View style={styles.restaurantGroupRatingRow}>
                                 <Star size={12} color="#DEA430" fill="#DEA430" style={{ marginRight: 3 }} />
                                 <Text style={styles.restaurantGroupRatingVal}>{res.rating || '4.5'}</Text>
-                                {res.reviewCount ? (
-                                  <Text style={styles.restaurantGroupReviewCount}>
-                                    ({res.reviewCount >= 1000 ? `${(res.reviewCount / 1000).toFixed(1)}K+` : `${res.reviewCount}+`})
-                                  </Text>
-                                ) : null}
                                 <Text style={styles.metaDot}>•</Text>
                                 <Text style={styles.metaText}>{typeof res.deliveryTime === 'number' ? `${res.deliveryTime} mins` : res.deliveryTime || '30 mins'}</Text>
                               </View>
-
-                              {res.offer && (
-                                <View style={styles.restaurantGroupOfferRow}>
-                                  <Tag size={12} color="#F97316" style={{ marginRight: 4 }} />
-                                  <Text style={styles.restaurantGroupOfferText}>
-                                    {res.offer}
-                                  </Text>
-                                </View>
-                              )}
                             </View>
 
-                            <ChevronRight size={22} color="#DEA430" />
+                            <ChevronRight size={20} color="#DEA430" />
                           </TouchableOpacity>
 
                           {/* Horizontal Dishes Scroll for this restaurant */}
@@ -1054,7 +1198,8 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                           >
                             {resDishes.map((food: any, foodIdx: number) => {
                               const originalPrice = Math.round(food.price * 1.25);
-                              const isAdded = cartItems.some(i => i.id === food.id);
+                              const cartItem = cartItems.find((i: any) => String(i.id) === String(food.id));
+                              const qty = cartItem ? cartItem.quantity : 0;
 
                               return (
                                 <View key={`dish_card_res_${food.id}_${foodIdx}`} style={styles.dishHorizontalCard}>
@@ -1092,28 +1237,40 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                                     </View>
                                   </View>
 
-                                  {/* Bottom Row: Price & ADD Button */}
+                                  {/* Bottom Row: Price & ADD Button / Stepper */}
                                   <View style={styles.dishCardBottomRow}>
                                     <View style={styles.dishPriceWrap}>
                                       <Text style={styles.dishCurrentPrice}>₹{food.price}</Text>
                                       <Text style={styles.dishOriginalPrice}>₹{originalPrice}</Text>
                                     </View>
 
-                                    <TouchableOpacity
-                                      style={[
-                                        styles.dishAddBtn,
-                                        isAdded && styles.dishAddBtnActive,
-                                      ]}
-                                      onPress={() => addToCart(food)}
-                                      activeOpacity={0.8}
-                                    >
-                                      <Text style={[
-                                        styles.dishAddBtnText,
-                                        isAdded && styles.dishAddBtnTextActive,
-                                      ]}>
-                                        {isAdded ? 'ADDED' : 'ADD'}
-                                      </Text>
-                                    </TouchableOpacity>
+                                    {qty > 0 ? (
+                                      <View style={styles.dishCardStepperBox}>
+                                        <TouchableOpacity
+                                          style={styles.stepperActionBtn}
+                                          onPress={() => updateCartQuantity(food.id, qty - 1)}
+                                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                        >
+                                          <Minus size={13} color="#000000" strokeWidth={3} />
+                                        </TouchableOpacity>
+                                        <Text style={styles.stepperQtyText}>{qty}</Text>
+                                        <TouchableOpacity
+                                          style={styles.stepperActionBtn}
+                                          onPress={() => updateCartQuantity(food.id, qty + 1)}
+                                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                        >
+                                          <Plus size={13} color="#000000" strokeWidth={3} />
+                                        </TouchableOpacity>
+                                      </View>
+                                    ) : (
+                                      <TouchableOpacity
+                                        style={styles.dishAddBtn}
+                                        onPress={() => addToCart(food)}
+                                        activeOpacity={0.8}
+                                      >
+                                        <Text style={styles.dishAddBtnText}>ADD +</Text>
+                                      </TouchableOpacity>
+                                    )}
                                   </View>
 
                                 </View>
@@ -1125,7 +1282,6 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
                       );
                     })}
                   </View>
-
                 </View>
               )}
 
@@ -1134,6 +1290,95 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
         )}
 
       </ScrollView>
+
+      {/* ─── FLOATING MINI-CART PILL (Better than Swiggy) ─── */}
+      {totalCartQty > 0 && (
+        <TouchableOpacity
+          style={[styles.floatingCartBar, { bottom: Math.max(insets.bottom, 12) + 8 }]}
+          activeOpacity={0.9}
+          onPress={() => {
+            if (onNavigateToCart) {
+              onNavigateToCart();
+            } else {
+              onBack();
+            }
+          }}
+        >
+          <View style={styles.floatingCartLeft}>
+            <View style={styles.floatingCartIcon}>
+              <ShoppingBag size={17} color="#000000" strokeWidth={2.4} />
+            </View>
+            <View>
+              <Text style={styles.floatingCartCountText}>{totalCartQty} {totalCartQty === 1 ? 'item' : 'items'} added</Text>
+              <Text style={styles.floatingCartPriceText}>₹{totalCartPrice} plus taxes</Text>
+            </View>
+          </View>
+          
+          <View style={styles.floatingCartRight}>
+            <Text style={styles.floatingCartCtaText}>View Cart</Text>
+            <ChevronRight size={18} color="#000000" strokeWidth={2.5} />
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* ─── INTERACTIVE VOICE SEARCH MODAL ─── */}
+      <Modal
+        visible={isVoiceModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsVoiceModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setIsVoiceModalVisible(false)}>
+          <View style={styles.voiceModalBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={styles.voiceCard}>
+                <TouchableOpacity
+                  style={styles.voiceCloseBtn}
+                  onPress={() => setIsVoiceModalVisible(false)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <X size={20} color="#8E8A80" />
+                </TouchableOpacity>
+
+                <View style={styles.voiceIconRing}>
+                  <Volume2 size={32} color="#DEA430" />
+                </View>
+
+                <Text style={styles.voiceListeningTitle}>Listening...</Text>
+                <Text style={styles.voiceSubtitle}>Speak dishes, restaurants, or cuisines</Text>
+
+                {/* Animated Sound Wave Bars */}
+                <View style={styles.soundWaveRow}>
+                  <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave1 }] }]} />
+                  <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave2 }] }]} />
+                  <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave3 }] }]} />
+                  <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave4 }] }]} />
+                  <Animated.View style={[styles.soundWaveBar, { transform: [{ scaleY: wave5 }] }]} />
+                </View>
+
+                {/* Quick Voice Chips */}
+                <Text style={styles.quickVoiceLabel}>Tap to simulate voice prompt:</Text>
+                <View style={styles.voicePromptsRow}>
+                  {['Hyderabadi Biryani', 'Margherita Pizza', 'Truffle Burger'].map((phrase, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={styles.voicePromptChip}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        setIsVoiceModalVisible(false);
+                        triggerSearch(phrase);
+                      }}
+                    >
+                      <Text style={styles.voicePromptChipText}>{phrase}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
     </View>
   );
 };
@@ -1141,54 +1386,64 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({ onBack, onNavigateTo
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B0A08',
+    backgroundColor: '#000000',
   },
   headerContainer: {
-    backgroundColor: '#0B0A08',
+    backgroundColor: '#000000',
     borderBottomWidth: 1,
-    borderBottomColor: '#1F1C16',
-    paddingTop: Platform.OS === 'ios' ? 4 : 8,
+    borderBottomColor: '#1A1814',
+    paddingBottom: 4,
   },
   topHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingBottom: 10,
+    paddingVertical: 8,
   },
   backBtn: {
     width: 36,
     height: 36,
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'center',
   },
+  voiceTopBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#181613',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#2E2920',
+  },
   headerTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontFamily: 'Urbanist-Bold',
     fontWeight: '700',
     color: '#FFFFFF',
-    letterSpacing: -0.2,
   },
   searchBarRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 8,
+    gap: 10,
   },
   inputInnerRow: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#12110E',
-    borderWidth: 1.5,
-    borderColor: '#DEA430',
+    borderWidth: 1,
+    borderColor: '#2B2822',
     borderRadius: 16,
-    height: 50,
+    height: 48,
     paddingHorizontal: 14,
   },
   textInput: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14.5,
     fontFamily: 'Urbanist-SemiBold',
     color: '#FFFFFF',
     paddingVertical: 8,
@@ -1205,101 +1460,137 @@ const styles = StyleSheet.create({
     width: 1,
     height: 20,
     backgroundColor: '#383228',
-    marginRight: 10,
-    marginLeft: 6,
+    marginRight: 8,
+    marginLeft: 4,
   },
   micBtn: {
     padding: 4,
   },
   vegToggleCard: {
-    borderWidth: 1.2,
-    borderColor: '#2E2920',
-    borderRadius: 14,
-    backgroundColor: '#12110E',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 10,
-    gap: 3,
+    gap: 6,
+    backgroundColor: '#12110E',
+    borderWidth: 1,
+    borderColor: '#2B2822',
+    borderRadius: 14,
+    height: 48,
+    paddingHorizontal: 12,
   },
   vegToggleCardActive: {
     borderColor: '#16A34A',
+    backgroundColor: 'rgba(22, 163, 74, 0.1)',
   },
   vegToggleLabel: {
-    fontSize: 9.5,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-    color: '#FFFFFF',
+    fontSize: 12,
+    fontFamily: 'Urbanist-ExtraBold',
+    color: '#16A34A',
+    fontWeight: '900',
   },
   vegSwitchTrack: {
-    width: 28,
+    width: 24,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#26221A',
-    padding: 1.5,
+    backgroundColor: '#2A261F',
     justifyContent: 'center',
+    paddingHorizontal: 2,
   },
   vegSwitchTrackActive: {
     backgroundColor: '#16A34A',
   },
   vegSwitchThumb: {
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    backgroundColor: '#FFFFFF',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#8E8A80',
   },
   vegSwitchThumbActive: {
+    backgroundColor: '#FFFFFF',
     alignSelf: 'flex-end',
   },
 
-  // Tabs Row
+  // Tabs
   tabsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#1A1814',
-    gap: 24,
+    paddingHorizontal: 16,
   },
   tabButton: {
-    paddingVertical: 10,
+    flex: 1,
     alignItems: 'center',
+    paddingVertical: 12,
     position: 'relative',
   },
   tabText: {
-    fontSize: 15.5,
+    fontSize: 14,
     fontFamily: 'Urbanist-Bold',
   },
   tabTextActive: {
     color: '#DEA430',
-    fontWeight: '700',
   },
   tabTextInactive: {
-    color: '#8E8A80',
-    fontWeight: '500',
+    color: '#71717A',
   },
   tabActiveIndicator: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 3,
+    bottom: -1,
+    left: 12,
+    right: 12,
+    height: 2.5,
     backgroundColor: '#DEA430',
     borderTopLeftRadius: 3,
     borderTopRightRadius: 3,
   },
 
-  // Body content
-  bodyContent: {
-    paddingBottom: 60,
+  // Filter Pills
+  filterPillsScroll: {
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  filterPillsContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  filterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#141310',
+    borderWidth: 1,
+    borderColor: '#26221A',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  filterPillActive: {
+    backgroundColor: '#DEA430',
+    borderColor: '#DEA430',
+  },
+  filterPillText: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-SemiBold',
+    color: '#CFCAC3',
+  },
+  filterPillTextActive: {
+    color: '#000000',
+    fontWeight: '800',
+  },
+  nonVegDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#DC2626',
+    marginRight: 5,
   },
 
-  // Initial Empty View
+  // Body
+  bodyContent: {
+    paddingTop: 8,
+  },
   initialContainer: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    gap: 24,
+    gap: 22,
   },
   initialSection: {
     gap: 12,
@@ -1310,15 +1601,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   initialSectionTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    color: '#FFFFFB',
+    fontWeight: '800',
+    color: '#DEA430',
+    letterSpacing: 0.5,
   },
   clearAllText: {
-    fontSize: 13,
-    fontFamily: 'Urbanist-Medium',
-    color: '#DEA430',
+    fontSize: 12,
+    fontFamily: 'Urbanist-SemiBold',
+    color: '#8E8A80',
   },
   recentChipsWrap: {
     flexDirection: 'row',
@@ -1328,84 +1620,95 @@ const styles = StyleSheet.create({
   recentChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#181613',
+    backgroundColor: '#141310',
     borderWidth: 1,
-    borderColor: '#2E2920',
+    borderColor: '#26221A',
     borderRadius: 20,
-    paddingHorizontal: 13,
-    paddingVertical: 7,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 6,
+  },
+  recentChipTouchPart: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
   },
   recentChipText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontFamily: 'Urbanist-Medium',
-    color: '#E0E0E0',
+    color: '#E2DCD5',
   },
-  cuisineGrid: {
+  recentDeleteBtn: {
+    padding: 4,
+    marginLeft: 4,
+  },
+  trendingSearchChip: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'space-between',
-  },
-  cuisineCard: {
-    width: '23%',
-    aspectRatio: 0.85,
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-    backgroundColor: '#1E1E1E',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: 8,
+    gap: 8,
+    backgroundColor: '#141310',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: '#26221A',
+    borderRadius: 20,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
   },
-  cuisineCardImg: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    height: '100%',
+  trendingSearchChipText: {
+    fontSize: 12.5,
+    fontFamily: 'Urbanist-SemiBold',
+    color: '#FFFFFF',
   },
-  cuisineCardOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  cuisineCardText: {
-    fontSize: 11,
+  trendingTag: {
+    fontSize: 10,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    color: '#FFFFFB',
+    color: '#F97316',
+    backgroundColor: 'rgba(249, 115, 22, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  cuisineRowContent: {
+    gap: 14,
+  },
+  cuisineColCard: {
+    alignItems: 'center',
+    width: 66,
+    gap: 6,
+  },
+  cuisineColImg: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#181613',
+    borderWidth: 1.5,
+    borderColor: '#2E2920',
+  },
+  cuisineColLabel: {
+    fontSize: 11.5,
+    fontFamily: 'Urbanist-Medium',
+    color: '#CFCAC3',
     textAlign: 'center',
-    paddingHorizontal: 2,
   },
 
   // Autocomplete Suggestions
   suggestionsContainer: {
     paddingHorizontal: 16,
-    paddingTop: 12,
     gap: 16,
   },
   suggestionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#151412',
-    borderRadius: 16,
-    padding: 12,
+    backgroundColor: '#12110E',
     borderWidth: 1,
     borderColor: '#242018',
+    borderRadius: 16,
+    padding: 10,
   },
   suggestionCircularImg: {
     width: 48,
     height: 48,
-    borderRadius: 12,
-    backgroundColor: '#26221A',
+    borderRadius: 24,
+    backgroundColor: '#1C1A17',
   },
   suggestionType: {
     fontSize: 12,
@@ -1416,62 +1719,139 @@ const styles = StyleSheet.create({
   sectionBlock: {
     gap: 10,
   },
-
-  // Loading
-  loadingContainer: {
-    paddingTop: 60,
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sectionHeaderText: {
+    fontSize: 12.5,
+    fontFamily: 'Urbanist-Bold',
+    color: '#DEA430',
+    letterSpacing: 0.5,
+  },
+  sectionHeaderLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#26221A',
+    marginLeft: 10,
+  },
+  seeAllSuggestionsBtn: {
+    backgroundColor: '#DEA430',
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 16,
+    gap: 8,
+    marginTop: 6,
   },
-  loadingText: {
-    fontSize: 15,
-    fontFamily: 'Urbanist-Medium',
-    color: '#CFCAC3',
-  },
-
-  // Results Container
-  resultsContainer: {
-    paddingTop: 14,
-  },
-  restaurantsTabWrapper: {
-    gap: 16,
+  seeAllSuggestionsText: {
+    fontSize: 14,
+    fontFamily: 'Urbanist-Bold',
+    color: '#000000',
   },
 
-  // 1. Promo Banners Carousel
+  // Zero Results View
+  zeroResultsContainer: {
+    alignItems: 'center',
+    paddingHorizontal: 28,
+    paddingTop: 48,
+    gap: 12,
+  },
+  zeroIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(222, 164, 48, 0.1)',
+    borderWidth: 1.5,
+    borderColor: '#DEA430',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  zeroTitle: {
+    fontSize: 18,
+    fontFamily: 'Urbanist-Bold',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  zeroSubtitle: {
+    fontSize: 13,
+    fontFamily: 'Urbanist-Regular',
+    color: '#8E8A80',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  zeroChipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  zeroChip: {
+    backgroundColor: '#181613',
+    borderWidth: 1,
+    borderColor: '#2E2920',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  zeroChipText: {
+    fontSize: 12.5,
+    fontFamily: 'Urbanist-SemiBold',
+    color: '#DEA430',
+  },
+  zeroResetBtn: {
+    backgroundColor: '#1E1B15',
+    borderWidth: 1,
+    borderColor: '#383228',
+    borderRadius: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  zeroResetBtnText: {
+    fontSize: 13,
+    fontFamily: 'Urbanist-Bold',
+    color: '#FFFFFF',
+  },
+
+  // Promo Banners
   promoBannersScroll: {
-    paddingLeft: 16,
+    marginBottom: 16,
   },
   promoBannersContent: {
-    paddingRight: 24,
+    paddingHorizontal: 16,
     gap: 12,
   },
   promoBannerCard: {
-    width: SCREEN_WIDTH * 0.72,
-    height: 175,
-    borderRadius: 18,
+    width: 220,
+    height: 110,
+    borderRadius: 16,
     overflow: 'hidden',
     position: 'relative',
-    backgroundColor: '#181714',
+    backgroundColor: '#171614',
     borderWidth: 1,
     borderColor: '#26221A',
   },
   promoBannerImage: {
     width: '100%',
     height: '100%',
-    position: 'absolute',
-    top: 0,
-    left: 0,
   },
   promoBannerOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.38)',
+    backgroundColor: 'rgba(0,0,0,0.48)',
   },
   promoBannerTopRow: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    right: 8,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 10,
-    alignItems: 'flex-start',
   },
   promoDealBadge: {
     backgroundColor: '#DEA430',
@@ -1480,70 +1860,68 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   promoDealBadgeText: {
-    color: '#000000',
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: 'Urbanist-Bold',
     fontWeight: '800',
+    color: '#000000',
   },
   promoAdBadge: {
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
   },
   promoAdBadgeText: {
-    color: '#CCCCCC',
-    fontSize: 9.5,
+    fontSize: 9,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
+    color: '#FFFFFF',
   },
   promoBannerBottomDetails: {
     position: 'absolute',
-    bottom: 12,
-    left: 12,
-    right: 12,
+    bottom: 8,
+    left: 8,
+    right: 8,
   },
   promoBannerName: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 14,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
+    color: '#FFFFFF',
   },
   promoBannerMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 3,
+    marginTop: 2,
   },
   promoBannerRating: {
-    color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
+    color: '#DEA430',
   },
   promoBannerTime: {
-    color: '#DDDDDD',
-    fontSize: 12,
-    fontFamily: 'Urbanist-Medium',
+    fontSize: 11,
+    fontFamily: 'Urbanist-Regular',
+    color: '#FFFFFF',
+  },
+  metaDot: {
+    fontSize: 11,
+    color: '#8E8A80',
+    marginHorizontal: 4,
   },
 
-  // 2. Primary Restaurant Card
+  // Primary Rest Card
   primaryRestCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#151412',
-    borderRadius: 18,
-    padding: 12,
-    marginHorizontal: 16,
+    backgroundColor: '#141310',
     borderWidth: 1,
     borderColor: '#26221A',
+    borderRadius: 18,
+    overflow: 'hidden',
+    marginHorizontal: 16,
+    marginBottom: 20,
   },
   primaryRestImageWrap: {
-    width: 82,
-    height: 82,
-    borderRadius: 14,
-    overflow: 'hidden',
+    height: 140,
     position: 'relative',
-    backgroundColor: '#26221A',
+    backgroundColor: '#1E1B15',
   },
   primaryRestImage: {
     width: '100%',
@@ -1551,40 +1929,39 @@ const styles = StyleSheet.create({
   },
   primaryRestDealBadge: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    paddingVertical: 2.5,
-    alignItems: 'center',
+    bottom: 10,
+    left: 10,
+    backgroundColor: '#DEA430',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   primaryRestDealText: {
-    color: '#DEA430',
-    fontSize: 10,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '900',
+    fontSize: 11,
+    fontFamily: 'Urbanist-ExtraBold',
+    color: '#000000',
   },
   primaryRestDetails: {
-    flex: 1,
-    marginLeft: 14,
-    justifyContent: 'center',
-    gap: 3,
+    padding: 14,
+    gap: 4,
   },
   primaryRestBestRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(222, 164, 48, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
   primaryRestBestText: {
-    color: '#DEA430',
-    fontSize: 12,
+    fontSize: 10.5,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
+    color: '#DEA430',
   },
   primaryRestName: {
-    fontSize: 19,
+    fontSize: 17,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
     color: '#FFFFFF',
+    marginTop: 2,
   },
   primaryRestRatingRow: {
     flexDirection: 'row',
@@ -1593,64 +1970,52 @@ const styles = StyleSheet.create({
   primaryRestRatingVal: {
     fontSize: 12.5,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginRight: 3,
+    color: '#DEA430',
   },
   primaryRestReviewCount: {
     fontSize: 12,
     fontFamily: 'Urbanist-Regular',
     color: '#8E8A80',
+    marginLeft: 3,
+  },
+  metaText: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Medium',
+    color: '#9E9A90',
   },
   primaryRestLocText: {
-    fontSize: 12.5,
-    fontFamily: 'Urbanist-Medium',
+    fontSize: 12,
+    fontFamily: 'Urbanist-Regular',
     color: '#8E8A80',
+    marginTop: 2,
   },
 
-  // 3. "BECAUSE YOU SEARCHED FOR ..." Carousel
+  // Because you searched section
   becauseSearchedSection: {
-    marginTop: 6,
+    paddingHorizontal: 16,
+    marginBottom: 24,
     gap: 12,
   },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-  },
-  sectionHeaderText: {
-    fontSize: 11.5,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-    color: '#DEA430',
-    letterSpacing: 0.5,
-    marginRight: 10,
-  },
-  sectionHeaderLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#66552B',
-  },
   becauseDishesScroll: {
-    paddingLeft: 16,
+    marginHorizontal: -16,
   },
   becauseDishesContent: {
-    paddingRight: 24,
-    gap: 10,
+    paddingHorizontal: 16,
+    gap: 12,
   },
   dishMiniCard: {
-    width: 145,
-    backgroundColor: '#151412',
-    borderRadius: 16,
+    width: 140,
+    backgroundColor: '#141310',
     borderWidth: 1,
     borderColor: '#26221A',
+    borderRadius: 16,
     overflow: 'hidden',
   },
   dishMiniImageWrap: {
     width: '100%',
-    height: 115,
+    height: 100,
     position: 'relative',
-    backgroundColor: '#26221A',
+    backgroundColor: '#1E1B15',
   },
   dishMiniImage: {
     width: '100%',
@@ -1658,96 +2023,113 @@ const styles = StyleSheet.create({
   },
   dishMiniAddBtn: {
     position: 'absolute',
-    bottom: 8,
-    right: 8,
+    bottom: 6,
+    right: 6,
+    backgroundColor: '#DEA430',
     width: 28,
     height: 28,
-    borderRadius: 6,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    borderWidth: 1,
-    borderColor: '#DEA430',
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  dishMiniAddBtnActive: {
-    backgroundColor: '#DEA430',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   dishMiniAddPlus: {
-    color: '#DEA430',
-    fontSize: 16,
+    fontSize: 18,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-    lineHeight: 18,
-  },
-  dishMiniAddPlusActive: {
+    fontWeight: '900',
     color: '#000000',
+    lineHeight: 20,
+  },
+  dishMiniStepperWrap: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DEA430',
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 3,
+    gap: 4,
+  },
+  miniStepperBtn: {
+    padding: 2,
+  },
+  miniStepperQty: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Bold',
+    color: '#000000',
+    fontWeight: '800',
   },
   dishMiniDetails: {
     padding: 10,
-    gap: 4,
+    gap: 3,
   },
   dishVegRow: {
     marginBottom: 2,
   },
   vegSquare: {
-    width: 13,
-    height: 13,
+    width: 12,
+    height: 12,
     borderWidth: 1.2,
+    borderRadius: 3,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 2,
   },
   vegCircle: {
     width: 6,
     height: 6,
     borderRadius: 3,
   },
+  vegSquareSmall: {
+    width: 11,
+    height: 11,
+    borderWidth: 1.2,
+    borderRadius: 2.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vegCircleSmall: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
   dishMiniName: {
-    color: '#FFFFFF',
     fontSize: 12.5,
-    fontFamily: 'Urbanist-Medium',
-    fontWeight: '600',
+    fontFamily: 'Urbanist-SemiBold',
+    color: '#FFFFFF',
     lineHeight: 16,
   },
   dishMiniPrice: {
-    color: '#DEA430',
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
+    color: '#DEA430',
     marginTop: 2,
   },
 
-  // 4. "MORE RESULTS LIKE THIS"
+  // Featured Restaurants List
   moreResultsLikeThisSection: {
-    marginTop: 10,
-    gap: 12,
-  },
-  moreResultsHeading: {
-    fontSize: 18,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-    color: '#FFFFFF',
     paddingHorizontal: 16,
+    gap: 14,
   },
   featuredRestList: {
-    paddingHorizontal: 16,
-    gap: 12,
+    gap: 14,
   },
   featuredRestaurantCard: {
-    flexDirection: 'row',
-    backgroundColor: '#151412',
-    borderRadius: 18,
-    padding: 12,
+    backgroundColor: '#141310',
     borderWidth: 1,
     borderColor: '#26221A',
+    borderRadius: 18,
+    overflow: 'hidden',
   },
   featuredCardImageWrap: {
-    width: 105,
-    height: 105,
-    borderRadius: 14,
-    overflow: 'hidden',
+    height: 130,
     position: 'relative',
-    backgroundColor: '#26221A',
+    backgroundColor: '#1E1B15',
   },
   featuredCardImage: {
     width: '100%',
@@ -1755,299 +2137,190 @@ const styles = StyleSheet.create({
   },
   featuredCardHeartBtn: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    padding: 4,
-    borderRadius: 12,
+    top: 10,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   featuredCardDealOverlay: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.85)',
+    bottom: 10,
+    left: 10,
+    backgroundColor: '#DEA430',
+    paddingHorizontal: 8,
     paddingVertical: 3,
-    alignItems: 'center',
+    borderRadius: 6,
   },
   featuredCardDealPrimary: {
-    color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 10.5,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '900',
+    color: '#000000',
   },
   featuredCardDetails: {
-    flex: 1,
-    marginLeft: 14,
-    justifyContent: 'center',
+    padding: 12,
     gap: 3,
   },
-  featuredBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  featuredBadgeText: {
-    color: '#DEA430',
-    fontSize: 12,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
   featuredCardName: {
-    color: '#FFFFFF',
     fontSize: 16,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-    marginTop: 1,
+    color: '#FFFFFF',
   },
   featuredCardRatingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 2,
   },
   greenStarRatingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#15803D',
+    backgroundColor: '#16A34A',
     paddingHorizontal: 5,
     paddingVertical: 1.5,
     borderRadius: 4,
+    marginRight: 4,
   },
   greenStarRatingVal: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-  },
-  featuredCardReviewCount: {
-    color: '#8E8A80',
-    fontSize: 12,
-    fontFamily: 'Urbanist-Regular',
-    marginLeft: 4,
-  },
-  featuredCardCuisines: {
-    color: '#8E8A80',
-    fontSize: 12,
-    fontFamily: 'Urbanist-Regular',
-    marginTop: 1,
-  },
-  featuredCardLoc: {
-    color: '#8E8A80',
-    fontSize: 12,
-    fontFamily: 'Urbanist-Regular',
-  },
-
-  // ─── DISHES TAB STYLING ───
-  dishesTabWrapper: {
-    gap: 16,
-  },
-  dishesFiltersWrapper: {
-    gap: 8,
-  },
-  filtersRowScroll: {
-    paddingLeft: 16,
-  },
-  filtersRowContent: {
-    paddingRight: 24,
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#151412',
-    borderWidth: 1,
-    borderColor: '#2A261F',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  filterChipActive: {
-    borderColor: '#DEA430',
-    backgroundColor: 'rgba(222, 164, 48, 0.1)',
-  },
-  filterChipText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: 'Urbanist-Medium',
-    fontWeight: '600',
-  },
-  filterChipTextActive: {
-    color: '#DEA430',
-    fontWeight: '700',
-  },
-  subCategoryChipActive: {
-    borderWidth: 1.5,
-    borderColor: '#DEA430',
-    backgroundColor: '#151412',
-  },
-  subCategoryChipTextActive: {
-    color: '#DEA430',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-  },
-  store99Badge: {
-    backgroundColor: '#DEA430',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 6,
-  },
-  store99BadgeText: {
-    color: '#000000',
     fontSize: 10.5,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  featuredCardReviewCount: {
+    fontSize: 11,
+    fontFamily: 'Urbanist-Regular',
+    color: '#8E8A80',
+  },
+  featuredCardCuisines: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Medium',
+    color: '#A1A1AA',
+  },
+  featuredCardLoc: {
+    fontSize: 11.5,
+    fontFamily: 'Urbanist-Regular',
+    color: '#71717A',
   },
 
-  // Dishes Grouped by Restaurant
-  dishesGroupedList: {
+  // Dishes Tab
+  dishesTabWrapper: {
     paddingHorizontal: 16,
-    gap: 20,
+    gap: 16,
+  },
+  dishesGroupedList: {
+    gap: 16,
   },
   dishGroupBlock: {
-    gap: 12,
+    backgroundColor: '#12110E',
+    borderWidth: 1,
+    borderColor: '#26221A',
+    borderRadius: 18,
+    overflow: 'hidden',
+    paddingBottom: 14,
   },
   restaurantGroupHeaderCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#151412',
-    borderRadius: 18,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#26221A',
+    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F1C16',
   },
   restaurantGroupLogoWrap: {
-    width: 54,
-    height: 54,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 10,
     overflow: 'hidden',
-    backgroundColor: '#26221A',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#1C1A17',
   },
   restaurantGroupLogo: {
     width: '100%',
     height: '100%',
-    resizeMode: 'cover',
   },
   restaurantGroupDetails: {
     flex: 1,
-    marginLeft: 14,
+    marginLeft: 12,
     gap: 2,
   },
   restaurantGroupName: {
-    fontSize: 18,
+    fontSize: 15,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
     color: '#FFFFFF',
-    flexShrink: 1,
-    marginRight: 6,
   },
   restaurantGroupRatingRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   restaurantGroupRatingVal: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginRight: 3,
+    color: '#DEA430',
   },
-  restaurantGroupReviewCount: {
-    fontSize: 12,
-    fontFamily: 'Urbanist-Regular',
-    color: '#8E8A80',
-  },
-  restaurantGroupOfferRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  restaurantGroupOfferText: {
-    color: '#F97316',
-    fontSize: 12,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-
-  // Grouped Dishes Scroll
   groupedDishesScroll: {
-    marginHorizontal: -16,
-    paddingLeft: 16,
+    marginTop: 12,
   },
   groupedDishesContent: {
-    paddingRight: 24,
+    paddingHorizontal: 14,
     gap: 12,
   },
   dishHorizontalCard: {
-    width: 255,
-    backgroundColor: '#151412',
-    borderRadius: 18,
-    padding: 14,
+    width: 220,
+    backgroundColor: '#181613',
     borderWidth: 1,
     borderColor: '#26221A',
-    justifyContent: 'space-between',
-    minHeight: 190,
+    borderRadius: 14,
+    padding: 12,
+    gap: 8,
   },
   dishCardTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
   },
   bestsellerTag: {
-    color: '#DEA430',
-    fontSize: 11,
+    fontSize: 10.5,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
+    color: '#DEA430',
   },
   dishCardMiddleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: 6,
+    gap: 8,
   },
   dishCardTextCol: {
     flex: 1,
-    paddingRight: 10,
-    gap: 6,
+    gap: 4,
   },
   dishCardTitle: {
-    color: '#FFFFFF',
-    fontSize: 15.5,
+    fontSize: 13.5,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    lineHeight: 20,
+    color: '#FFFFFF',
+    lineHeight: 18,
   },
   dishGreenRatingBadge: {
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
-    borderWidth: 1,
-    borderColor: '#22C55E',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(74, 222, 128, 0.15)',
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 4,
   },
   dishGreenRatingText: {
-    color: '#4ADE80',
-    fontSize: 10.5,
+    fontSize: 10,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
+    color: '#4ADE80',
   },
   dishCardImageWrap: {
-    width: 95,
-    height: 75,
-    borderRadius: 12,
+    width: 64,
+    height: 64,
+    borderRadius: 10,
     overflow: 'hidden',
-    backgroundColor: '#26221A',
+    backgroundColor: '#1E1B15',
   },
   dishCardImage: {
     width: '100%',
     height: '100%',
-    resizeMode: 'cover',
   },
   dishCardBottomRow: {
     flexDirection: 'row',
@@ -2057,51 +2330,210 @@ const styles = StyleSheet.create({
   },
   dishPriceWrap: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'baseline',
     gap: 6,
   },
   dishCurrentPrice: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 14.5,
     fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
+    color: '#FFFFFF',
   },
   dishOriginalPrice: {
-    color: '#8E8A80',
-    fontSize: 12.5,
-    fontFamily: 'Urbanist-Medium',
+    fontSize: 12,
+    fontFamily: 'Urbanist-Regular',
+    color: '#71717A',
     textDecorationLine: 'line-through',
   },
   dishAddBtn: {
-    backgroundColor: '#12110E',
-    borderWidth: 1.5,
-    borderColor: '#DEA430',
-    borderRadius: 10,
-    paddingHorizontal: 22,
-    paddingVertical: 7,
-  },
-  dishAddBtnActive: {
-    backgroundColor: 'rgba(222, 164, 48, 0.15)',
+    backgroundColor: '#DEA430',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   dishAddBtnText: {
-    color: '#DEA430',
-    fontSize: 12.5,
+    fontSize: 12,
     fontFamily: 'Urbanist-Bold',
     fontWeight: '800',
+    color: '#000000',
   },
-  dishAddBtnTextActive: {
-    color: '#4ADE80',
+  dishCardStepperBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DEA430',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    gap: 6,
+  },
+  stepperActionBtn: {
+    padding: 2,
+  },
+  stepperQtyText: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '900',
+    color: '#000000',
   },
 
-  // Common
-  metaDot: {
-    fontSize: 12,
-    color: '#555555',
-    marginHorizontal: 6,
+  // Loading
+  loadingContainer: {
+    alignItems: 'center',
+    paddingTop: 40,
+    gap: 12,
   },
-  metaText: {
-    fontSize: 12,
+  loadingText: {
+    fontSize: 14,
     fontFamily: 'Urbanist-Medium',
     color: '#8E8A80',
+  },
+  resultsContainer: {
+    gap: 16,
+  },
+  restaurantsTabWrapper: {
+    gap: 16,
+  },
+
+  // Floating Mini Cart Bar
+  floatingCartBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    maxWidth: isTablet ? 600 : undefined,
+    alignSelf: 'center',
+    backgroundColor: '#DEA430',
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 12,
+    zIndex: 9999,
+  },
+  floatingCartLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  floatingCartIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatingCartCountText: {
+    fontSize: 13,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#000000',
+  },
+  floatingCartPriceText: {
+    fontSize: 11,
+    fontFamily: 'Urbanist-Medium',
+    color: 'rgba(0, 0, 0, 0.75)',
+  },
+  floatingCartRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  floatingCartCtaText: {
+    fontSize: 13.5,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#000000',
+  },
+
+  // Voice Search Modal
+  voiceModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  voiceCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#141310',
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: '#2E2920',
+    padding: 24,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  voiceCloseBtn: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    padding: 6,
+  },
+  voiceIconRing: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#1E1B15',
+    borderWidth: 1.5,
+    borderColor: '#DEA430',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  voiceListeningTitle: {
+    fontSize: 20,
+    fontFamily: 'Urbanist-Bold',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  voiceSubtitle: {
+    fontSize: 13,
+    fontFamily: 'Urbanist-Medium',
+    color: '#8E8A80',
+    marginBottom: 20,
+  },
+  soundWaveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 40,
+    gap: 8,
+    marginBottom: 24,
+  },
+  soundWaveBar: {
+    width: 5,
+    height: 36,
+    borderRadius: 3,
+    backgroundColor: '#DEA430',
+  },
+  quickVoiceLabel: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-SemiBold',
+    color: '#CFCAC3',
+    marginBottom: 10,
+  },
+  voicePromptsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  voicePromptChip: {
+    backgroundColor: '#1E1B15',
+    borderWidth: 1,
+    borderColor: '#383228',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  voicePromptChipText: {
+    fontSize: 12.5,
+    fontFamily: 'Urbanist-Medium',
+    color: '#DEA430',
   },
 });

@@ -24,7 +24,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Search, Heart, ChevronRight, ArrowRight, SlidersHorizontal, ChevronDown, MoreVertical } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
-import { SCREEN_WIDTH, isTablet, isSmallDevice } from '../utils/responsive';
+import { SCREEN_WIDTH, isTablet, isSmallDevice, getSafeTopPadding } from '../utils/responsive';
 
 // Hero Platter Local Asset (Transparent PNG without background)
 const heroRollImg = require('../assets/home/payday_hero_rolls.png');
@@ -205,7 +205,7 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ── TOP FLOATING HEADER ── */}
-      <View style={[styles.headerRow, { paddingTop: 10 }]}>
+      <View style={[styles.headerRow, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           {/* Gold Border Circular Back Button */}
           <TouchableOpacity

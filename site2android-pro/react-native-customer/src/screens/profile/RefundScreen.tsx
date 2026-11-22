@@ -10,8 +10,10 @@ import {
   Platform,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, CheckCircle, Clock, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react-native';
 import { useViewModel } from '../../state/MainViewModel';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface RefundItem {
   id: string;
@@ -47,6 +49,7 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({
   onBack,
   onNavigateToOrder,
 }) => {
+  const insets = useSafeAreaInsets();
   const { authState } = useViewModel();
   const [selectedRefund, setSelectedRefund] = useState<RefundItem | null>(null);
   const [feedbackGiven, setFeedbackGiven] = useState<Record<string, boolean>>({});
@@ -131,11 +134,11 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({
     const isDone = selectedRefund.isCompleted;
 
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => setSelectedRefund(null)}
@@ -151,7 +154,7 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({
         {/* Scrollable Content */}
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 40) }]}
           showsVerticalScrollIndicator={false}
         >
           {/* Top Info Card */}
@@ -322,17 +325,17 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({
             )}
           </View>
         </ScrollView>
-      </SafeAreaView>
+      </View>
     );
   }
 
   // ─── REFUND LIST VIEW ───
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={onBack}
@@ -348,7 +351,7 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({
       {/* Content Area */}
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 40) }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Refund Status Announcement */}
@@ -437,7 +440,7 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({
           <Text style={styles.endOfListText}>You've reached the end of the list</Text>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 

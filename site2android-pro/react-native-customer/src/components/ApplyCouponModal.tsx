@@ -322,7 +322,7 @@ export const ApplyCouponModal: React.FC<ApplyCouponModalProps> = ({
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 * SCALE + insets.bottom }]}
         >
           {/* ════════════════════════════════════════════════════════════════════════
               [2] MANUAL COUPON INPUT BOX

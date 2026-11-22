@@ -35,7 +35,7 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
-import { SCREEN_WIDTH, isTablet } from '../utils/responsive';
+import { SCREEN_WIDTH, isTablet, getSafeTopPadding } from '../utils/responsive';
 
 // Local assets
 const freeTreatFullBannerImg = require('../assets/home/free_treat_full_banner.png');
@@ -213,7 +213,7 @@ export const FreeTreatScreen: React.FC<FreeTreatScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ── TOP FLOATING HEADER ── */}
-      <View style={[styles.headerRow, { paddingTop: 10 }]}>
+      <View style={[styles.headerRow, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <View style={styles.headerLeftWrap}>
           {/* Gold Border Circular Back Button */}
           <TouchableOpacity

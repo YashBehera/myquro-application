@@ -9,7 +9,9 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, ChevronDown } from 'lucide-react-native';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface StatementSubViewProps {
   email: string;
@@ -20,6 +22,7 @@ export const StatementSubView: React.FC<StatementSubViewProps> = ({
   email,
   onBack,
 }) => {
+  const insets = useSafeAreaInsets();
   const [statementDuration, setStatementDuration] = useState('');
   const [statementCategory, setStatementCategory] = useState('');
   const [showDurationModal, setShowDurationModal] = useState(false);
@@ -30,7 +33,7 @@ export const StatementSubView: React.FC<StatementSubViewProps> = ({
   return (
     <View style={styles.profileFigmaStatementScreenContainer}>
       {/* Custom Header */}
-      <View style={styles.profileFigmaStatementHeader}>
+      <View style={[styles.profileFigmaStatementHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity onPress={onBack} style={styles.profileFigmaStatementHeaderBackBtn}>
           <ArrowLeft size={22} color="#eae1d4" />
         </TouchableOpacity>
@@ -39,7 +42,7 @@ export const StatementSubView: React.FC<StatementSubViewProps> = ({
       </View>
 
       {/* Screen Content */}
-      <ScrollView style={styles.profileFigmaStatementScrollView} contentContainerStyle={styles.profileFigmaStatementScrollContent}>
+      <ScrollView style={styles.profileFigmaStatementScrollView} contentContainerStyle={[styles.profileFigmaStatementScrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 60) }]}>
         {/* Main Titles */}
         <Text style={styles.profileFigmaStatementMainTitleWhite}>Account</Text>
         <Text style={styles.profileFigmaStatementMainTitleGold}>Statements</Text>

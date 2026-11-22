@@ -519,7 +519,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
 
       <ScrollView
         style={styles.root}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
         stickyHeaderIndices={[2]}
         refreshControl={
@@ -535,7 +535,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 0] TOP HEADER (100% Pixel-Identical to HomeScreen.tsx)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: safeTopPadding }]}>
           {/* Left Column: Home label + Location Address */}
           <View style={styles.headerLeftCol}>
             <TouchableOpacity
@@ -2223,7 +2223,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
       <TopSearchSheetOverlay
         visible={isSearchSheetOpen}
         onClose={() => setIsSearchSheetOpen(false)}
-        onSelectRestaurant={(id) => {
+        onSelectRestaurant={(id, targetDishName) => {
           handleSelectDineoutRestaurant(id);
           setIsSearchSheetOpen(false);
         }}

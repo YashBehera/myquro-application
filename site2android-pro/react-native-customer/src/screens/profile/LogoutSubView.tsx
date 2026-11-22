@@ -6,8 +6,10 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft } from 'lucide-react-native';
 import { scale } from './profileUtils';
+import { getSafeTopPadding } from '../../utils/responsive';
 
 interface LogoutSubViewProps {
   onBack: () => void;
@@ -20,12 +22,13 @@ export const LogoutSubView: React.FC<LogoutSubViewProps> = ({
   showToast,
   logout,
 }) => {
+  const insets = useSafeAreaInsets();
   const deviceName = Platform.OS === 'ios' ? 'Apple iPhone18,3' : 'Android SDK built for x86';
 
   return (
     <View style={styles.favContainer}>
       {/* Header */}
-      <View style={styles.favHeader}>
+      <View style={[styles.favHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity onPress={onBack} style={styles.favHeaderBackBtn}>
           <ArrowLeft size={22} color="#eae1d4" />
         </TouchableOpacity>

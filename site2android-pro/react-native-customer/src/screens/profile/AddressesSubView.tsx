@@ -36,6 +36,8 @@ import {
   Share2,
 } from 'lucide-react-native';
 import { COLORS } from '../../theme/Theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 import {
   fetchPlaceSuggestions,
   getCoordsFromPlaceId,
@@ -71,6 +73,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
   editPhone,
   showToast,
 }) => {
+  const insets = useSafeAreaInsets();
   const [addressStep, setAddressStep] = useState<'list' | 'map' | 'form'>('list');
 
   useEffect(() => {
@@ -422,7 +425,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
       {addressStep === 'list' && (
         <View style={{ flex: 1 }}>
           {/* Header */}
-          <View style={styles.favHeader}>
+          <View style={[styles.favHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
             <TouchableOpacity onPress={onBack} style={styles.favHeaderBackBtn}>
               <ArrowLeft size={22} color="#eae1d4" />
             </TouchableOpacity>
@@ -533,7 +536,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
             />
           </View>
 
-          <SafeAreaView style={styles.profileFigmaTopHeaderArea} pointerEvents="box-none">
+          <View style={[styles.profileFigmaTopHeaderArea, { top: getSafeTopPadding(insets.top, 8) }]} pointerEvents="box-none">
             <View style={styles.profileFigmaTopSearchRow}>
               <TouchableOpacity onPress={() => setAddressStep('list')} style={styles.profileFigmaCircularBackBtn}>
                 <ArrowLeft size={20} color="#eae1d4" />
@@ -573,7 +576,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                 </ScrollView>
               </View>
             )}
-          </SafeAreaView>
+          </View>
 
           <TouchableOpacity
             style={styles.profileFigmaCurrentLocationBtn}
@@ -633,7 +636,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
 
       {addressStep === 'form' && (
         <View style={styles.profileFigmaFormScreenContainer}>
-          <View style={styles.profileFigmaFormTopBar}>
+          <View style={[styles.profileFigmaFormTopBar, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
             <TouchableOpacity onPress={() => setAddressStep('map')} style={styles.profileFigmaFormBackBtn}>
               <ArrowLeft size={22} color="#eae1d4" />
             </TouchableOpacity>
@@ -647,7 +650,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
 
           <ScrollView
             style={styles.profileFigmaFormScrollView}
-            contentContainerStyle={styles.profileFigmaFormScrollContent}
+            contentContainerStyle={[styles.profileFigmaFormScrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 48) }]}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.profileFigmaFormSection}>

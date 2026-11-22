@@ -10,7 +10,9 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft } from 'lucide-react-native';
+import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 
 interface StudentRewardsSubViewProps {
   onBack: () => void;
@@ -19,6 +21,7 @@ interface StudentRewardsSubViewProps {
 export const StudentRewardsSubView: React.FC<StudentRewardsSubViewProps> = ({
   onBack,
 }) => {
+  const insets = useSafeAreaInsets();
   const [studentEmail, setStudentEmail] = useState('');
 
   const isValidEmail = studentEmail.trim().endsWith('.edu') || studentEmail.trim().endsWith('.ac.in');
@@ -26,7 +29,7 @@ export const StudentRewardsSubView: React.FC<StudentRewardsSubViewProps> = ({
   return (
     <View style={styles.profileFigmaStudentScreenContainer}>
       {/* Custom Header */}
-      <View style={styles.profileFigmaStudentHeader}>
+      <View style={[styles.profileFigmaStudentHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <TouchableOpacity onPress={onBack} style={styles.profileFigmaStudentHeaderBackBtn}>
           <ArrowLeft size={22} color="#eae1d4" />
         </TouchableOpacity>
@@ -35,7 +38,7 @@ export const StudentRewardsSubView: React.FC<StudentRewardsSubViewProps> = ({
       </View>
 
       {/* Scrollable Content */}
-      <ScrollView style={styles.profileFigmaStudentScrollView} contentContainerStyle={styles.profileFigmaStudentScrollContent}>
+      <ScrollView style={styles.profileFigmaStudentScrollView} contentContainerStyle={[styles.profileFigmaStudentScrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 60) }]}>
         {/* Main Illustration */}
         <View style={styles.profileFigmaStudentIllustrationContainer}>
           <Image

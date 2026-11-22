@@ -65,6 +65,8 @@ import {
   isSmallDevice,
   SCREEN_WIDTH,
   MAX_CONTENT_WIDTH,
+  getSafeTopPadding,
+  getSafeBottomPadding,
 } from '../utils/responsive';
 
 // ─── Figma Node 3027:1289 & 3027:1201 Assets ───────────────────────────────────
@@ -554,7 +556,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       {/* ════════════════════════════════════════════════════════════════════════
           [1] TOP HEADER (FIGMA 3027:1289 & 3027:1201)
           ════════════════════════════════════════════════════════════════════════ */}
-      <View style={styles.topHeader}>
+      <View style={[styles.topHeader, { paddingTop: getSafeTopPadding(insets.top, 6) }]}>
         <TouchableOpacity style={styles.headerBackBtn} activeOpacity={0.8} onPress={onBack}>
           <Image source={checkBack} style={styles.headerBackImg} />
         </TouchableOpacity>
@@ -592,7 +594,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}
       >
         {/* ════════════════════════════════════════════════════════════════════════
             [2] BENEFITS BANNER
@@ -1134,7 +1136,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       {/* ════════════════════════════════════════════════════════════════════════
           [10] FOOTER - TACTICAL PAYMENT BAR (FIGMA NODE 3027:1289 & 3027:1201)
           ════════════════════════════════════════════════════════════════════════ */}
-      <View style={styles.stickyFooterBar}>
+      <View style={[styles.stickyFooterBar, { paddingBottom: getSafeBottomPadding(insets.bottom, 12) }]}>
         <View style={styles.footerContent}>
           {/* Payment Method Selector */}
           <TouchableOpacity

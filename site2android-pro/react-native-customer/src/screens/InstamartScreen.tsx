@@ -30,7 +30,7 @@ import {
   ShieldCheck,
 } from 'lucide-react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop, Path } from 'react-native-svg';
-import { SCREEN_WIDTH } from '../utils/responsive';
+import { SCREEN_WIDTH, getSafeTopPadding } from '../utils/responsive';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -53,7 +53,7 @@ export const InstamartScreen: React.FC<InstamartScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {/* ── TOP FLOATING HEADER ── */}
-      <View style={[styles.headerRow, { paddingTop: 10 }]}>
+      <View style={[styles.headerRow, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
         <View style={styles.headerLeftWrap}>
           {/* Gold Border Circular Back Button */}
           <TouchableOpacity

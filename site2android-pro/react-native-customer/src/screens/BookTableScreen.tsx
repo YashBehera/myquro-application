@@ -37,6 +37,7 @@ import {
   SCALE,
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
+  getSafeTopPadding,
 } from '../utils/responsive';
 
 import { BookingConfirmationScreen } from './BookingConfirmationScreen';
@@ -324,7 +325,7 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
         <View
           style={[
             styles.reviewHeaderContainer,
-            { paddingTop: 10 * SCALE },
+            { paddingTop: getSafeTopPadding(insets.top, 8) },
           ]}
         >
           <TouchableOpacity
@@ -471,7 +472,7 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
       <View
         style={[
           styles.headerContainer,
-          { paddingTop: 10 * SCALE },
+          { paddingTop: getSafeTopPadding(insets.top, 8) },
         ]}
       >
         <TouchableOpacity

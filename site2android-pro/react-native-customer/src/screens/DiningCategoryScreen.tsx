@@ -42,7 +42,7 @@ import {
   Percent,
 } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
-import { SCREEN_WIDTH } from '../utils/responsive';
+import { SCREEN_WIDTH, getSafeTopPadding } from '../utils/responsive';
 
 // ── 8 Transparent Category Hero Images ──
 const heroCafesImg     = require('../assets/dineout/cat_hero_cafes.png');
@@ -320,7 +320,7 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent={true} />
 
       {/* ── TOP FLOATING BACK & SEARCH BUTTONS OVERLAY ── */}
-      <View style={[styles.floatingHeader, { top: 12 }]}>
+      <View style={[styles.floatingHeader, { top: getSafeTopPadding(insets.top, 12) }]}>
         <TouchableOpacity
           style={styles.circleBtn}
           activeOpacity={0.8}
@@ -350,7 +350,7 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
           style={[
             styles.heroImageContainer,
             {
-              paddingTop: 42,
+              paddingTop: getSafeTopPadding(insets.top, 42),
               height: SCREEN_WIDTH / config.aspectRatio + 24,
             },
           ]}
