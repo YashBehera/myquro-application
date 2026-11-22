@@ -29,3 +29,26 @@ if (fs.existsSync(webviewFile)) {
     console.log('✅ Patched react-native-webview types for React 19');
   }
 }
+
+const safeAreaFile = path.join(__dirname, '../node_modules/react-native-safe-area-context/android/build.gradle');
+if (fs.existsSync(safeAreaFile)) {
+  let content = fs.readFileSync(safeAreaFile, 'utf8');
+  if (/com\.android\.tools\.build:gradle:9\./.test(content)) {
+    content = content.replace(
+      /classpath\(["']com\.android\.tools\.build:gradle:9\.[^"']+["']\)/g,
+      'classpath("com.android.tools.build:gradle:8.7.2")'
+    );
+    fs.writeFileSync(safeAreaFile, content, 'utf8');
+    console.log('✅ Patched react-native-safe-area-context AGP version to 8.7.2');
+  }
+}
+
+const rnGradlePluginToml = path.join(__dirname, '../node_modules/@react-native/gradle-plugin/gradle/libs.versions.toml');
+if (fs.existsSync(rnGradlePluginToml)) {
+  let content = fs.readFileSync(rnGradlePluginToml, 'utf8');
+  if (/agp\s*=\s*"9\./.test(content)) {
+    content = content.replace(/agp\s*=\s*"9\.[^"]+"/, 'agp = "8.7.2"');
+    fs.writeFileSync(rnGradlePluginToml, content, 'utf8');
+    console.log('✅ Patched @react-native/gradle-plugin AGP version to 8.7.2');
+  }
+}
