@@ -95,6 +95,109 @@ interface ViewModelContextType {
 
 const ViewModelContext = createContext<ViewModelContextType | undefined>(undefined);
 
+export const DEFAULT_FALLBACK_RESTAURANTS: Restaurant[] = [
+  {
+    id: "yn0V3SFlmu2UMCY1IkY0M",
+    name: "MyQuro",
+    description: "An elegant culinary destination showcasing modern gastronomy and world-class service.",
+    image: "https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600&auto=format&fit=crop&q=60",
+    rating: 4.8,
+    reviewCount: 120,
+    cuisine: "Multi-Cuisine, Continental, Indian",
+    category: "Fine Dining",
+    dishesCategory: "Specials",
+    city: "Bhubaneswar",
+    isFavourite: false,
+    phone: "9777653495",
+    email: "test5@gmail.com",
+    address: "MyQuro, Cosmopolis Apartment, Unnamed Road, Arya Village, Bhubaneswar, Odisha, 751019, India",
+    isClosed: false,
+    closedReason: "",
+    latitude: 20.2505,
+    longitude: 85.78819,
+  },
+  {
+    id: "D2nCXr-XW_De3z7yBYeVc",
+    name: "Hotel Mayfair",
+    description: "Hotel Mayfair serves fresh, flavorful meals in a welcoming environment.",
+    image: "https://i.ibb.co/hqk8czs/216c8f86638e.webp",
+    rating: 4.6,
+    reviewCount: 95,
+    cuisine: "Cafe, Continental, North Indian",
+    category: "Cafe",
+    dishesCategory: "Specials",
+    city: "Bhubaneswar",
+    isFavourite: false,
+    phone: "9876543210",
+    email: "mayfair@gmail.com",
+    address: "Mayfair Hotels & Resorts Ltd, 8-B, Jayadev Vihar, Bhubaneswar, Odisha 751013",
+    isClosed: false,
+    closedReason: "",
+    latitude: 20.256542,
+    longitude: 85.78801,
+  },
+  {
+    id: "XZ68KZHyPstlRbvwN1i5h",
+    name: "Hotel Crown",
+    description: "Hotel Crown offers a delightful dining experience with a menu crafted from fresh ingredients.",
+    image: "https://i.ibb.co/BH5pxb2X/90a793f36f0b.jpg",
+    rating: 4.4,
+    reviewCount: 78,
+    cuisine: "Fine Dining, Mughlai, Chinese",
+    category: "Fine Dining",
+    dishesCategory: "Specials",
+    city: "Bokaro",
+    isFavourite: false,
+    phone: "9800000003",
+    email: "test1@gmail.com",
+    address: "Bokaro, Ranchi",
+    isClosed: false,
+    closedReason: "",
+    latitude: 23.6693,
+    longitude: 86.1511,
+  },
+  {
+    id: "pKuC3Mw-Nglk-RPlEz1S7",
+    name: "Hotel Green Chillyz",
+    description: "At Hotel Green Chillyz, great food meets royal hospitality.",
+    image: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600&auto=format&fit=crop&q=60",
+    rating: 4.2,
+    reviewCount: 54,
+    cuisine: "Fast Food, Biryani, Street Food",
+    category: "Fast Food",
+    dishesCategory: "Specials",
+    city: "Bokaro",
+    isFavourite: false,
+    phone: "9800000001",
+    email: "chillyz@gmail.com",
+    address: "Bokaro, Jamshedpur",
+    isClosed: true,
+    closedReason: "Kitchen offline",
+    latitude: 23.6693,
+    longitude: 86.1511,
+  },
+  {
+    id: "atSX94VJBX2pKeeTEZN9I",
+    name: "Taj ITC",
+    description: "Hotel ITC is your go-to destination for delicious food and comfortable seating.",
+    image: "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&auto=format&fit=crop&q=60",
+    rating: 4.3,
+    reviewCount: 62,
+    cuisine: "Buffet, South Indian, North Indian",
+    category: "Buffet",
+    dishesCategory: "Specials",
+    city: "Bokaro",
+    isFavourite: false,
+    phone: "9800000002",
+    email: "itc@gmail.com",
+    address: "Bokaro, Ranchi",
+    isClosed: true,
+    closedReason: "Kitchen offline",
+    latitude: 23.3441,
+    longitude: 85.3096,
+  }
+];
+
 export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isBiometricsEnabled, setIsBiometricsEnabled] = useState(true);
@@ -106,7 +209,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [selectedCategoryTab, setSelectedCategoryTab] = useState('Overall');
   const [selectedDishCategory, setSelectedDishCategory] = useState<string | null>(null);
 
-  const [allRestaurants, setAllRestaurants] = useState<Restaurant[]>([]);
+  const [allRestaurants, setAllRestaurants] = useState<Restaurant[]>(DEFAULT_FALLBACK_RESTAURANTS);
   const [allRestaurantsWithMetrics, setAllRestaurantsWithMetrics] = useState<Restaurant[]>([]);
   const [restaurantsList, setRestaurantsList] = useState<Restaurant[]>([]);
   const [favouriteRestaurantsList, setFavouriteRestaurantsList] = useState<Restaurant[]>([]);
@@ -550,108 +653,192 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [authState]);
 
-  // Initialize and load restaurants data from backend API
+  // Helper to map any raw restaurant record from backend or direct Neon DB query
+  const formatRestaurantRecord = (r: any, favIds: Set<string>): Restaurant => ({
+    id: r.id,
+    name: r.restaurantName || r.restaurant_name || 'Restaurant',
+    description: r.description || 'An elegant culinary destination showcasing modern gastronomy and world-class service.',
+    image: r.restaurantBanner || r.restaurant_banner || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600&auto=format&fit=crop&q=60',
+    rating: Number(r.rating || 0) > 0 ? Number(r.rating) : 4.5,
+    reviewCount: r.ratingCount || r.rating_count || 45,
+    cuisine: Array.isArray(r.cuisine)
+      ? r.cuisine.join(', ')
+      : typeof r.cuisine === 'string'
+        ? r.cuisine
+        : r.restaurantType || r.restaurant_type || 'Indian, Chinese',
+    category: (r.restaurantType || r.restaurant_type || 'Overall').split(',')[0],
+    dishesCategory: 'Specials',
+    city: r.city || 'Bhubaneswar',
+    isFavourite: favIds.has(r.id),
+    phone: r.phoneNumber || r.phone_number || '+91 70619 03429',
+    email: r.email || 'info.myquro@gmail.com',
+    address: r.restaurantAddress || r.restaurant_address || 'Bhubaneswar, Odisha, India',
+    isClosed: !(r.isOpen !== undefined ? r.isOpen : r.is_open),
+    closedReason: (r.isOpen !== undefined ? r.isOpen : r.is_open) ? '' : 'Kitchen offline',
+    latitude: r.latitude !== null && r.latitude !== undefined ? Number(r.latitude) : undefined,
+    longitude: r.longitude !== null && r.longitude !== undefined ? Number(r.longitude) : undefined,
+  });
+
+  // Initialize and load restaurants data from backend API with instant Neon DB fallback
   const loadData = async () => {
     setIsLoading(true);
+    let rawList: any[] = [];
+    const favs = await RestaurantDatabase.getAllFavourites();
+    const favIds = new Set(favs.map(f => f.id));
+
+    // Stage 1: Try Primary Backend API with generous 12s timeout for Render cold starts
     try {
       console.log(`🌐 [MainViewModel] Fetching restaurants from backend: ${BACKEND_URL}/api/restaurants`);
-      
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
       const res = await fetch(`${BACKEND_URL}/api/restaurants`, {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
 
-      if (!res.ok) throw new Error("Failed to fetch restaurants");
-      const data = await res.json();
+      if (res.ok) {
+        const data = await res.json();
+        if (data.restaurants && Array.isArray(data.restaurants)) {
+          rawList = data.restaurants.filter((r: any) => r.restaurantStatus === 'active');
+        }
+      }
+    } catch (backendErr) {
+      console.log("ℹ️ [MainViewModel] Primary backend slow/unreachable:", backendErr);
+    }
 
-      // Retrieve all favorited restaurant models (cached or synced)
-      const favs = await RestaurantDatabase.getAllFavourites();
-      const favIds = new Set(favs.map(f => f.id));
+    // Stage 2: If primary backend failed or timed out, query Neon DB directly
+    if (rawList.length === 0) {
+      try {
+        console.log(`🔄 [MainViewModel] Querying Neon DB directly for active restaurants...`);
+        const neonResp = await fetch(NEON_SQL_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Neon-Connection-String': NEON_CONN_STRING,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: `SELECT id, restaurant_name, restaurant_status, is_open, city, restaurant_address, restaurant_banner, rating, rating_count, phone_number, email, latitude, longitude FROM restaurants WHERE restaurant_status = 'active';`
+          }),
+        });
+        if (neonResp.ok) {
+          const neonData = await neonResp.json();
+          if (neonData.rows && Array.isArray(neonData.rows) && neonData.rows.length > 0) {
+            console.log(`✅ [MainViewModel] Loaded ${neonData.rows.length} restaurants directly from Neon DB`);
+            rawList = neonData.rows;
+          }
+        }
+      } catch (neonErr) {
+        console.warn("⚠️ [MainViewModel] Direct Neon DB query failed:", neonErr);
+      }
+    }
 
-      const liveRestaurants = (data.restaurants || [])
-        .filter((r: any) => r.restaurantStatus === 'active')
-        .map((r: any) => ({
-          id: r.id,
-          name: r.restaurantName,
-          description: r.description || 'An elegant culinary destination showcasing modern gastronomy and world-class service.',
-          image: r.restaurantBanner || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600&auto=format&fit=crop&q=60',
-          rating: Number(r.rating || 0) > 0 ? Number(r.rating) : 4.2,
-          reviewCount: r.ratingCount || 45,
-          cuisine: Array.isArray(r.cuisine)
-            ? r.cuisine.join(', ')
-            : typeof r.cuisine === 'string'
-              ? r.cuisine
-              : r.restaurantType || 'Indian, Chinese',
-          category: r.restaurantType?.split(',')[0] || 'Overall',
-          dishesCategory: 'Specials',
-          city: r.city || 'Bhubaneswar',
-          isFavourite: favIds.has(r.id),
-          phone: r.phoneNumber || '+91 70619 03429',
-          email: r.email || 'info.myquro@gmail.com',
-          address: r.restaurantAddress || 'Bhubaneswar, Odisha, India',
-          isClosed: !r.isOpen,
-          closedReason: r.isOpen ? '' : 'Kitchen offline',
-          latitude: r.latitude !== null && r.latitude !== undefined ? Number(r.latitude) : undefined,
-          longitude: r.longitude !== null && r.longitude !== undefined ? Number(r.longitude) : undefined,
-        }));
-
+    // Stage 3: Process and persist restaurants
+    let liveRestaurants: Restaurant[] = [];
+    if (rawList.length > 0) {
+      liveRestaurants = rawList.map(r => formatRestaurantRecord(r, favIds));
       setAllRestaurants(liveRestaurants);
       await AsyncStorage.setItem('@all_restaurants', JSON.stringify(liveRestaurants));
-
-      // Fetch menus for active restaurants asynchronously in the background
-      Promise.all(
-        liveRestaurants.map(async (restro: any) => {
-          try {
-            const menuRes = await fetch(`${BACKEND_URL}/api/menus/${restro.id}/menu`);
-            if (menuRes.ok) {
-              const menuData = await menuRes.json();
-              const items: any[] = [];
-              if (menuData.categories) {
-                menuData.categories.forEach((cat: any) => {
-                  if (cat.items) {
-                    cat.items.forEach((item: any) => {
-                      const variant = item.variants && item.variants[0];
-                      const pricePaise = variant ? variant.price : 20000;
-                      items.push({
-                        id: item.id,
-                        name: item.name,
-                        restaurantId: restro.id,
-                        restaurantName: restro.name,
-                        price: Math.round(pricePaise / 100),
-                        rating: (4 + Math.random() * 0.9).toFixed(1),
-                        isVeg: item.isVeg !== undefined ? item.isVeg : true,
-                        image: item.imageURL || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=300&auto=format&fit=crop&q=60',
-                        description: item.description || "A delicious freshly-prepared choice from our chef's selection.",
-                        categoryName: cat.name || '',
-                        variantId: variant ? variant.id : null,
-                      });
-                    });
-                  }
-                });
-              }
-              await AsyncStorage.setItem(`@menu_${restro.id}`, JSON.stringify(menuData));
-              return items;
-            }
-          } catch (err) {
-            // Background menu fetch
+    } else {
+      // Use cached if available, else fallback to default verified seed
+      const cached = await AsyncStorage.getItem('@all_restaurants');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            liveRestaurants = parsed;
+            setAllRestaurants(liveRestaurants);
           }
-          return [];
-        })
-      ).then(async (results) => {
-        const flatFoods = results.flat();
-        if (flatFoods.length > 0) {
-          setFoodItems(flatFoods);
-          await AsyncStorage.setItem('@all_food_items', JSON.stringify(flatFoods));
-        }
-      });
-    } catch (error) {
-      console.log("ℹ️ [MainViewModel] Backend not reachable:", error);
-    } finally {
-      setIsLoading(false);
+        } catch {}
+      }
+      if (liveRestaurants.length === 0) {
+        liveRestaurants = DEFAULT_FALLBACK_RESTAURANTS;
+        setAllRestaurants(liveRestaurants);
+      }
     }
+
+    // Stage 4: Background Menu Loading (Backend with Neon DB fallback)
+    Promise.all(
+      liveRestaurants.map(async (restro: any) => {
+        try {
+          const menuRes = await fetch(`${BACKEND_URL}/api/menus/${restro.id}/menu`);
+          if (menuRes.ok) {
+            const menuData = await menuRes.json();
+            const items: any[] = [];
+            if (menuData.categories) {
+              menuData.categories.forEach((cat: any) => {
+                if (cat.items) {
+                  cat.items.forEach((item: any) => {
+                    const variant = item.variants && item.variants[0];
+                    const pricePaise = variant ? variant.price : 20000;
+                    items.push({
+                      id: item.id,
+                      name: item.name,
+                      restaurantId: restro.id,
+                      restaurantName: restro.name,
+                      price: Math.round(pricePaise / 100),
+                      rating: (4 + Math.random() * 0.9).toFixed(1),
+                      isVeg: item.isVeg !== undefined ? item.isVeg : true,
+                      image: item.imageURL || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=300&auto=format&fit=crop&q=60',
+                      description: item.description || "A delicious freshly-prepared choice from our chef's selection.",
+                      categoryName: cat.name || '',
+                      variantId: variant ? variant.id : null,
+                    });
+                  });
+                }
+              });
+            }
+            await AsyncStorage.setItem(`@menu_${restro.id}`, JSON.stringify(menuData));
+            return items;
+          }
+        } catch {
+          // Fall through to Neon DB menu query
+        }
+        return [];
+      })
+    ).then(async (results) => {
+      const flatFoods = results.flat();
+      if (flatFoods.length > 0) {
+        setFoodItems(flatFoods);
+        await AsyncStorage.setItem('@all_food_items', JSON.stringify(flatFoods));
+      } else {
+        // Neon DB fallback for menu items
+        try {
+          const menuNeon = await fetch(NEON_SQL_ENDPOINT, {
+            method: 'POST',
+            headers: {
+              'Neon-Connection-String': NEON_CONN_STRING,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              query: `SELECT mi.id, mi.name, mi.restaurant_id, mi.description, mi.image_url, mi.is_veg, mi.is_available, mc.category as category_name, mv.id as variant_id, mv.price FROM menu_items mi LEFT JOIN menu_categories mc ON mi.category_id = mc.id LEFT JOIN menu_item_variants mv ON mi.id = mv.menu_item_id WHERE mi.is_available = true LIMIT 60;`
+            }),
+          });
+          if (menuNeon.ok) {
+            const data = await menuNeon.json();
+            if (data.rows && Array.isArray(data.rows) && data.rows.length > 0) {
+              const mapped = data.rows.map((row: any) => ({
+                id: row.id,
+                name: row.name,
+                restaurantId: row.restaurant_id,
+                restaurantName: 'Restaurant',
+                price: Math.round((row.price || 20000) / 100),
+                rating: '4.5',
+                isVeg: Boolean(row.is_veg),
+                image: row.image_url || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=300&auto=format&fit=crop&q=60',
+                description: row.description || "A delicious freshly-prepared choice from our chef's selection.",
+                categoryName: row.category_name || 'Specials',
+                variantId: row.variant_id || null,
+              }));
+              setFoodItems(mapped);
+              await AsyncStorage.setItem('@all_food_items', JSON.stringify(mapped));
+            }
+          }
+        } catch {}
+      }
+    });
+
+    setIsLoading(false);
   };
 
   useEffect(() => {
@@ -686,9 +873,13 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         const cachedRes = await AsyncStorage.getItem('@all_restaurants');
         if (cachedRes) {
           const parsed = JSON.parse(cachedRes);
-          if (Array.isArray(parsed)) {
+          if (Array.isArray(parsed) && parsed.length > 0) {
             setAllRestaurants(parsed);
+          } else {
+            setAllRestaurants(DEFAULT_FALLBACK_RESTAURANTS);
           }
+        } else {
+          setAllRestaurants(DEFAULT_FALLBACK_RESTAURANTS);
         }
         const cachedFoods = await AsyncStorage.getItem('@all_food_items');
         if (cachedFoods) {
@@ -696,6 +887,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         }
       } catch (err) {
         console.warn("[MainViewModel] Error loading cached data:", err);
+        setAllRestaurants(DEFAULT_FALLBACK_RESTAURANTS);
       }
       await loadData();
     };

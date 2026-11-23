@@ -577,35 +577,6 @@ const MainAppContent: React.FC = () => {
             },
           ]}
         >
-          {/* Upsell discount banner directly on top */}
-          {(() => {
-            const cartTotalPrice = cartItems.reduce((acc, i) => acc + (i.price * i.quantity), 0);
-            const remainingForFlat300 = Math.max(0, 500 - cartTotalPrice);
-            return (
-              <View style={styles.fcUpsellCard}>
-                <View style={styles.fcDiscountBadge}>
-                  <Text style={styles.fcDiscountBadgePercent}>%</Text>
-                </View>
-                <View style={styles.fcUpsellTextWrap}>
-                  {remainingForFlat300 > 0 ? (
-                    <>
-                      <Text style={styles.fcUpsellTextLine1}>
-                        Add items worth <Text style={styles.fcUpsellGoldHighlight}>₹{remainingForFlat300}</Text> to save ₹300
-                      </Text>
-                      <Text style={styles.fcUpsellTextLine2}>Use code FLAT300 at checkout</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.fcUpsellTextLine1}>
-                        <Text style={styles.fcUpsellGoldHighlight}>🎉 ₹300 savings unlocked!</Text>
-                      </Text>
-                      <Text style={styles.fcUpsellTextLine2}>Apply code FLAT300 at checkout</Text>
-                    </>
-                  )}
-                </View>
-              </View>
-            );
-          })()}
 
           {/* Global Floating View Cart Bar */}
           <View style={styles.fcContainer}>

@@ -1275,27 +1275,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
               return (
                 <View key={orderId} style={[styles.orderCard, isActive && styles.orderCardActive]}>
-                  {/* Active Live Tracking Banner */}
-                  {isActive && (
-                    <TouchableOpacity
-                      style={styles.activeTrackingBanner}
-                      activeOpacity={0.85}
-                      onPress={() => onNavigateToTracking && onNavigateToTracking(orderId)}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                        <View style={styles.livePulseDot} />
-                        <Text style={styles.activeTrackingBannerText}>
-                          LIVE: {displayStatusText.toUpperCase()}
-                        </Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#000000', marginRight: 4 }}>
-                          TRACK
-                        </Text>
-                        <Navigation size={13} color="#000000" />
-                      </View>
-                    </TouchableOpacity>
-                  )}
+
 
                   {/* Card Header (Image + Name + Loc + Status) */}
                   <View style={styles.cardHeader}>
