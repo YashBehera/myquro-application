@@ -12,7 +12,7 @@
       "bundleIdentifier": "com.myquro.customer"
     },
     "android": {
-      "package": "com.myquro.customer",
+      "package": "com.aistudio.myquro.pkfxt",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0B0B0B"
@@ -22,8 +22,8 @@
         "ACCESS_COARSE_LOCATION",
         "CAMERA",
         "VIBRATE",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "plugins": [

@@ -13,6 +13,7 @@ class MainActivity : ReactActivity() {
    * Required for react-native-screens to properly manage view lifecycle.
    */
   override fun onCreate(savedInstanceState: Bundle?) {
+    setTheme(R.style.AppTheme)
     super.onCreate(null)
   }
 
