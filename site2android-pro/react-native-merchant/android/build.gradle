@@ -41,7 +41,13 @@ allprojects {
     tasks.matching { it.name.contains("AarMetadata") && it.name.startsWith("check") }.configureEach {
         enabled = false
     }
+    afterEvaluate { project ->
+        if (project.name == 'expo') {
+            project.android.sourceSets.main.java.srcDirs += new File(project.buildDir, 'generated/expo/src/main/java')
+        }
+    }
 }
 
+apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
 
