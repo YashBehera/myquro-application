@@ -40,6 +40,7 @@ import companyRoutes from "./routes/company.routes.js";
 import favouriteRoutes from "./routes/favourite.routes.js";
 import deliveryRoutes from "./routes/delivery.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
+import complaintsRoutes from "./routes/complaints.routes.js";
 import riderOnboardingRoutes from "./routes/rider-onboarding.routes.js";
 import customerAuthRoutes from "./routes/customerAuth.routes.js";
 
@@ -155,6 +156,7 @@ app.use("/api/loyalty", loyaltyRoutes);
 app.use("/api/companies", companyRoutes);
 app.use("/api/favourites", favouriteRoutes);
 app.use("/api/delivery", deliveryRoutes);
+app.use("/api/complaints", complaintsRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/rider/onboarding", riderOnboardingRoutes);
 app.use("/api/customer/auth", customerAuthRoutes);

@@ -832,13 +832,25 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 85 + insets.bottom }]}
       >
         {/* ════════════════════════════════════════════════════════════════════════
-            [2] BENEFITS BANNER
+            [2] BENEFITS BANNER (LUXURY OBSIDIAN & CHAMPAGNE GOLD)
             ════════════════════════════════════════════════════════════════════════ */}
         <View style={styles.benefitsBanner}>
-          <Image source={checkSparkle} style={styles.benefitsSparkleImg} />
-          <Text style={styles.benefitsText}>
-            <Text style={styles.benefitsGoldText}>₹55 saved!</Text> With MyQURO benefits
-          </Text>
+          <View style={styles.benefitsLeftWrap}>
+            <View style={styles.benefitsIconBadge}>
+              <Svg width={13 * SCALE} height={13 * SCALE} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
+                  fill="#F2CA50"
+                />
+              </Svg>
+            </View>
+            <Text style={styles.benefitsText}>
+              <Text style={styles.benefitsGoldText}>₹55 saved!</Text> with MYQURO Benefits
+            </Text>
+          </View>
+          <View style={styles.benefitsAppliedBadge}>
+            <Text style={styles.benefitsAppliedText}>BENEFITS</Text>
+          </View>
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════════
@@ -1952,28 +1964,65 @@ const styles = StyleSheet.create({
   benefitsBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#010A05',
-    borderWidth: 1,
-    borderColor: '#1E2C20',
-    borderRadius: 12 * SCALE,
+    justifyContent: 'space-between',
+    backgroundColor: '#110F0A',
+    borderWidth: 1.2,
+    borderColor: 'rgba(222, 164, 48, 0.28)',
+    borderRadius: 14 * SCALE,
     paddingHorizontal: 14 * SCALE,
     paddingVertical: 10 * SCALE,
-    gap: 8 * SCALE,
     marginBottom: 12 * SCALE,
+    shadowColor: '#DEA430',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  benefitsLeftWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9 * SCALE,
+    flex: 1,
+  },
+  benefitsIconBadge: {
+    width: 24 * SCALE,
+    height: 24 * SCALE,
+    borderRadius: 12 * SCALE,
+    backgroundColor: 'rgba(222, 164, 48, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(222, 164, 48, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   benefitsSparkleImg: {
-    width: 16 * SCALE,
-    height: 16 * SCALE,
+    width: 14 * SCALE,
+    height: 14 * SCALE,
     resizeMode: 'contain',
   },
   benefitsText: {
-    fontFamily: 'Urbanist-Regular',
+    fontFamily: 'Urbanist-Medium',
     fontSize: 12.5 * SCALE,
-    color: '#717371',
+    color: '#D4CEBE',
+    letterSpacing: 0.15,
   },
   benefitsGoldText: {
+    fontFamily: 'Urbanist-ExtraBold',
+    color: '#F2CA50',
+    letterSpacing: 0.2,
+  },
+  benefitsAppliedBadge: {
+    backgroundColor: 'rgba(222, 164, 48, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(222, 164, 48, 0.25)',
+    borderRadius: 6 * SCALE,
+    paddingHorizontal: 7 * SCALE,
+    paddingVertical: 3 * SCALE,
+  },
+  benefitsAppliedText: {
     fontFamily: 'Urbanist-Bold',
-    color: '#49A463',
+    fontSize: 9 * SCALE,
+    color: '#F2CA50',
+    letterSpacing: 0.6,
   },
 
   // ── 3. GOLD CLUB CARD ──────────────────────────────────────────
@@ -2688,9 +2737,9 @@ const styles = StyleSheet.create({
     color: '#BABABA',
   },
   toPaySavingsText: {
-    fontFamily: 'Urbanist-Regular',
+    fontFamily: 'Urbanist-Bold',
     fontSize: 12 * SCALE,
-    color: '#488F59',
+    color: '#DEA430',
   },
   toPayChevronImg: {
     width: 12 * SCALE,
@@ -2723,14 +2772,14 @@ const styles = StyleSheet.create({
     color: '#CCCCCC',
   },
   billDetailLabelGreen: {
-    fontFamily: 'Urbanist-Regular',
+    fontFamily: 'Urbanist-Medium',
     fontSize: 12 * SCALE,
-    color: '#488F59',
+    color: '#DEA430',
   },
   billDetailValueGreen: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 12.5 * SCALE,
-    color: '#488F59',
+    color: '#F2CA50',
   },
   freeDeliveryRow: {
     flexDirection: 'row',
@@ -2746,7 +2795,7 @@ const styles = StyleSheet.create({
   freeDeliveryGreen: {
     fontFamily: 'Urbanist-Bold',
     fontSize: 12 * SCALE,
-    color: '#488F59',
+    color: '#F2CA50',
   },
 
   // ── 9. CANCELLATION POLICY ─────────────────────────────────────

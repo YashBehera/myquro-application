@@ -2737,11 +2737,14 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           );
         }}
         onContactSupport={() => {
+          const supportOptions: any[] = [
+            { text: 'Call Helpdesk (+91 70619 03429)', onPress: () => Linking.openURL('tel:+917061903429') },
+          ];
           if (riderInfo?.phone) {
-            Linking.openURL(`tel:${riderInfo.phone}`);
-          } else {
-            Alert.alert('Delivery Support', 'Connecting to MyQuro delivery support hotline...');
+            supportOptions.unshift({ text: `Call Delivery Partner (${riderInfo.name || 'Rider'})`, onPress: () => Linking.openURL(`tel:${riderInfo.phone}`) });
           }
+          supportOptions.push({ text: 'Dismiss', style: 'cancel' });
+          Alert.alert('Delivery Support', 'How would you like to connect regarding this order?', supportOptions);
         }}
         onExploreOffers={() => {
           Alert.alert('My Quro Pay', 'Explore exclusive 5% cashback offers on every order with My Quro Pay!');
@@ -3415,21 +3418,21 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             </View>
 
             {/* ══════════════════════════════════════════════════════════════════════
-              [4] SAVINGS PILL BANNER (PREMIUM EMERALD GLOW CAPSULE)
+              [4] SAVINGS PILL BANNER (LUXURY OBSIDIAN & CHAMPAGNE GOLD CAPSULE)
               ══════════════════════════════════════════════════════════════════════ */}
             <View style={styles.savingsPillBanner}>
-              {/* Ambient Emerald Glass Glow Background */}
+              {/* Ambient Gold Glass Glow Background */}
               <View style={StyleSheet.absoluteFill} pointerEvents="none">
                 <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
                   <Defs>
                     <LinearGradient id="savingsBaseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <Stop offset="0%" stopColor="#08140B" />
-                      <Stop offset="50%" stopColor="#0E2816" />
-                      <Stop offset="100%" stopColor="#08140B" />
+                      <Stop offset="0%" stopColor="#100E08" />
+                      <Stop offset="50%" stopColor="#1C160B" />
+                      <Stop offset="100%" stopColor="#100E08" />
                     </LinearGradient>
                     <RadialGradient id="savingsCenterGlow" cx="50%" cy="50%" r="55%" fx="50%" fy="50%">
-                      <Stop offset="0%" stopColor="#22C55E" stopOpacity="0.22" />
-                      <Stop offset="100%" stopColor="#08140B" stopOpacity="0" />
+                      <Stop offset="0%" stopColor="#DEA430" stopOpacity="0.22" />
+                      <Stop offset="100%" stopColor="#100E08" stopOpacity="0" />
                     </RadialGradient>
                   </Defs>
                   <Rect width="100%" height="100%" fill="url(#savingsBaseGrad)" />
@@ -3437,22 +3440,30 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                 </Svg>
               </View>
 
-              {/* Left Glowing Diamond Star */}
-              <Svg width={14 * SCALE} height={14 * SCALE} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
-                  fill="#34D399"
-                />
-              </Svg>
+              <View style={styles.savingsBannerLeftRow}>
+                {/* Left Glowing Diamond Star in gold badge */}
+                <View style={styles.savingsStarBadge}>
+                  <Svg width={13 * SCALE} height={13 * SCALE} viewBox="0 0 24 24" fill="none">
+                    <Path
+                      d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
+                      fill="#F2CA50"
+                    />
+                  </Svg>
+                </View>
 
-              {/* Banner Text with Highlighted Savings */}
-              <Text style={styles.savingsBannerText}>
-                Yay!{' '}
-                <Text style={styles.savingsAmountHighlight}>
-                  {normalizePrice(orderDetail?.discount) > 0 ? `₹${normalizePrice(orderDetail.discount)} saved` : 'FREE delivery'}
+                {/* Banner Text with Highlighted Savings */}
+                <Text style={styles.savingsBannerText}>
+                  Yay!{' '}
+                  <Text style={styles.savingsAmountHighlight}>
+                    {normalizePrice(orderDetail?.discount) > 0 ? `₹${normalizePrice(orderDetail.discount)} saved` : 'FREE delivery'}
+                  </Text>
+                  {' '}on this order
                 </Text>
-                {' '}on this order
-              </Text>
+              </View>
+
+              <View style={styles.savingsOneBadge}>
+                <Text style={styles.savingsOneBadgeText}>MYQURO ONE</Text>
+              </View>
             </View>
 
             {/* ══════════════════════════════════════════════════════════════════════
@@ -4595,33 +4606,65 @@ const styles = StyleSheet.create({
 
   // ── 4. Savings Pill Banner (Figma Node 3046:153) ────────────────
   savingsPillBanner: {
-    backgroundColor: '#07150C',
+    backgroundColor: '#120F0A',
     borderRadius: 24 * SCALE,
     borderWidth: 1.2,
-    borderColor: '#194523',
+    borderColor: 'rgba(222, 164, 48, 0.32)',
     paddingVertical: 12 * SCALE,
-    paddingHorizontal: 18 * SCALE,
+    paddingHorizontal: 16 * SCALE,
     marginBottom: 12 * SCALE,
     position: 'relative',
     overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#10B981',
+    shadowColor: '#DEA430',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
     elevation: 4,
+  },
+  savingsBannerLeftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9 * SCALE,
+    flex: 1,
+  },
+  savingsStarBadge: {
+    width: 24 * SCALE,
+    height: 24 * SCALE,
+    borderRadius: 12 * SCALE,
+    backgroundColor: 'rgba(222, 164, 48, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(222, 164, 48, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   savingsBannerText: {
     fontFamily: 'Urbanist-SemiBold',
     fontSize: 13.5 * SCALE,
-    color: '#86EFAC',
+    color: '#E8E1D2',
     letterSpacing: 0.2,
   },
   savingsAmountHighlight: {
     fontFamily: 'Urbanist-ExtraBold',
-    color: '#4ADE80',
+    color: '#F2CA50',
+    letterSpacing: 0.2,
+  },
+  savingsOneBadge: {
+    backgroundColor: 'rgba(222, 164, 48, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(222, 164, 48, 0.3)',
+    borderRadius: 6 * SCALE,
+    paddingHorizontal: 7 * SCALE,
+    paddingVertical: 3 * SCALE,
+    marginLeft: 8 * SCALE,
+  },
+  savingsOneBadgeText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 9 * SCALE,
+    color: '#F2CA50',
+    letterSpacing: 0.6,
   },
 
   // ── 5. MyQuro Real Cashback Promo Card ─────────────────────────

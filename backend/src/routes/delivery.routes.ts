@@ -11,6 +11,7 @@ import { menuItems } from "../db/schema/menu-items.js";
 import { menuItemVariants } from "../db/schema/menu-item-variants.js";
 import { authSessions } from "../db/schema/auth-sessions.js";
 import { operatingCities, operatingZones } from "../db/schema/rider-onboarding.js";
+import { complaints } from "../db/schema/complaints.js";
 import { requireAuth } from "../auth/requireAuth.js";
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -1809,9 +1810,7 @@ function getWeekNumber(d: Date) {
   return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
 }
 
-// In-memory support tickets store: ticketId -> Ticket
-const riderTicketsStore: any[] = [];
-
+// Persistent Support Tickets stored in Neon DB complaints table
 // POST /api/delivery/rider/support-ticket
 router.post("/rider/support-ticket", requireAuth, async (req: any, res) => {
   try {
@@ -1819,25 +1818,57 @@ router.post("/rider/support-ticket", requireAuth, async (req: any, res) => {
     const { category, subject, description, metadata, attachments } = req.body;
 
     const ticketId = `TKT-${nanoid(7).toUpperCase()}`;
+    const now = new Date();
+    const nowIso = now.toISOString();
+
     const newTicket = {
       id: ticketId,
+      ticketType: "rider_issue",
       riderId: user.id,
       category: category || "general",
-      subject: subject || "Support Request",
+      categoryLabel: subject || category || "Rider Support Request",
+      reason: subject || "Support Request",
       description: description || "",
+      priority: "MEDIUM",
+      status: "OPEN",
       metadata: metadata || {},
-      attachments: attachments || [],
-      status: "in_progress",
-      createdAt: new Date().toISOString(),
-      estimatedResolution: "Within 2-4 hours",
+      evidence: attachments || [],
+      messages: [
+        {
+          id: `msg-${nanoid(6)}`,
+          complaintId: ticketId,
+          senderId: user.id,
+          senderName: user.name || "Rider",
+          senderType: "CUSTOMER",
+          message: description || subject || "Support Request",
+          timestamp: nowIso,
+        },
+      ],
+      auditLogs: [
+        {
+          id: `aud-${nanoid(6)}`,
+          complaintId: ticketId,
+          user: user.name || "Rider",
+          action: "Ticket Created",
+          timestamp: nowIso,
+          newStatus: "OPEN",
+          notes: subject || "Rider submitted support ticket",
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
     };
 
-    riderTicketsStore.unshift(newTicket);
+    await db.insert(complaints).values(newTicket as any);
 
     return res.status(200).json({
       success: true,
       message: "Ticket submitted successfully",
-      ticket: newTicket,
+      ticket: {
+        ...newTicket,
+        createdAt: nowIso,
+        estimatedResolution: "Within 2-4 hours",
+      },
     });
   } catch (err) {
     console.error("❌ POST support ticket error:", err);
@@ -1849,7 +1880,12 @@ router.post("/rider/support-ticket", requireAuth, async (req: any, res) => {
 router.get("/rider/support-tickets", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
-    const userTickets = riderTicketsStore.filter((t) => t.riderId === user.id);
+    const userTickets = await db
+      .select()
+      .from(complaints)
+      .where(and(eq(complaints.riderId, user.id), eq(complaints.ticketType, "rider_issue")))
+      .orderBy(desc(complaints.createdAt));
+
     return res.status(200).json({
       success: true,
       tickets: userTickets,
@@ -1859,6 +1895,7 @@ router.get("/rider/support-tickets", requireAuth, async (req: any, res) => {
     return res.status(500).json({ message: "Failed to retrieve tickets" });
   }
 });
+
 
 // In-memory Floating Cash Store per rider
 interface FloatingCashTxn {

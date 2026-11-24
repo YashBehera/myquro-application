@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,106 @@ import {
   TouchableOpacity,
   ScrollView,
   StatusBar,
+  ActivityIndicator,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useRider } from '@/context/RiderContext';
+import { BACKEND_URL } from '@/config';
 
 export default function HelpSupportScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { sessionToken, driverProfile } = useRider();
+
+  const [activeTab, setActiveTab] = useState<'issues' | 'my_tickets'>('issues');
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [isLoadingTickets, setIsLoadingTickets] = useState(false);
+  const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
+  const [replyTextMap, setReplyTextMap] = useState<Record<string, string>>({});
+  const [isSendingReply, setIsSendingReply] = useState(false);
 
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
     } else {
       router.replace('/(tabs)/more');
+    }
+  };
+
+  const fetchTickets = async () => {
+    setIsLoadingTickets(true);
+    try {
+      if (sessionToken) {
+        const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-tickets`, {
+          headers: {
+            Authorization: `Bearer ${sessionToken}`,
+            Origin: 'http://localhost:3000',
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.tickets && Array.isArray(data.tickets)) {
+            setTickets(data.tickets);
+            return;
+          }
+        }
+      }
+
+      const rId = driverProfile?.id || driverProfile?.deId;
+      if (rId) {
+        const res = await fetch(`${BACKEND_URL}/api/complaints/rider/${rId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.tickets && Array.isArray(data.tickets)) {
+            setTickets(data.tickets);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching rider support tickets:', err);
+    } finally {
+      setIsLoadingTickets(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTickets();
+  }, [sessionToken]);
+
+  const handleSendTicketReply = async (ticketId: string) => {
+    const text = replyTextMap[ticketId]?.trim();
+    if (!text) return;
+
+    setIsSendingReply(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/complaints/${ticketId}/message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        },
+        body: JSON.stringify({
+          senderId: driverProfile?.id || driverProfile?.deId || 'RIDER',
+          senderName: driverProfile?.name || 'Rider',
+          senderType: 'CUSTOMER',
+          message: text,
+        }),
+      });
+
+      if (res.ok) {
+        setReplyTextMap((prev) => ({ ...prev, [ticketId]: '' }));
+        fetchTickets();
+      } else {
+        Alert.alert('Error', 'Failed to send message.');
+      }
+    } catch (err) {
+      console.error('Error replying to ticket:', err);
+    } finally {
+      setIsSendingReply(false);
     }
   };
 
@@ -43,6 +129,22 @@ export default function HelpSupportScreen() {
     }
   };
 
+  const getStatusBadge = (status: string) => {
+    switch (status?.toUpperCase()) {
+      case 'OPEN':
+      case 'SUBMITTED':
+        return { label: 'Open', color: '#F2CA50', bg: 'rgba(242, 202, 80, 0.15)' };
+      case 'IN_PROGRESS':
+        return { label: 'In Review', color: '#38BDF8', bg: 'rgba(56, 189, 248, 0.15)' };
+      case 'RESOLVED':
+        return { label: 'Resolved', color: '#10B981', bg: 'rgba(16, 185, 129, 0.15)' };
+      case 'ESCALATED':
+        return { label: 'Escalated', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      default:
+        return { label: status || 'Pending', color: '#F2CA50', bg: 'rgba(242, 202, 80, 0.15)' };
+    }
+  };
+
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 12) }]}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent />
@@ -51,6 +153,32 @@ export default function HelpSupportScreen() {
       <View style={styles.topBar}>
         <TouchableOpacity onPress={handleBack} style={styles.backBtn} activeOpacity={0.8}>
           <Ionicons name="arrow-back" size={24} color="#F2CA50" />
+        </TouchableOpacity>
+        <Text style={styles.topBarTitle}>Help & Support</Text>
+        <TouchableOpacity onPress={fetchTickets} style={styles.backBtn} activeOpacity={0.8}>
+          <Ionicons name="refresh" size={20} color="#F2CA50" />
+        </TouchableOpacity>
+      </View>
+
+      {/* TAB SELECTOR */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'issues' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('issues')}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.tabButtonText, activeTab === 'issues' && styles.tabButtonTextActive]}>
+            Raise an Issue
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'my_tickets' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('my_tickets')}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.tabButtonText, activeTab === 'my_tickets' && styles.tabButtonTextActive]}>
+            My Tickets {tickets.length > 0 ? `(${tickets.length})` : ''}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -82,40 +210,152 @@ export default function HelpSupportScreen() {
           </View>
 
           <Text style={styles.needHelpText}>Need any help?</Text>
-          <Text style={styles.myQuroText}>My Quro is here for you.</Text>
+          <Text style={styles.myQuroText}>My Quro is here for you 24x7.</Text>
         </View>
 
-        {/* RAISE A NEW ISSUE SECTION */}
-        <Text style={styles.sectionHeaderTitle}>Raise a new issue</Text>
-
-        <View style={styles.issuesCardContainer}>
-          {issuesList.map((item, index) => {
-            const isLast = index === issuesList.length - 1;
-
-            return (
-              <View key={item.id}>
+        {activeTab === 'my_tickets' ? (
+          /* MY TICKETS VIEW */
+          <View>
+            <Text style={styles.sectionHeaderTitle}>Your Raised Support Tickets</Text>
+            {isLoadingTickets ? (
+              <ActivityIndicator size="small" color="#F2CA50" style={{ marginVertical: 20 }} />
+            ) : tickets.length === 0 ? (
+              <View style={styles.emptyTicketsCard}>
+                <Ionicons name="checkmark-circle-outline" size={44} color="#F2CA50" />
+                <Text style={styles.emptyTicketsTitle}>No Active Tickets</Text>
+                <Text style={styles.emptyTicketsSubtitle}>
+                  You have no pending support tickets. If you encounter any payout, trip, or penalty issue, raise a ticket from the issues list.
+                </Text>
                 <TouchableOpacity
-                  onPress={() => handleIssuePress(item)}
-                  style={styles.issueRow}
+                  style={styles.raiseIssueBtn}
+                  onPress={() => setActiveTab('issues')}
                   activeOpacity={0.8}
                 >
-                  <View style={styles.issueLeftGroup}>
-                    {/* Circle Icon Box */}
-                    <View style={styles.iconCircleBox}>
-                      <Ionicons name={item.icon as any} size={20} color="#F2CA50" />
-                    </View>
-
-                    <Text style={styles.issueTitleText}>{item.title}</Text>
-                  </View>
-
-                  <Ionicons name="chevron-forward" size={18} color="#F2CA50" />
+                  <Text style={styles.raiseIssueBtnText}>Raise an Issue</Text>
                 </TouchableOpacity>
-
-                {!isLast && <View style={styles.dottedDivider} />}
               </View>
-            );
-          })}
-        </View>
+            ) : (
+              tickets.map((t) => {
+                const badge = getStatusBadge(t.status);
+                const isExpanded = expandedTicketId === t.id;
+                const messages = Array.isArray(t.messages) ? t.messages : [];
+
+                return (
+                  <View key={t.id} style={styles.ticketCard}>
+                    <TouchableOpacity
+                      style={styles.ticketCardHeader}
+                      onPress={() => setExpandedTicketId(isExpanded ? null : t.id)}
+                      activeOpacity={0.85}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.ticketIdRow}>
+                          <Text style={styles.ticketIdText}>#{t.id}</Text>
+                          <View style={[styles.badgePill, { backgroundColor: badge.bg }]}>
+                            <Text style={[styles.badgeText, { color: badge.color }]}>{badge.label}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.ticketSubjectText}>{t.reason || t.subject || 'Support Ticket'}</Text>
+                        <Text style={styles.ticketCategoryText}>Category: {t.category || 'General'}</Text>
+                      </View>
+                      <Ionicons
+                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={20}
+                        color="#F2CA50"
+                      />
+                    </TouchableOpacity>
+
+                    {isExpanded && (
+                      <View style={styles.ticketCardBody}>
+                        <View style={styles.divider} />
+                        <Text style={styles.bodyLabel}>Description</Text>
+                        <Text style={styles.bodyDesc}>{t.description || 'No description provided.'}</Text>
+
+                        {/* MESSAGES THREAD */}
+                        {messages.length > 0 && (
+                          <View style={styles.chatThreadWrap}>
+                            <Text style={styles.bodyLabel}>Conversation</Text>
+                            {messages.map((m: any, mIdx: number) => {
+                              const isRider = m.senderType === 'CUSTOMER' || m.senderId === driverProfile?.id;
+                              return (
+                                <View
+                                  key={m.id || mIdx}
+                                  style={[
+                                    styles.chatMsgBubble,
+                                    isRider ? styles.chatMsgBubbleRider : styles.chatMsgBubbleSupport,
+                                  ]}
+                                >
+                                  <Text style={styles.chatMsgSender}>
+                                    {isRider ? 'You' : 'MyQuro Partner Support'}
+                                  </Text>
+                                  <Text style={styles.chatMsgText}>{m.message}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        )}
+
+                        {/* REPLY INPUT */}
+                        {t.status !== 'RESOLVED' && (
+                          <View style={styles.ticketReplyRow}>
+                            <TextInput
+                              placeholder="Add follow-up details..."
+                              placeholderTextColor="#666"
+                              value={replyTextMap[t.id] || ''}
+                              onChangeText={(txt) => setReplyTextMap((prev) => ({ ...prev, [t.id]: txt }))}
+                              style={styles.ticketReplyInput}
+                            />
+                            <TouchableOpacity
+                              style={styles.ticketSendBtn}
+                              onPress={() => handleSendTicketReply(t.id)}
+                              disabled={isSendingReply}
+                              activeOpacity={0.85}
+                            >
+                              {isSendingReply ? (
+                                <ActivityIndicator size="small" color="#000000" />
+                              ) : (
+                                <Ionicons name="send" size={16} color="#000000" />
+                              )}
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              })
+            )}
+          </View>
+        ) : (
+          /* RAISE A NEW ISSUE SECTION */
+          <View>
+            <Text style={styles.sectionHeaderTitle}>Raise a new issue</Text>
+
+            <View style={styles.issuesCardContainer}>
+              {issuesList.map((item, index) => {
+                const isLast = index === issuesList.length - 1;
+
+                return (
+                  <View key={item.id}>
+                    <TouchableOpacity
+                      onPress={() => handleIssuePress(item)}
+                      style={styles.issueRow}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.issueLeftGroup}>
+                        <View style={styles.iconCircleBox}>
+                          <Ionicons name={item.icon as any} size={20} color="#F2CA50" />
+                        </View>
+                        <Text style={styles.issueTitleText}>{item.title}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color="#F2CA50" />
+                    </TouchableOpacity>
+                    {!isLast && <View style={styles.dottedDivider} />}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -131,12 +371,52 @@ const styles = StyleSheet.create({
   topBar: {
     paddingHorizontal: 16,
     paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   backBtn: {
     width: 40,
     height: 40,
     justifyContent: 'center',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+  },
+  topBarTitle: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: '#111111',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.2)',
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  tabButtonActive: {
+    backgroundColor: 'rgba(242, 202, 80, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.4)',
+  },
+  tabButtonText: {
+    fontSize: 13,
+    color: '#8A8A8A',
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+  },
+  tabButtonTextActive: {
+    color: '#F2CA50',
+    fontWeight: '700',
   },
   scrollContent: {
     flex: 1,
@@ -144,91 +424,250 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     alignItems: 'center',
-    marginBottom: 24,
-    paddingTop: 8,
+    marginBottom: 20,
+    paddingTop: 4,
   },
   welcomeSubtitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: 'Urbanist-Regular',
     color: '#EAE1D4',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   heroTitleText: {
-    fontSize: 24,
+    fontSize: 22,
     fontFamily: 'Urbanist-Bold',
     fontWeight: '700',
     color: '#FFFFFF',
-    textAlign: 'center',
   },
   heroTitleGold: {
     color: '#F2CA50',
   },
   goldArcLine: {
-    width: 220,
-    height: 2,
+    width: 60,
+    height: 3,
     backgroundColor: '#F2CA50',
+    borderRadius: 2,
     marginTop: 6,
-    marginBottom: 20,
-    borderRadius: 1,
+    marginBottom: 14,
   },
   agentCircleWrapper: {
     position: 'relative',
-    marginBottom: 16,
+    marginBottom: 10,
   },
   agentOuterCircle: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: 'rgba(242, 202, 80, 0.12)',
     borderWidth: 1.5,
-    borderColor: '#F2CA50',
-    backgroundColor: '#120F0C',
-    justifyContent: 'center',
+    borderColor: 'rgba(242, 202, 80, 0.4)',
     alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
   },
   agentImage: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
+    width: 74,
+    height: 74,
+    borderRadius: 37,
   },
   sparkleLeft: {
     position: 'absolute',
-    top: 10,
-    left: -12,
+    top: 6,
+    left: -10,
   },
   sparkleRight: {
     position: 'absolute',
-    top: 50,
-    right: -16,
+    bottom: 12,
+    right: -10,
   },
   needHelpText: {
-    fontSize: 15,
-    fontFamily: 'Urbanist-Regular',
-    color: '#EAE1D4',
-    textAlign: 'center',
-  },
-  myQuroText: {
-    fontSize: 14,
-    fontFamily: 'Urbanist-Regular',
-    color: '#A6A6A6',
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  sectionHeaderTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: 'Urbanist-Bold',
     fontWeight: '700',
     color: '#FFFFFF',
-    marginBottom: 14,
+  },
+  myQuroText: {
+    fontSize: 12,
+    fontFamily: 'Urbanist-Regular',
+    color: '#A99260',
+    marginTop: 2,
+  },
+  sectionHeaderTitle: {
+    fontSize: 15,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 12,
+    marginTop: 6,
+  },
+  emptyTicketsCard: {
+    backgroundColor: '#111111',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.2)',
+    padding: 24,
+    alignItems: 'center',
+  },
+  emptyTicketsTitle: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    marginTop: 10,
+  },
+  emptyTicketsSubtitle: {
+    fontSize: 12,
+    color: '#8A8A8A',
+    fontFamily: 'Urbanist-Regular',
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  raiseIssueBtn: {
+    marginTop: 16,
+    backgroundColor: '#F2CA50',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  raiseIssueBtnText: {
+    fontSize: 13,
+    color: '#000000',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  ticketCard: {
+    backgroundColor: '#111111',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.25)',
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  ticketCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+  },
+  ticketIdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  ticketIdText: {
+    fontSize: 13,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  badgePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  ticketSubjectText: {
+    fontSize: 14,
+    color: '#EAE1D4',
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+  },
+  ticketCategoryText: {
+    fontSize: 11,
+    color: '#8A8A8A',
+    fontFamily: 'Urbanist-Regular',
+    marginTop: 2,
+  },
+  ticketCardBody: {
+    padding: 14,
+    paddingTop: 0,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginBottom: 10,
+  },
+  bodyLabel: {
+    fontSize: 11,
+    color: '#A99260',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  bodyDesc: {
+    fontSize: 13,
+    color: '#D4AF37',
+    fontFamily: 'Urbanist-Regular',
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  chatThreadWrap: {
+    marginTop: 6,
+    gap: 6,
+  },
+  chatMsgBubble: {
+    padding: 10,
+    borderRadius: 10,
+    maxWidth: '85%',
+  },
+  chatMsgBubbleRider: {
+    backgroundColor: 'rgba(242, 202, 80, 0.15)',
+    alignSelf: 'flex-end',
+    borderBottomRightRadius: 2,
+  },
+  chatMsgBubbleSupport: {
+    backgroundColor: '#1E1E1E',
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 2,
+  },
+  chatMsgSender: {
+    fontSize: 10,
+    color: '#A99260',
+    fontFamily: 'Urbanist-Bold',
+    marginBottom: 2,
+  },
+  chatMsgText: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Regular',
+  },
+  ticketReplyRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  ticketReplyInput: {
+    flex: 1,
+    backgroundColor: '#181818',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    color: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 12,
+    fontFamily: 'Urbanist-Regular',
+  },
+  ticketSendBtn: {
+    backgroundColor: '#F2CA50',
+    borderRadius: 10,
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   issuesCardContainer: {
-    backgroundColor: '#141210',
+    backgroundColor: '#111111',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2E2923',
-    borderRadius: 22,
-    paddingHorizontal: 16,
+    borderColor: 'rgba(242, 202, 80, 0.2)',
+    paddingHorizontal: 14,
     paddingVertical: 6,
-    marginBottom: 24,
   },
   issueRow: {
     flexDirection: 'row',
@@ -239,29 +678,23 @@ const styles = StyleSheet.create({
   issueLeftGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    flex: 1,
+    gap: 12,
   },
   iconCircleBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#1C1914',
-    borderWidth: 1,
-    borderColor: '#2E2923',
-    justifyContent: 'center',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(242, 202, 80, 0.1)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   issueTitleText: {
-    fontSize: 16,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
+    fontSize: 14,
     color: '#FFFFFF',
+    fontFamily: 'Urbanist-Medium',
   },
   dottedDivider: {
     height: 1,
-    borderWidth: 1,
-    borderColor: '#3D3528',
-    borderStyle: 'dashed',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
 });

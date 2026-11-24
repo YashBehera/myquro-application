@@ -703,7 +703,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     return (
       <HelpSubView
         isDarkMode={isDarkMode}
-        onBack={() => setCurrentView('main')}
+        initialOrder={selectedOrderForDetails}
+        pastOrders={ordersList}
+        customerProfile={{
+          id: authState.type === 'Authenticated' ? ((authState as any).user?.id || (authState as any).id || 'CUST') : 'CUST',
+          name: authState.type === 'Authenticated' ? (authState.username || (authState as any).user?.name || 'Customer') : 'Customer',
+          phone: authState.type === 'Authenticated' ? ((authState as any).phone || (authState as any).user?.phone || '') : '',
+          avatar: authState.type === 'Authenticated' ? ((authState as any).user?.image || '') : '',
+        }}
+        onBack={() => {
+          setSelectedOrderForDetails(null);
+          setCurrentView('main');
+        }}
       />
     );
   }

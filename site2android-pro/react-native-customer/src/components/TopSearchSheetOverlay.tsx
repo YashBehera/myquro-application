@@ -641,7 +641,7 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
                             : `${res.reviewCount}+`
                           : '5K+';
                         const deliveryTimeStr = typeof res.deliveryTime === 'number' ? `${res.deliveryTime} mins` : res.deliveryTime || '30 mins';
-                        const areaStr = res.address || res.city || '';
+                        const areaStr = res.address || res.city || 'Patrapada';
 
                         return (
                           <TouchableOpacity

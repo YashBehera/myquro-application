@@ -91,7 +91,7 @@ export default function ComplaintDetailsScreen() {
       await sendMessage(
         complaint.id,
         'RESTAURANT',
-        'Restaurant Support (MyQuro Bistro)',
+        complaint.outletName ? `${complaint.outletName} Support` : 'Restaurant Support',
         replyText.trim()
       );
       setReplyText('');

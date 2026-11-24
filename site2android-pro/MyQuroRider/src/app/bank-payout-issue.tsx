@@ -88,11 +88,23 @@ export default function BankPayoutIssueScreen() {
     const distanceToMonday = (currentDayOfWeek + 6) % 7;
     const currentMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - distanceToMonday);
 
+    const getWeekNumber = (d: Date) => {
+      const target = new Date(d.valueOf());
+      const dayNr = (d.getDay() + 6) % 7;
+      target.setDate(target.getDate() - dayNr + 3);
+      const firstThursday = target.valueOf();
+      target.setMonth(0, 1);
+      if (target.getDay() !== 4) {
+        target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+      }
+      return 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+    };
+
     const list = [];
     for (let w = 1; w <= 4; w++) {
       const mon = new Date(currentMonday.getFullYear(), currentMonday.getMonth(), currentMonday.getDate() - (w * 7));
       const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
-      const title = w === 1 ? 'Last Week' : `Week ${w + 30}`;
+      const title = w === 1 ? 'Last Week' : `Week ${getWeekNumber(mon)}`;
       const dateRange = `${mon.getDate()} ${monthNames[mon.getMonth()]} to ${sun.getDate()} ${monthNames[sun.getMonth()]}`;
       list.push({
         id: `week_${w}`,

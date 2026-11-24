@@ -60,3 +60,4 @@ export * from "./schema/order-deliveries.js";
 export * from "./schema/chat-messages.js";
 export * from "./schema/rider-onboarding.js";
 export * from "./schema/merchant-penalties.js";
+export * from "./schema/complaints.js";

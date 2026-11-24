@@ -58,11 +58,46 @@ export default function DailyMGScreen() {
       });
     }
 
+    // Calculate past weeks dynamically
+    const getWeekNumber = (d: Date) => {
+      const target = new Date(d.valueOf());
+      const dayNr = (d.getDay() + 6) % 7;
+      target.setDate(target.getDate() - dayNr + 3);
+      const firstThursday = target.valueOf();
+      target.setMonth(0, 1);
+      if (target.getDay() !== 4) {
+        target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+      }
+      return 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+    };
+
+    const week2Mon = new Date(currentMonday.getFullYear(), currentMonday.getMonth(), currentMonday.getDate() - 14);
+    const week2Name = `Week ${getWeekNumber(week2Mon)}`;
+    const week2Days = [];
+    for (let d = 6; d >= 0; d--) {
+      const dayDate = new Date(week2Mon.getFullYear(), week2Mon.getMonth(), week2Mon.getDate() + d);
+      week2Days.push({
+        id: `w2_${d}`,
+        dateText: `${dayNames[dayDate.getDay()]}, ${dayDate.getDate()} ${monthNames[dayDate.getMonth()]}`,
+      });
+    }
+
+    const week3Mon = new Date(currentMonday.getFullYear(), currentMonday.getMonth(), currentMonday.getDate() - 21);
+    const week3Name = `Week ${getWeekNumber(week3Mon)}`;
+    const week3Days = [];
+    for (let d = 6; d >= 0; d--) {
+      const dayDate = new Date(week3Mon.getFullYear(), week3Mon.getMonth(), week3Mon.getDate() + d);
+      week3Days.push({
+        id: `w3_${d}`,
+        dateText: `${dayNames[dayDate.getDay()]}, ${dayDate.getDate()} ${monthNames[dayDate.getMonth()]}`,
+      });
+    }
+
     return [
       { id: '1', weekName: 'This Week', days: thisWeekDays },
       { id: '2', weekName: 'Last Week', days: lastWeekDays },
-      { id: '3', weekName: 'Week 32', days: [] },
-      { id: '4', weekName: 'Week 31', days: [] },
+      { id: '3', weekName: week2Name, days: week2Days },
+      { id: '4', weekName: week3Name, days: week3Days },
     ];
   }, []);
 
