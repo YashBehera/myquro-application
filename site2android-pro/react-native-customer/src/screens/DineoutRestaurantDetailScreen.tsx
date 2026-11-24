@@ -295,8 +295,8 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
   const restaurantCost = restaurant?.costForTwo || '₹1,000 for two';
   const restaurantPhone = restaurant?.phone || '';
 
-  const restaurantLat = Number(restaurant?.latitude || restaurant?.lat || 20.2520);
-  const restaurantLng = Number(restaurant?.longitude || restaurant?.lng || 85.7950);
+  const restaurantLat = Number(restaurant?.latitude || restaurant?.lat || 0);
+  const restaurantLng = Number(restaurant?.longitude || restaurant?.lng || 0);
 
   const isFav = favouriteRestaurantsList?.some((f) => f.id === restaurant?.id);
 
@@ -632,7 +632,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
                     </Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
                       <Text style={styles.locationTextSub}>
-                        {restaurantLocation.split(',').slice(1).join(',').trim() || 'Dumduma, Bhubaneswar'}
+                        {restaurantLocation.split(',').slice(1).join(',').trim() || restaurantLocation || ''}
                       </Text>
                       <ChevronDown size={14 * SCALE} color="#DEA430" style={{ marginLeft: 4 }} />
                     </View>

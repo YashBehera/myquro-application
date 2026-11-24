@@ -171,8 +171,8 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
 
   // Map selector states
   const [mapRegion, setMapRegion] = useState({
-    latitude: currentLocation?.latitude || 20.2961,
-    longitude: currentLocation?.longitude || 85.8245,
+    latitude: currentLocation?.latitude || 0,
+    longitude: currentLocation?.longitude || 0,
     latitudeDelta: 0.005,
     longitudeDelta: 0.005,
   });
@@ -1113,7 +1113,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
                   <TextInput
                     value={city}
                     onChangeText={setCity}
-                    placeholder="e.g. Bhubaneswar"
+                    placeholder="Enter city"
                     placeholderTextColor="#6A6A6A"
                     style={styles.formInput}
                   />

@@ -4,8 +4,10 @@ import {
   timestamp,
   integer,
   boolean,
+  numeric,
   index,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { restaurants } from "./restaurants.js";
 import { menuCategories } from "./menu-categories.js";
 
@@ -24,6 +26,8 @@ export const menuItems = pgTable("menu_items", {
   imageURL: text("image_url"),
   isVeg: boolean("is_veg").default(true),
   isAvailable: boolean("is_available").notNull().default(true),
+  rating: numeric("rating", { precision: 2, scale: 1 }).default(sql`0.0`),
+  ratingCount: integer("rating_count").default(0),
   pausedUntil: timestamp("paused_until"),
   pauseReason: text("pause_reason"),
   isActive: boolean("is_active").notNull().default(true),

@@ -227,8 +227,8 @@ const getOlaMapHtml = (
 `;
 
 export const OlaMapView = forwardRef<OlaMapViewRef, OlaMapViewProps>(({
-  initialLatitude = 20.2520,
-  initialLongitude = 85.7870,
+  initialLatitude = 0,
+  initialLongitude = 0,
   initialZoom = 15.5,
   onRegionChangeComplete,
   onMoveStart,

@@ -154,7 +154,7 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
         ratingCount: r.reviewCount ? `${r.reviewCount}+` : '1.5K+',
         time: '35-45 mins',
         cuisines: r.cuisine || r.category || 'Multi-cuisine',
-        location: r.address || r.city || 'Bhubaneswar',
+        location: r.address || r.city || '',
         distance: distStr,
         discount: r.discount || (idx % 2 === 0 ? '70% OFF' : 'FLAT ₹150 OFF'),
         subDiscount: idx % 2 === 0 ? 'UPTO ₹140' : 'ABOVE ₹399',

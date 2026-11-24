@@ -800,7 +800,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                     <View style={{ flex: 1, marginLeft: 14 }}>
                       {renderBoldedText(res.name, query)}
                       <Text style={styles.suggestionType}>
-                        ★ {res.rating || '4.5'} • {typeof res.deliveryTime === 'number' ? `${res.deliveryTime} mins` : res.deliveryTime || '30 mins'} • {res.city || 'Patrapada'}
+                        ★ {res.rating || '4.5'} • {typeof res.deliveryTime === 'number' ? `${res.deliveryTime} mins` : res.deliveryTime || '30 mins'}{res.city ? ` • ${res.city}` : ''}
                       </Text>
                     </View>
                     <ChevronRight size={18} color="#DEA430" />
@@ -989,7 +989,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                           <Text style={styles.metaText}>{typeof primaryRestaurant.deliveryTime === 'number' ? `${primaryRestaurant.deliveryTime} mins` : primaryRestaurant.deliveryTime || '30–35 mins'}</Text>
                         </View>
                         <Text style={styles.primaryRestLocText} numberOfLines={1}>
-                          {primaryRestaurant.address || primaryRestaurant.city || 'Patrapada'} • {typeof primaryRestaurant.distance === 'number' ? `${primaryRestaurant.distance.toFixed(1)} km` : '3.5 km'}
+                          {primaryRestaurant.address || primaryRestaurant.city || ''}{typeof primaryRestaurant.distance === 'number' ? ` • ${primaryRestaurant.distance.toFixed(1)} km` : ''}
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -1136,7 +1136,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                                 </Text>
 
                                 <Text style={styles.featuredCardLoc} numberOfLines={1}>
-                                  {res.address || res.city || 'Patrapada'} • {typeof res.distance === 'number' ? `${res.distance.toFixed(1)} km` : '4.0 km'}
+                                  {res.address || res.city || ''}{typeof res.distance === 'number' ? ` • ${res.distance.toFixed(1)} km` : ''}
                                 </Text>
                               </View>
                             </TouchableOpacity>

@@ -3,15 +3,160 @@ import { db } from "../db/db.js";
 import { reviews } from "../db/schema/reviews.js";
 import { authUsers } from "../db/schema/auth-users.js";
 import { tableSession } from "../db/schema/table-session.js";
-import { eq, and, desc } from "drizzle-orm";
-import { requireAuth } from "../auth/requireAuth.js";
+import { orders } from "../db/schema/orders.js";
+import { orderItems } from "../db/schema/order-items.js";
+import { orderDeliveries } from "../db/schema/order-deliveries.js";
+import { deliveryRiders } from "../db/schema/delivery-riders.js";
+import { menuItems } from "../db/schema/menu-items.js";
+import { restaurants } from "../db/schema/restaurants.js";
+import { eq, and, desc, sql } from "drizzle-orm";
+import { requireAuth, optionalAuth } from "../auth/requireAuth.js";
 import { isRestaurantOwnerManagerOrStaff } from "../lib/checkRoles.js";
 import { updateRestaurantRating } from "../lib/rating-utils.js";
 
 const router = Router();
 
-// POST /reviews - Create a review for a session
-router.post("/", requireAuth, async (req: any, res) => {
+// Handler function for rating orders (restaurant, food items, delivery partner)
+async function handleRateOrder(req: any, res: any) {
+  try {
+    const {
+      orderId,
+      restaurantId: bodyRestaurantId,
+      foodRating, // 1 to 5
+      deliveryRating, // 1 to 5
+      rating, // generic fallback if foodRating not specified
+      reviewText,
+      compliments, // e.g. ["Delicious 😋", "Super Fast ⚡"]
+      items, // array of items: [{ id, menuItemId, name, rating }]
+    } = req.body;
+
+    const user = req.user;
+    const userId = user?.id || req.body.userId || 'guest_user';
+
+    const effectiveFoodRating = foodRating || rating;
+    let targetRestaurantId = bodyRestaurantId;
+    let targetRiderId = req.body.riderId;
+    let orderRecord: any = null;
+
+    if (orderId) {
+      const orderData = await db
+        .select()
+        .from(orders)
+        .where(eq(orders.id, orderId))
+        .limit(1);
+      if (orderData.length > 0) {
+        orderRecord = orderData[0];
+        targetRestaurantId = targetRestaurantId || orderRecord.restaurantId;
+      }
+
+      // Find delivery rider for this order if not provided
+      if (!targetRiderId) {
+        const delData = await db
+          .select({ riderId: orderDeliveries.riderId })
+          .from(orderDeliveries)
+          .where(eq(orderDeliveries.orderId, orderId))
+          .limit(1);
+        if (delData.length > 0) {
+          targetRiderId = delData[0].riderId;
+        }
+      }
+    }
+
+    const results: any = {};
+
+    // 1. Process Restaurant / Food Rating
+    if (targetRestaurantId && effectiveFoodRating && effectiveFoodRating >= 1 && effectiveFoodRating <= 5) {
+      const reviewId = `review_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const fullReviewText = reviewText
+        ? (compliments && compliments.length > 0 ? `${reviewText} [${compliments.join(', ')}]` : reviewText)
+        : (compliments && compliments.length > 0 ? compliments.join(', ') : null);
+
+      await db.insert(reviews).values({
+        id: reviewId,
+        orderId: orderId || null,
+        userId: userId,
+        restaurantId: targetRestaurantId,
+        rating: Math.round(effectiveFoodRating) as any,
+        reviewText: fullReviewText,
+      });
+
+      // Update restaurant rating
+      await updateRestaurantRating(targetRestaurantId);
+      results.restaurantRated = true;
+    }
+
+    // 2. Process Food Items Rating
+    let itemsToRate: any[] = Array.isArray(items) ? items : [];
+    if (itemsToRate.length === 0 && orderId) {
+      const dbItems = await db
+        .select({
+          id: orderItems.id,
+          menuItemId: orderItems.menuItemId,
+        })
+        .from(orderItems)
+        .where(eq(orderItems.orderId, orderId));
+      itemsToRate = dbItems;
+    }
+
+    if (itemsToRate.length > 0 && effectiveFoodRating && effectiveFoodRating >= 1 && effectiveFoodRating <= 5) {
+      for (const it of itemsToRate) {
+        const mId = it.menuItemId || it.id;
+        if (mId) {
+          const iRating = Number(it.rating || effectiveFoodRating);
+          await db.execute(sql`
+            UPDATE menu_items 
+            SET 
+              rating = ROUND(((COALESCE(rating, 0.0) * COALESCE(rating_count, 0) + ${iRating}) / (COALESCE(rating_count, 0) + 1))::numeric, 1),
+              rating_count = COALESCE(rating_count, 0) + 1,
+              updated_at = NOW()
+            WHERE id = ${mId};
+          `);
+        }
+      }
+      results.itemsRatedCount = itemsToRate.length;
+    }
+
+    // 3. Process Delivery Rider Rating
+    if (deliveryRating && deliveryRating >= 1 && deliveryRating <= 5) {
+      const dRating = Number(deliveryRating);
+      if (targetRiderId) {
+        await db.execute(sql`
+          UPDATE delivery_riders
+          SET
+            rating = ROUND(((COALESCE(rating, 0.0) * COALESCE(total_ratings, 0) + ${dRating}) / (COALESCE(total_ratings, 0) + 1))::numeric, 1),
+            total_ratings = COALESCE(total_ratings, 0) + 1,
+            updated_at = NOW()
+          WHERE id = ${targetRiderId};
+        `);
+        results.riderRated = true;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Ratings and review submitted successfully",
+      data: results
+    });
+
+  } catch (error) {
+    console.error("Error in handleRateOrder:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit ratings"
+    });
+  }
+}
+
+// POST /reviews/rate-order - Rate order (restaurant + food items + delivery rider)
+router.post("/rate-order", optionalAuth, handleRateOrder);
+
+// POST /reviews - Create a review for a session or order
+router.post("/", optionalAuth, async (req: any, res) => {
+  // If orderId or (restaurantId without sessionId) is provided, forward to handleRateOrder
+  if (!req.body.sessionId && (req.body.orderId || req.body.restaurantId || req.body.foodRating || req.body.deliveryRating)) {
+    return handleRateOrder(req, res);
+  }
   try {
     const { sessionId, rating, reviewText } = req.body;
     const user = req.user;

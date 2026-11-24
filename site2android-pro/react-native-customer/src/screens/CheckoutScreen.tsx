@@ -64,10 +64,16 @@ import {
   isTablet,
   isSmallDevice,
   SCREEN_WIDTH,
+  SCREEN_HEIGHT,
   MAX_CONTENT_WIDTH,
   getSafeTopPadding,
   getSafeBottomPadding,
 } from '../utils/responsive';
+
+// ─── Customization Modal Assets (Parity with Restaurant Detail Screen) ─────────
+const modalMascot         = require('../assets/restaurant_detail/customization_modal/modalMascot.png');       // Rabbit Mascot Character
+const modalClose          = require('../assets/restaurant_detail/customization_modal/modalClose.png');        // Gold Close ✕
+const dietNonVegIcon      = require('../assets/restaurant_detail/figma/imgImage12.png');                      // Non-Veg Triangle Icon
 
 // ─── Figma Node 3027:1289 & 3027:1201 Assets ───────────────────────────────────
 const checkBack             = require('../assets/checkout/figma/checkBack.png');             // Back Arrow
@@ -107,6 +113,9 @@ export interface SimFoodItem {
   mrp?: number;
   bestseller?: boolean;
   variants?: any[];
+  variantId?: string | null;
+  restaurantId?: string;
+  restaurantName?: string;
 }
 
 export interface SimCartItem {
@@ -223,6 +232,217 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   const [showLocationSelectorSheet, setShowLocationSelectorSheet] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [appliedCelebrationCoupon, setAppliedCelebrationCoupon] = useState<SimCoupon | null>(null);
+
+  const activeRestaurantId = useMemo(() => {
+    return currentRestaurant?.id || restaurantId || (cartItems && cartItems.length > 0 ? cartItems[0].restaurantId : null);
+  }, [currentRestaurant, restaurantId, cartItems]);
+
+  const [restaurantMenuItems, setRestaurantMenuItems] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!activeRestaurantId) return;
+    let isMounted = true;
+    const loadRestaurantMenu = async () => {
+      try {
+        const cached = await AsyncStorage.getItem(`@menu_${activeRestaurantId}`);
+        if (cached && isMounted) {
+          const parsed = JSON.parse(cached);
+          if (parsed.categories) {
+            const items: any[] = [];
+            parsed.categories.forEach((cat: any) => {
+              (cat.items || []).forEach((item: any) => {
+                const variantsList = item.variants || [];
+                const pricePaise = variantsList[0]?.price;
+                const price = typeof pricePaise === 'number' ? (pricePaise > 1000 ? Math.round(pricePaise / 100) : pricePaise) : (item.price || 199);
+                items.push({
+                  id: item.id,
+                  name: item.name,
+                  restaurantId: activeRestaurantId,
+                  restaurantName: displayRestaurantName,
+                  price,
+                  rating: Number(item.rating || 0) > 0 ? Number(Number(item.rating).toFixed(1)) : 0,
+                  ratingCount: Number(item.ratingCount || item.rating_count || 0),
+                  isVeg: Boolean(item.isVeg !== undefined ? item.isVeg : true),
+                  image: item.imageURL || item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80',
+                  description: item.description || '',
+                  mrp: Math.round(price * 1.25),
+                  bestseller: item.bestseller || false,
+                  variants: variantsList,
+                });
+              });
+            });
+            if (items.length > 0) {
+              setRestaurantMenuItems(items);
+            }
+          }
+        }
+      } catch (e) {}
+    };
+    loadRestaurantMenu();
+    return () => { isMounted = false; };
+  }, [activeRestaurantId, displayRestaurantName]);
+
+  // ── Dish Customization Pop-Up Modal States (Exact Parity with Restaurant Detail Screen) ──
+  const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [editingCartItem, setEditingCartItem] = useState<any | null>(null);
+  const [selectedVariantIndex, setSelectedVariantIndex] = useState<number>(0);
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
+  const [modalQuantity, setModalQuantity] = useState<number>(1);
+  const [showItemCustomizationModal, setShowItemCustomizationModal] = useState(false);
+
+  const currentVariants = useMemo(() => {
+    if (!editingCartItem) return [];
+    const itemFood = editingCartItem.foodItem || editingCartItem;
+    const match = restaurantMenuItems.find((m: any) => m.id === itemFood.id) || foodItems.find((f: any) => f.id === itemFood.id);
+    const variantsList = itemFood.variants && itemFood.variants.length > 0
+      ? itemFood.variants
+      : (match?.variants && match.variants.length > 0 ? match.variants : []);
+
+    if (variantsList && variantsList.length > 0) {
+      return variantsList.map((v: any, idx: number) => ({
+        id: v.id || `var_${idx}`,
+        name: v.variantName || v.name || v.portionSize || 'Regular',
+        price: typeof v.price === 'number' ? (v.price > 1000 ? Math.round(v.price / 100) : v.price) : (itemFood.price || 150),
+        serves: v.portionSize || v.variantName || v.name || 'Regular',
+      }));
+    }
+    return [
+      {
+        id: (itemFood as any).variantId || itemFood.id || 'default',
+        name: 'Regular',
+        price: itemFood.price || 150,
+        serves: 'Regular',
+      },
+    ];
+  }, [editingCartItem, restaurantMenuItems, foodItems]);
+
+  const currentAddonsList = useMemo(() => {
+    if (!editingCartItem) return [];
+    const itemFood = editingCartItem.foodItem || editingCartItem;
+    const available = restaurantMenuItems.length > 0 ? restaurantMenuItems : foodItems.filter((f: any) => f.restaurantId === activeRestaurantId);
+    return available
+      .filter((f: any) => f.id !== itemFood.id)
+      .slice(0, 4)
+      .map((f: any) => ({
+        id: f.id,
+        name: f.name,
+        price: f.price,
+        isVeg: f.isVeg,
+        tag: f.bestseller ? 'Bestseller' : (f.rating >= 4.5 ? 'Chef Special' : undefined),
+      }));
+  }, [editingCartItem, restaurantMenuItems, foodItems, activeRestaurantId]);
+
+  const modalSelectedVariant = currentVariants[selectedVariantIndex] || currentVariants[0];
+
+  const modalAddonsCost = useMemo(() => {
+    return selectedAddonIds.reduce((sum, id) => {
+      const match = currentAddonsList.find((a: any) => a.id === id);
+      return sum + (match ? match.price : 0);
+    }, 0);
+  }, [selectedAddonIds, currentAddonsList]);
+
+  const modalSingleItemTotal = useMemo(() => {
+    if (!modalSelectedVariant) return 0;
+    return Math.round(modalSelectedVariant.price + modalAddonsCost);
+  }, [modalSelectedVariant, modalAddonsCost]);
+
+  const modalGrandTotal = useMemo(() => {
+    return modalSingleItemTotal * modalQuantity;
+  }, [modalSingleItemTotal, modalQuantity]);
+
+  const handleToggleAddon = (id: string) => {
+    setSelectedAddonIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter(item => item !== id);
+      }
+      if (prev.length >= 3) {
+        if (Platform.OS === 'android') {
+          ToastAndroid.show('You can select maximum 3 items', ToastAndroid.SHORT);
+        }
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
+
+  const handleOpenItemCustomization = (item: any, index: number) => {
+    setEditingItemIndex(index);
+    setEditingCartItem(item);
+    setModalQuantity(item.quantity || 1);
+    setSelectedVariantIndex(0);
+    const itemFood = item.foodItem || item;
+    const currentVarId = item.variantId || item.customization?.size?.id;
+    const match = restaurantMenuItems.find((m: any) => m.id === itemFood.id) || foodItems.find((f: any) => f.id === itemFood.id);
+    const variantsList = itemFood.variants && itemFood.variants.length > 0
+      ? itemFood.variants
+      : (match?.variants && match.variants.length > 0 ? match.variants : []);
+    if (variantsList.length > 0 && currentVarId) {
+      const idx = variantsList.findIndex((v: any) => v.id === currentVarId);
+      if (idx > -1) setSelectedVariantIndex(idx);
+    }
+    const existingExtras = item.customization?.extras || [];
+    setSelectedAddonIds(existingExtras.map((e: any) => e.id || e.name));
+    setShowItemCustomizationModal(true);
+  };
+
+  const handleSaveItemCustomization = () => {
+    if (editingItemIndex === null || !editingCartItem || !modalSelectedVariant) {
+      setShowItemCustomizationModal(false);
+      return;
+    }
+    const unitPrice = modalSelectedVariant.price + modalAddonsCost;
+    const selectedExtras = selectedAddonIds.map(id => {
+      const match = currentAddonsList.find((a: any) => a.id === id);
+      return {
+        id,
+        name: match ? match.name : id,
+        price: match ? Math.round(match.price) : 0,
+      };
+    });
+
+    const updatedCart = [...safeCart];
+    const target = updatedCart[editingItemIndex];
+    if (target) {
+      const updatedItem: SimCartItem = {
+        ...target,
+        quantity: modalQuantity,
+        variantId: modalSelectedVariant.id,
+        foodItem: {
+          ...target.foodItem,
+          price: unitPrice,
+        },
+        customization: {
+          ...target.customization,
+          size: modalSelectedVariant,
+          extras: selectedExtras,
+        },
+      };
+      updatedCart[editingItemIndex] = updatedItem;
+
+      setCart(updatedCart);
+      if (syncCartItems) {
+        syncCartItems(
+          updatedCart.map(i => ({
+            id: i.foodItem.id,
+            name: i.foodItem.name,
+            price: i.foodItem.price,
+            quantity: i.quantity,
+            image: i.foodItem.image,
+            isVeg: i.foodItem.isVeg,
+            description: i.foodItem.description || '',
+            restaurantId: restaurantId || '',
+            restaurantName: displayRestaurantName || '',
+            variantId: i.variantId || i.customization?.size?.id || undefined,
+            customization: i.customization || undefined,
+          }))
+        );
+      }
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(`Updated ${target.foodItem?.name || 'item'} specification`, ToastAndroid.SHORT);
+      }
+    }
+    setShowItemCustomizationModal(false);
+  };
   const modalScaleAnim = useRef(new Animated.Value(0.82)).current;
   const modalOpacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -331,28 +551,36 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   const [selectedInstructions, setSelectedInstructions] = useState<string[]>([]);
   const [isBillDetailsExpanded, setIsBillDetailsExpanded] = useState<boolean>(false);
 
-  // Dynamic Surprise Deals derived purely from active restaurant menu items
+  // Dynamic Surprise Deals derived PURELY from the active restaurant's real menu items
   const surpriseDealsList = useMemo(() => {
-    if (foodItems && foodItems.length > 0) {
-      return foodItems
-        .filter(f => f.bestseller || f.badgeOffer || f.rating >= 4.0 || (f.mrp && f.mrp > f.price))
+    const availableItems = restaurantMenuItems.length > 0
+      ? restaurantMenuItems
+      : (foodItems && activeRestaurantId ? foodItems.filter((f: any) => f.restaurantId === activeRestaurantId) : (foodItems || []));
+
+    if (availableItems && availableItems.length > 0) {
+      return availableItems
         .slice(0, 4)
         .map(f => {
           const originalPrice = f.mrp || Math.round(f.price * 1.25);
           const disc = Math.round((1 - f.price / originalPrice) * 100);
           return {
-            id: `deal_${f.id}`,
+            id: f.id, // REAL ID from menu (not synthetic deal_...)
             name: f.name,
             originalPrice,
             dealPrice: f.price,
             discount: `${disc > 0 ? disc : 15}% OFF`,
             image: f.image ? (typeof f.image === 'string' ? { uri: f.image } : f.image) : { uri: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80' },
-            isVeg: f.isVeg,
+            isVeg: Boolean(f.isVeg),
+            description: f.description || '',
+            variants: f.variants || [],
+            variantId: f.variantId || (f.variants && f.variants[0]?.id) || null,
+            restaurantId: f.restaurantId || activeRestaurantId,
+            restaurantName: f.restaurantName || displayRestaurantName,
           };
         });
     }
     return [];
-  }, [foodItems]);
+  }, [restaurantMenuItems, foodItems, activeRestaurantId, displayRestaurantName]);
 
   // Safe Cart Items calculation (handles both SimCartItem and CartItem shapes without fake fallbacks)
   const safeCart = useMemo<SimCartItem[]>(() => {
@@ -477,7 +705,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
     }
   };
 
-  // Add Surprise Deal to cart
+  // Add Surprise Deal (Real Item from Menu) to cart
   const handleAddDealItem = (deal: typeof surpriseDealsList[0]) => {
     const existingIndex = safeCart.findIndex(i => i.foodItem.id === deal.id || i.foodItem.name === deal.name);
     let updated: SimCartItem[];
@@ -494,12 +722,18 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           mrp: deal.originalPrice,
           rating: 4.6,
           ratingCount: 88,
-          category: 'Surprise Deals',
+          category: 'Specials',
           isVeg: deal.isVeg,
           isEatRight: false,
-          image: typeof deal.image === 'object' && (deal.image as any).uri ? (deal.image as any).uri : 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=600&auto=format&fit=crop&q=80',
+          image: typeof deal.image === 'object' && (deal.image as any).uri ? (deal.image as any).uri : (typeof deal.image === 'string' ? deal.image : 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=600&auto=format&fit=crop&q=80'),
+          description: deal.description,
+          variants: deal.variants,
+          variantId: deal.variantId,
+          restaurantId: deal.restaurantId,
+          restaurantName: deal.restaurantName,
         },
         quantity: 1,
+        variantId: deal.variantId,
       };
       updated = [...safeCart, newDealItem];
     }
@@ -515,9 +749,10 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           image: i.foodItem.image,
           isVeg: i.foodItem.isVeg,
           description: i.foodItem.description || '',
-          restaurantId: restaurantId || '',
+          restaurantId: deal.restaurantId || activeRestaurantId || '',
           restaurantName: displayRestaurantName || '',
-          variantId: i.customization?.size?.id || null,
+          variantId: i.variantId || i.customization?.size?.id || null,
+          customization: i.customization || undefined,
         }))
       );
     }
@@ -594,7 +829,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 130 + insets.bottom }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 85 + insets.bottom }]}
       >
         {/* ════════════════════════════════════════════════════════════════════════
             [2] BENEFITS BANNER
@@ -661,7 +896,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
             </View>
           ) : (
             safeCart.map((item, index) => {
-              const variantText = item.customization?.size?.name || (item as any).variantName || (item.foodItem as any)?.variantName;
+              const variantText = item.customization?.size?.name || (item as any).variantName || (item.foodItem as any)?.variantName || 'Regular';
               const itemPrice = (item.foodItem?.price || 0) * (item.quantity || 1);
               return (
                 <View key={`checkout-item-${index}`} style={styles.cartItemRowWrap}>
@@ -675,20 +910,15 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
                         </Text>
                       </View>
 
-                      {variantText ? (
-                        <TouchableOpacity
-                          style={styles.cartItemVariantRow}
-                          activeOpacity={0.8}
-                          onPress={() => {
-                            if (Platform.OS === 'android') {
-                              ToastAndroid.show('Portion: ' + variantText, ToastAndroid.SHORT);
-                            }
-                          }}
-                        >
-                          <Text style={styles.cartItemVariantText}>{variantText}</Text>
-                          <Image source={checkChevronDown} style={styles.cartVariantChevron} />
-                        </TouchableOpacity>
-                      ) : null}
+                      <TouchableOpacity
+                        style={styles.cartItemVariantRow}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        onPress={() => handleOpenItemCustomization(item, index)}
+                      >
+                        <Text style={styles.cartItemVariantText}>{variantText}</Text>
+                        <Image source={checkChevronDown} style={styles.cartVariantChevron} />
+                      </TouchableOpacity>
 
                       {item.customization?.extras && item.customization.extras.length > 0 ? (
                         <View style={styles.cartItemExtrasSubtextRow}>
@@ -1129,8 +1359,6 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
             Please double-check your order and address details. Orders are non-refundable once placed.
           </Text>
         </View>
-
-        <View style={{ height: 110 * SCALE }} />
       </ScrollView>
 
       {/* ════════════════════════════════════════════════════════════════════════
@@ -1418,8 +1646,8 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           if (setCurrentLocation) {
             setCurrentLocation({
               address: addr.address || `${addr.houseNo ? addr.houseNo + ', ' : ''}${addr.landmark ? addr.landmark + ', ' : ''}${addr.area ? addr.area + ', ' : ''}${addr.city || ''}`.trim(),
-              latitude: addr.latitude || currentLocation?.latitude || 20.2961,
-              longitude: addr.longitude || currentLocation?.longitude || 85.8245,
+              latitude: addr.latitude || currentLocation?.latitude || 0,
+              longitude: addr.longitude || currentLocation?.longitude || 0,
               label: addr.type,
             });
           }
@@ -1453,6 +1681,196 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           addLog(`Updated delivery address from selector: ${loc.label || loc.address}`);
         }}
       />
+
+      {/* ════════════════════════════════════════════════════════════════════════
+          [17] DISH CUSTOMIZATION POP-UP MODAL (EXACT PARITY WITH RESTAURANT DETAIL SCREEN)
+          ════════════════════════════════════════════════════════════════════════ */}
+      <Modal
+        visible={showItemCustomizationModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowItemCustomizationModal(false)}
+      >
+        <View style={styles.customModalOverlay}>
+          <TouchableOpacity
+            style={styles.customModalBackdropDismiss}
+            activeOpacity={1}
+            onPress={() => setShowItemCustomizationModal(false)}
+          />
+
+          <View style={styles.customModalCard}>
+            {/* Header: Thumbnail + Dish Title + Close Button */}
+            <View style={styles.customModalHeader}>
+              <View style={styles.customModalHeaderLeft}>
+                {editingCartItem?.foodItem?.image ? (
+                  <Image
+                    source={typeof editingCartItem.foodItem.image === 'string' ? { uri: editingCartItem.foodItem.image } : editingCartItem.foodItem.image}
+                    style={styles.customModalDishThumb}
+                  />
+                ) : (
+                  <View style={styles.customModalDishThumbFallback} />
+                )}
+                <Text style={styles.customModalDishTitle} numberOfLines={1}>
+                  {editingCartItem?.foodItem?.name || editingCartItem?.name || 'Dish Details'}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.customModalCloseBtn}
+                activeOpacity={0.8}
+                onPress={() => setShowItemCustomizationModal(false)}
+              >
+                <Image source={modalClose} style={styles.customModalCloseImg} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Scrollable Customization Content */}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={styles.customModalScroll}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Mascot Speech Bubble Row */}
+              <View style={styles.mascotSpeechRow}>
+                <Image source={modalMascot} style={styles.mascotImg} />
+                <View style={styles.speechBubbleCard}>
+                  <Text style={styles.speechBubbleText}>
+                    Customize your order with available choices and add-ons.
+                  </Text>
+                </View>
+              </View>
+
+              {/* Section 1: "Choose From Variant" */}
+              {currentVariants.length > 1 && (
+                <View style={styles.customSectionWrap}>
+                  <Text style={styles.customSectionTitle}>Choose From Variant</Text>
+                  <Text style={styles.customSectionSubtitle}>Select any 1</Text>
+
+                  <View style={styles.variantsBox}>
+                    {currentVariants.map((variant: any, index: number) => {
+                      const isSelected = selectedVariantIndex === index;
+                      return (
+                        <React.Fragment key={`variant-${variant.id || index}`}>
+                          <TouchableOpacity
+                            style={styles.variantRow}
+                            activeOpacity={0.7}
+                            delayPressIn={0}
+                            onPress={() => setSelectedVariantIndex(index)}
+                          >
+                            <View style={styles.variantLeft}>
+                              <Image
+                                source={editingCartItem?.foodItem?.isVeg ? checkVegIcon : dietNonVegIcon}
+                                style={styles.dietIconSmall}
+                              />
+                              <Text style={styles.variantNameText}>{variant.name}</Text>
+                            </View>
+
+                            <View style={styles.variantRight}>
+                              <Text style={styles.variantPriceText}>₹{variant.price}</Text>
+                              <View style={[styles.radioCircleOutline, isSelected && styles.radioCircleActive]}>
+                                {isSelected && <View style={styles.radioCircleInner} />}
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                          {index < currentVariants.length - 1 && (
+                            <View style={styles.variantDivider} />
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              {/* Section 2: "Add-ons & Extras" */}
+              {currentAddonsList.length > 0 && (
+                <View style={styles.customSectionWrap}>
+                  <Text style={styles.customSectionTitle}>
+                    Add-ons & Recommended Extras
+                  </Text>
+                  <Text style={styles.customSectionSubtitle}>Select up to 3</Text>
+
+                  <View style={styles.addonsBox}>
+                    {currentAddonsList.map((addon: any, index: number) => {
+                      const isChecked = selectedAddonIds.includes(addon.id);
+                      return (
+                        <React.Fragment key={`addon-${addon.id}`}>
+                          <TouchableOpacity
+                            style={styles.addonRow}
+                            activeOpacity={0.7}
+                            delayPressIn={0}
+                            onPress={() => handleToggleAddon(addon.id)}
+                          >
+                            <View style={styles.addonLeft}>
+                              <Image
+                                source={addon.isVeg ? checkVegIcon : dietNonVegIcon}
+                                style={styles.dietIconSmall}
+                              />
+                              <View style={styles.addonTitleWrap}>
+                                {addon.tag && (
+                                  <View style={styles.addonTagPill}>
+                                    <Text style={styles.addonTagText}>{addon.tag}</Text>
+                                  </View>
+                                )}
+                                <Text style={styles.addonNameText} numberOfLines={1}>
+                                  {addon.name}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.addonRight}>
+                              <Text style={styles.addonPriceText}>+ ₹{Number(addon.price).toFixed(2)}</Text>
+                              <View style={[styles.checkboxOutline, isChecked && styles.checkboxActive]}>
+                                {isChecked && <Check size={13} color="#000000" strokeWidth={3.5} />}
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                          {index < currentAddonsList.length - 1 && (
+                            <View style={styles.variantDivider} />
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Bottom Sticky Action Row: Quantity Stepper + Update Specification Button */}
+            <View style={[styles.customModalBottomBar, { paddingBottom: getSafeBottomPadding(insets.bottom, 16) }]}>
+              {/* Stepper (- qty +) */}
+              <View style={styles.modalStepperBox}>
+                <TouchableOpacity
+                  style={styles.stepperBtn}
+                  onPress={() => setModalQuantity(Math.max(1, modalQuantity - 1))}
+                >
+                  <Minus size={14} color="#D8A635" strokeWidth={3} />
+                </TouchableOpacity>
+
+                <Text style={styles.stepperCountText}>{modalQuantity}</Text>
+
+                <TouchableOpacity
+                  style={styles.stepperBtn}
+                  onPress={() => setModalQuantity(modalQuantity + 1)}
+                >
+                  <Plus size={14} color="#D8A635" strokeWidth={3} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Update Specification Button */}
+              <TouchableOpacity
+                style={styles.modalAddCtaBtn}
+                activeOpacity={0.88}
+                onPress={handleSaveItemCustomization}
+              >
+                <Text style={styles.modalAddCtaText}>Update Specification</Text>
+                <Text style={styles.modalAddCtaPipe}>|</Text>
+                <Text style={styles.modalAddCtaPrice}>₹{modalGrandTotal}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -2786,5 +3204,297 @@ const styles = StyleSheet.create({
     fontSize: 16 * SCALE,
     color: '#000000',
     letterSpacing: 0.5,
+  },
+
+  // ── 13. DISH CUSTOMIZATION POP-UP MODAL (FIGMA NODE 3027:1105 PARITY) ──
+  customModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'flex-end',
+  },
+  customModalBackdropDismiss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  customModalCard: {
+    backgroundColor: '#0A0A08',
+    borderTopLeftRadius: 28 * SCALE,
+    borderTopRightRadius: 28 * SCALE,
+    borderWidth: 1,
+    borderColor: '#22201D',
+    maxHeight: SCREEN_HEIGHT * 0.88,
+    paddingTop: 16 * SCALE,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 16,
+  },
+  customModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 18 * SCALE,
+    paddingBottom: 14 * SCALE,
+    borderBottomWidth: 1,
+    borderBottomColor: '#171715',
+  },
+  customModalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12 * SCALE,
+    flex: 1,
+  },
+  customModalDishThumb: {
+    width: 44 * SCALE,
+    height: 44 * SCALE,
+    borderRadius: 12 * SCALE,
+    resizeMode: 'cover',
+  },
+  customModalDishThumbFallback: {
+    width: 44 * SCALE,
+    height: 44 * SCALE,
+    borderRadius: 12 * SCALE,
+    backgroundColor: '#1E1E1C',
+  },
+  customModalDishTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 18 * SCALE,
+    color: '#E5E2E1',
+    flex: 1,
+  },
+  customModalCloseBtn: {
+    padding: 6,
+  },
+  customModalCloseImg: {
+    width: 18 * SCALE,
+    height: 18 * SCALE,
+    resizeMode: 'contain',
+  },
+  customModalScroll: {
+    paddingHorizontal: 16 * SCALE,
+    paddingVertical: 12 * SCALE,
+  },
+  mascotSpeechRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10 * SCALE,
+    marginBottom: 18 * SCALE,
+  },
+  mascotImg: {
+    width: 58 * SCALE,
+    height: 72 * SCALE,
+    resizeMode: 'contain',
+  },
+  speechBubbleCard: {
+    flex: 1,
+    backgroundColor: '#13100B',
+    borderWidth: 1,
+    borderColor: '#342C1B',
+    borderRadius: 18 * SCALE,
+    paddingHorizontal: 14 * SCALE,
+    paddingVertical: 10 * SCALE,
+  },
+  speechBubbleText: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12.5 * SCALE,
+    color: '#C5B496',
+    lineHeight: 17 * SCALE,
+  },
+  customSectionWrap: {
+    marginBottom: 20 * SCALE,
+  },
+  customSectionTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 15.5 * SCALE,
+    color: '#D4D4D4',
+    marginBottom: 2,
+  },
+  customSectionSubtitle: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12 * SCALE,
+    color: '#777777',
+    marginBottom: 10 * SCALE,
+  },
+  variantsBox: {
+    backgroundColor: '#070806',
+    borderWidth: 1,
+    borderColor: '#1E1E1B',
+    borderRadius: 18 * SCALE,
+    overflow: 'hidden',
+  },
+  variantRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14 * SCALE,
+    paddingVertical: 14 * SCALE,
+  },
+  variantLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10 * SCALE,
+    flex: 1,
+  },
+  dietIconSmall: {
+    width: 14 * SCALE,
+    height: 14 * SCALE,
+    resizeMode: 'contain',
+  },
+  variantNameText: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 14 * SCALE,
+    color: '#CCCCCC',
+  },
+  variantRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12 * SCALE,
+  },
+  variantPriceText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 14 * SCALE,
+    color: '#CCCCCC',
+  },
+  radioCircleOutline: {
+    width: 20 * SCALE,
+    height: 20 * SCALE,
+    borderRadius: 10 * SCALE,
+    borderWidth: 2,
+    borderColor: '#666666',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  radioCircleActive: {
+    borderColor: '#DEA430',
+  },
+  radioCircleInner: {
+    width: 10 * SCALE,
+    height: 10 * SCALE,
+    borderRadius: 5 * SCALE,
+    backgroundColor: '#DEA430',
+  },
+  variantDivider: {
+    height: 1,
+    backgroundColor: '#171715',
+    marginHorizontal: 14 * SCALE,
+  },
+  addonsBox: {
+    backgroundColor: '#070806',
+    borderWidth: 1,
+    borderColor: '#201E1A',
+    borderRadius: 18 * SCALE,
+    overflow: 'hidden',
+  },
+  addonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14 * SCALE,
+    paddingVertical: 13 * SCALE,
+  },
+  addonLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8 * SCALE,
+    flex: 1,
+  },
+  addonTitleWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  addonTagPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1E190D',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+  },
+  addonTagText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 9 * SCALE,
+    color: '#947A34',
+  },
+  addonNameText: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 13.5 * SCALE,
+    color: '#CCCCCC',
+  },
+  addonRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10 * SCALE,
+  },
+  addonPriceText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12.5 * SCALE,
+    color: '#888888',
+  },
+  checkboxOutline: {
+    width: 20 * SCALE,
+    height: 20 * SCALE,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#666666',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  checkboxActive: {
+    borderColor: '#DEA430',
+    backgroundColor: '#DEA430',
+  },
+  customModalBottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16 * SCALE,
+    paddingTop: 12 * SCALE,
+    gap: 12 * SCALE,
+    borderTopWidth: 1,
+    borderTopColor: '#171715',
+  },
+  modalStepperBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#050505',
+    borderWidth: 1,
+    borderColor: '#7F6D36',
+    borderRadius: 16 * SCALE,
+    height: 50 * SCALE,
+    paddingHorizontal: 12 * SCALE,
+    gap: 16 * SCALE,
+  },
+  stepperBtn: {
+    padding: 6,
+  },
+  stepperCountText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 16 * SCALE,
+    color: '#FFFFFF',
+  },
+  modalAddCtaBtn: {
+    flex: 1,
+    height: 50 * SCALE,
+    backgroundColor: '#D8A635',
+    borderRadius: 16 * SCALE,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8 * SCALE,
+  },
+  modalAddCtaText: {
+    fontFamily: 'Urbanist-Black',
+    fontSize: 15.5 * SCALE,
+    color: '#2E1F07',
+  },
+  modalAddCtaPipe: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 15.5 * SCALE,
+    color: '#3E2904',
+  },
+  modalAddCtaPrice: {
+    fontFamily: 'Urbanist-Black',
+    fontSize: 15.5 * SCALE,
+    color: '#2E1F07',
   },
 });

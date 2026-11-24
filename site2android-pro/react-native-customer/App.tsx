@@ -565,7 +565,15 @@ const MainAppContent: React.FC = () => {
       )}
 
       {/* Floating Cart Summary Bar with Upsell Banner on Top */}
-      {cartItems.length > 0 && activeScreen !== 'checkout' && activeScreen !== 'cart' && activeScreen !== 'login' && activeScreen !== 'dining' && activeScreen !== 'profile' && (
+      {cartItems.length > 0 &&
+        activeScreen !== 'checkout' &&
+        activeScreen !== 'cart' &&
+        activeScreen !== 'login' &&
+        activeScreen !== 'dining' &&
+        activeScreen !== 'profile' &&
+        activeScreen !== 'tracking' &&
+        activeScreen !== 'reorder' &&
+        activeScreen !== 'dining-category' && (
         <View
           style={[
             styles.fcWrapper,
@@ -590,8 +598,8 @@ const MainAppContent: React.FC = () => {
                       id: c.id,
                       name: c.name,
                       price: c.price,
-                      rating: 4.8,
-                      ratingCount: 120,
+                      rating: (c as any).rating ? Number((c as any).rating) : 0,
+                      ratingCount: (c as any).ratingCount || 0,
                       category: 'Dishes',
                       isVeg: c.isVeg,
                       isEatRight: false,

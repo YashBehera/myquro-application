@@ -9,8 +9,9 @@ export const reviews = pgTable(
     id: text("id").notNull().primaryKey(),
 
     sessionId: text("session_id")
-      .notNull()
       .references(() => tableSession.id, { onDelete: "cascade" }),
+
+    orderId: text("order_id"),
 
     userId: text("user_id")
       .notNull()

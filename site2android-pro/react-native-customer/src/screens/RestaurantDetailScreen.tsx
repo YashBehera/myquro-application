@@ -26,6 +26,7 @@ import {
   ToastAndroid,
   Clipboard,
   StatusBar,
+  Animated,
 } from 'react-native';
 import {
   Heart,
@@ -254,12 +255,12 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
               name: rest.restaurantName,
               description: rest.description || '',
               image: rest.restaurantBanner || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600&auto=format&fit=crop&q=60',
-              rating: Number(rest.rating || 4.2),
-              reviewCount: rest.ratingCount || 45,
+              rating: Number(rest.rating || 0) > 0 ? Number(Number(rest.rating).toFixed(1)) : 0,
+              reviewCount: Number(rest.ratingCount || 0),
               cuisine: Array.isArray(rest.cuisine) ? rest.cuisine.join(', ') : (rest.cuisine || rest.restaurantType || 'Multi-Cuisine'),
               category: rest.restaurantType || 'Gourmet',
               dishesCategory: 'Specials',
-              city: rest.city || 'Bhubaneswar',
+              city: rest.city || '',
               isFavourite: false,
               phone: rest.phoneNumber || '',
               email: rest.email || '',
@@ -287,8 +288,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
     return {
       id: restaurantId || '',
       name: 'Restaurant',
-      rating: 4.2,
-      reviewCount: 45,
+      rating: 0,
+      reviewCount: 0,
       cuisine: 'Multi-Cuisine',
       category: 'Dining',
       address: '',
@@ -297,7 +298,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
       image: 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600&auto=format&fit=crop&q=60',
       description: '',
       dishesCategory: 'Specials',
-      city: 'Bhubaneswar',
+      city: '',
       isFavourite: false,
       phone: '',
       email: '',
@@ -324,6 +325,85 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
   const [selectedVariantIndex, setSelectedVariantIndex] = useState<number>(0);
   const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
   const [modalQuantity, setModalQuantity] = useState<number>(1);
+
+  // Auto-rotating & Touch-Responsive Offer Banner Carousel State
+  const [currentOfferIndex, setCurrentOfferIndex] = useState(0);
+  const offerFadeAnim = useRef(new Animated.Value(1)).current;
+
+  const restaurantOffers = useMemo(() => [
+    {
+      title: restaurant.discount || '70% OFF UPTO ₹140',
+      code: 'USE QURO70 | ABOVE ₹199',
+      badge: '%',
+      couponCode: 'QURO70',
+    },
+    {
+      title: 'FLAT ₹125 OFF INSTANTLY',
+      code: 'USE FLAVORFUL | ABOVE ₹399',
+      badge: '₹',
+      couponCode: 'FLAVORFUL',
+    },
+    {
+      title: '50% OFF UPTO ₹100',
+      code: 'USE WELCOME50 | ABOVE ₹149',
+      badge: '%',
+      couponCode: 'WELCOME50',
+    },
+    {
+      title: 'FLAT ₹200 OFF GOURMET DEALS',
+      code: 'USE GOURMET200 | ABOVE ₹599',
+      badge: '₹',
+      couponCode: 'GOURMET200',
+    },
+    {
+      title: 'FREE DELIVERY + EXTRA 20% OFF',
+      code: 'USE ONEPASS | ABOVE ₹99',
+      badge: '★',
+      couponCode: 'ONEPASS',
+    },
+  ], [restaurant.discount]);
+
+  // Touch handler to cycle to next offer with smooth animation
+  const handleNextOffer = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(offerFadeAnim, {
+        toValue: 0.3,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+      Animated.timing(offerFadeAnim, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start();
+    setCurrentOfferIndex(prev => (prev + 1) % restaurantOffers.length);
+    const offer = restaurantOffers[(currentOfferIndex + 1) % restaurantOffers.length];
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(`Coupon: ${offer.couponCode} (${offer.title})`, ToastAndroid.SHORT);
+    }
+  }, [offerFadeAnim, restaurantOffers, currentOfferIndex]);
+
+  // Continuously rotate offers every 3.2 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      Animated.sequence([
+        Animated.timing(offerFadeAnim, {
+          toValue: 0.2,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.timing(offerFadeAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      setCurrentOfferIndex(prev => (prev + 1) % restaurantOffers.length);
+    }, 3200);
+
+    return () => clearInterval(timer);
+  }, [offerFadeAnim, restaurantOffers.length]);
 
   const scrollRef = useRef<ScrollViewInstance>(null);
 
@@ -358,8 +438,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
           id: item.id,
           name: item.name,
           price: item.price,
-          rating: 4.5,
-          ratingCount: 24,
+          rating: (item as any).rating ? Number((item as any).rating) : 0,
+          ratingCount: (item as any).ratingCount || 0,
           category: 'Dishes',
           isVeg: item.isVeg,
           isEatRight: false,
@@ -421,8 +501,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                   id: item.id,
                   name: item.name,
                   price: price,
-                  rating: item.rating || 4.5,
-                  ratingCount: item.ratingCount || 18,
+                  rating: Number(item.rating || 0) > 0 ? Number(Number(item.rating).toFixed(1)) : 0,
+                  ratingCount: Number(item.ratingCount || item.rating_count || 0),
                   category: cat.name,
                   isVeg: parseIsVeg(item),
                   isEatRight: parseIsEatRight(item),
@@ -461,8 +541,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                   id: item.id,
                   name: item.name,
                   price: price,
-                  rating: item.rating || 4.5,
-                  ratingCount: item.ratingCount || 18,
+                  rating: Number(item.rating || 0) > 0 ? Number(Number(item.rating).toFixed(1)) : 0,
+                  ratingCount: Number(item.ratingCount || item.rating_count || 0),
                   category: cat.name,
                   isVeg: parseIsVeg(item),
                   isEatRight: parseIsEatRight(item),
@@ -486,8 +566,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                 id: f.id,
                 name: f.name,
                 price: f.price || 199,
-                rating: Number(f.rating) || 4.5,
-                ratingCount: 20,
+                rating: Number(f.rating || 0) > 0 ? Number(Number(f.rating).toFixed(1)) : 0,
+                ratingCount: Number(f.ratingCount || f.rating_count || 0),
                 category: f.categoryName || 'Dishes',
                 isVeg: f.isVeg !== undefined ? f.isVeg : true,
                 isEatRight: false,
@@ -508,8 +588,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
               id: f.id,
               name: f.name,
               price: f.price || 199,
-              rating: Number(f.rating) || 4.5,
-              ratingCount: 20,
+              rating: Number(f.rating || 0) > 0 ? Number(Number(f.rating).toFixed(1)) : 0,
+              ratingCount: Number(f.ratingCount || f.rating_count || 0),
               category: f.categoryName || 'Dishes',
               isVeg: f.isVeg !== undefined ? f.isVeg : true,
               isEatRight: false,
@@ -841,15 +921,26 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                 <Image source={imgImage19} style={styles.sealIcon} />
                 <Text style={styles.sealText}>My Quro Seal</Text>
               </View>
+              {(restaurant.isPureVeg || /pure\s*veg|vegetarian/i.test((restaurant as any).restaurantType || restaurant.category || '')) && (
+                <View style={{ backgroundColor: '#051A0E', borderWidth: 1, borderColor: '#00A352', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 }}>
+                  <Text style={{ color: '#00D06C', fontSize: 10 * SCALE, fontFamily: 'Urbanist-Bold' }}>PURE VEG</Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.ratingColumn}>
               <View style={styles.ratingPill}>
-                <Text style={styles.ratingNumber}>{restaurant.rating || 4.3}</Text>
-                <Image source={imgImage18} style={styles.ratingStarImg} />
+                <Text style={styles.ratingNumber}>
+                  {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : 'NEW'}
+                </Text>
+                {Number(restaurant.rating) > 0 && <Image source={imgImage18} style={styles.ratingStarImg} />}
               </View>
               <Text style={styles.ratingCountText}>
-                {restaurant.reviewCount ? `${(restaurant.reviewCount / 1000).toFixed(1)}K+ ratings` : '9.4K+ ratings'}
+                {restaurant.reviewCount && Number(restaurant.reviewCount) > 0
+                  ? (Number(restaurant.reviewCount) >= 1000
+                      ? `${(Number(restaurant.reviewCount) / 1000).toFixed(1)}K+ ratings`
+                      : `${restaurant.reviewCount} rating${Number(restaurant.reviewCount) > 1 ? 's' : ''}`)
+                  : 'No ratings yet'}
               </Text>
             </View>
           </View>
@@ -865,12 +956,12 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
             activeOpacity={0.8}
             onPress={() => {
               if (Platform.OS === 'android') {
-                ToastAndroid.show(`${restaurant.address || 'Patrapada, Bhubaneswar'}`, ToastAndroid.SHORT);
+                ToastAndroid.show(`${restaurant.address || restaurant.name}`, ToastAndroid.SHORT);
               }
             }}
           >
             <Text style={styles.etaLocationText}>
-              {restaurant.deliveryTime || 35}–{(restaurant.deliveryTime || 35) + 5} mins • {restaurant.address?.split(',')[0] || 'Patrapada'}
+              {restaurant.deliveryTime || 35}–{(restaurant.deliveryTime || 35) + 5} mins • {restaurant.address?.split(',')[0] || restaurant.name}
             </Text>
             <Image source={imgImage17} style={styles.downChevronImg} />
           </TouchableOpacity>
@@ -878,30 +969,45 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
           {/* Card Divider Line 1 */}
           <Image source={imgBackground9} style={styles.cardDividerImg} />
 
-          {/* Offer Banner Carousel Row */}
-          <View style={styles.offerBannerRow}>
+          {/* Offer Banner Carousel Row (Touch Responsive & Auto-Rotating) */}
+          <TouchableOpacity
+            style={styles.offerBannerRow}
+            activeOpacity={0.8}
+            onPress={handleNextOffer}
+          >
             <View style={styles.offerBadgeBox}>
               <Image source={imgBackground8} style={styles.offerBadgeStarburst} />
-              <Text style={styles.offerBadgePercentText}>%</Text>
+              <Text style={styles.offerBadgePercentText}>
+                {restaurantOffers[currentOfferIndex]?.badge || '%'}
+              </Text>
             </View>
 
-            <View style={styles.offerInfoCol}>
-              <Text style={styles.offerTitleText}>
-                {restaurant.discount || '70% OFF UPTO ₹140'}
+            <Animated.View style={[styles.offerInfoCol, { opacity: offerFadeAnim }]}>
+              <Text style={styles.offerTitleText} numberOfLines={1}>
+                {restaurantOffers[currentOfferIndex]?.title}
               </Text>
-              <Text style={styles.offerCouponCodeText}>USE DELULU4FOOD | ABOVE ₹199</Text>
-            </View>
+              <Text style={styles.offerCouponCodeText} numberOfLines={1}>
+                {restaurantOffers[currentOfferIndex]?.code}
+              </Text>
+            </Animated.View>
 
             <View style={styles.offerPaginationCol}>
-              <Text style={styles.offerPageCountText}>1/5</Text>
+              <Text style={styles.offerPageCountText}>
+                {currentOfferIndex + 1}/{restaurantOffers.length}
+              </Text>
               <View style={styles.offerDotsRow}>
-                <Image source={imgBackground7} style={styles.offerDotActive} />
-                <Image source={imgBackground6} style={styles.offerDotInactive} />
-                <Image source={imgBackground5} style={styles.offerDotInactive} />
-                <Image source={imgBackground4} style={styles.offerDotInactive} />
+                {restaurantOffers.map((_, dotIdx) => (
+                  <View
+                    key={`offer-dot-${dotIdx}`}
+                    style={[
+                      styles.offerDotCustom,
+                      dotIdx === currentOfferIndex && styles.offerDotCustomActive,
+                    ]}
+                  />
+                ))}
               </View>
             </View>
-          </View>
+          </TouchableOpacity>
 
           {/* Card Divider Line 2 */}
           <Image source={imgBackground3} style={styles.cardDividerImg} />
@@ -1159,7 +1265,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                             <View style={styles.greenRatingPill}>
                               <Image source={contImg16} style={styles.greenStarIcon} />
                               <Text style={styles.greenRatingText}>
-                                {item.rating || 4.3}({item.ratingCount || 249})
+                                {Number(item.rating) > 0 ? Number(item.rating).toFixed(1) : 'NEW'}
+                                {Number(item.ratingCount) > 0 ? `(${item.ratingCount})` : ''}
                               </Text>
                             </View>
                           </View>
@@ -1255,7 +1362,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                             <View style={styles.greenRatingPill}>
                               <Image source={contImg8} style={styles.greenStarIcon} />
                               <Text style={styles.greenRatingText}>
-                                {item.rating || 4.5} ({item.ratingCount || 56})
+                                {Number(item.rating) > 0 ? Number(item.rating).toFixed(1) : 'NEW'}
+                                {Number(item.ratingCount) > 0 ? ` (${item.ratingCount})` : ''}
                               </Text>
                             </View>
                           </View>
@@ -1339,7 +1447,8 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                           <View style={styles.pairRatingPill}>
                             <Image source={starGreenSmall} style={styles.pairStarIcon} />
                             <Text style={styles.pairRatingText}>
-                              {dish.rating || 4.3}({dish.ratingCount || 45})
+                              {Number(dish.rating) > 0 ? Number(dish.rating).toFixed(1) : 'NEW'}
+                              {Number(dish.ratingCount) > 0 ? `(${dish.ratingCount})` : ''}
                             </Text>
                           </View>
                         </View>
@@ -1567,7 +1676,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
               onPress={() => {
                 Alert.alert(
                   restaurant.name,
-                  `Address: ${restaurant.address}\nCuisine: ${restaurant.cuisine}\nRating: ${restaurant.rating} ★ (${restaurant.reviewCount || 9400} ratings)`
+                  `Address: ${restaurant.address}\nCuisine: ${restaurant.cuisine}\nRating: ${Number(restaurant.rating) > 0 ? `${Number(restaurant.rating).toFixed(1)} ★ (${restaurant.reviewCount || 0} ratings)` : 'New on My Quro'}`
                 );
                 setShowMoreMenu(false);
               }}
@@ -1982,6 +2091,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
+  },
+  offerDotCustom: {
+    width: 4 * SCALE,
+    height: 4 * SCALE,
+    borderRadius: 2 * SCALE,
+    backgroundColor: '#3A3830',
+  },
+  offerDotCustomActive: {
+    width: 10 * SCALE,
+    backgroundColor: '#DEA430',
   },
   offerDotActive: {
     width: 6 * SCALE,

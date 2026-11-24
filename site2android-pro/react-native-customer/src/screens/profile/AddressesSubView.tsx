@@ -123,8 +123,8 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
   };
 
   const [mapRegion, setMapRegion] = useState({
-    latitude: 20.2508,
-    longitude: 85.7886,
+    latitude: 0,
+    longitude: 0,
     latitudeDelta: 0.01,
     longitudeDelta: 0.01,
   });
@@ -251,7 +251,7 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
           address: locationResult.address,
         });
         setArea(locationResult.label);
-        setCity(locationResult.address.split(',')[1]?.trim() || 'Bhubaneswar');
+        setCity(locationResult.address.split(',')[1]?.trim() || '');
         olaMapRef.current?.recenter(locationResult.latitude, locationResult.longitude, 16.5);
         olaMapRef.current?.setUserLocation(locationResult.latitude, locationResult.longitude);
         setIsResolvingAddress(false);
@@ -261,16 +261,6 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
       console.error("GPS Ola Maps Geocode error in profile:", err);
     }
 
-    // Default fallback if GPS unavailable
-    try {
-      const info = await reverseGeocode(20.2520, 85.7820);
-      if (info) {
-        setSelectedLocationInfo(info);
-        setArea(info.label);
-        setCity(info.address.split(',')[1]?.trim() || 'Bhubaneswar');
-        olaMapRef.current?.recenter(20.2520, 85.7820, 16);
-      }
-    } catch (_) {}
     setIsResolvingAddress(false);
   };
 
@@ -459,8 +449,8 @@ export const AddressesSubView: React.FC<AddressesSubViewProps> = ({
                 setDeliveryInstructions('');
                 setEditingAddressId(null);
                 setMapRegion({
-                  latitude: userLocation?.latitude || 20.2508,
-                  longitude: userLocation?.longitude || 85.7886,
+                  latitude: userLocation?.latitude || 0,
+                  longitude: userLocation?.longitude || 0,
                   latitudeDelta: 0.01,
                   longitudeDelta: 0.01,
                 });

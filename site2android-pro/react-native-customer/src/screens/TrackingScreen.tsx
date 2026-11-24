@@ -71,6 +71,7 @@ import {
   Navigation,
 } from 'lucide-react-native';
 import { DeliveredOrderView } from './DeliveredOrderView';
+import { RatingService } from '../services/RatingService';
 import Svg, {
   Rect,
   Path,
@@ -319,26 +320,26 @@ function buildOlaMapHtml(
     /* Animated Delivery Bike Marker */
     .bike-marker{
       position:relative;
-      width:40px;height:40px;
+      width:44px;height:44px;
       display:flex;align-items:center;justify-content:center;
       pointer-events:none;
     }
     .bike-aura{
       position:absolute;
-      width:38px;height:38px;border-radius:19px;
-      background:rgba(56,189,248,0.28);
-      animation:bike-pulse 1.8s infinite ease-out;
+      width:42px;height:42px;border-radius:21px;
+      background:rgba(212,175,55,0.28);
+      animation:bike-pulse 2s infinite ease-out;
     }
     @keyframes bike-pulse{
-      0%{transform:scale(0.85);opacity:0.9;}
-      100%{transform:scale(1.55);opacity:0;}
+      0%{transform:scale(0.85);opacity:0.95;}
+      100%{transform:scale(1.75);opacity:0;}
     }
     .bike-icon-wrapper{
-      width:34px;height:34px;
+      width:38px;height:38px;
       display:flex;align-items:center;justify-content:center;
       transform-origin:center center;
       transition:transform 0.35s cubic-bezier(0.25,1,0.5,1);
-      filter:drop-shadow(0 3px 6px rgba(0,0,0,0.5));
+      filter:drop-shadow(0 4px 10px rgba(0,0,0,0.7));
     }
   </style>
 </head>
@@ -495,7 +496,7 @@ function buildOlaMapHtml(
       var bikeEl = document.createElement('div');
       bikeEl.className = 'bike-marker';
       bikeEl.id = 'rider-bike-marker';
-      bikeEl.innerHTML = '<div class="bike-aura"></div><div class="bike-icon-wrapper" id="bike-icon-inner"><svg width="34" height="34" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="16" fill="#0F172A" stroke="#38BDF8" stroke-width="2.5"/><polygon points="18,3 23,10 13,10" fill="#38BDF8"/><rect x="16" y="10" width="4" height="16" rx="2" fill="#F8FAFC"/><circle cx="18" cy="12" r="2.2" fill="#0284C7"/><line x1="12" y1="12" x2="24" y2="12" stroke="#CBD5E1" stroke-width="2.2" stroke-linecap="round"/><circle cx="18" cy="23" r="2.5" fill="#0284C7"/><rect x="13" y="15" width="10" height="7.5" rx="2" fill="#F59E0B" stroke="#FFFFFF" stroke-width="1"/></svg></div>';
+      bikeEl.innerHTML = '<div class="bike-aura"></div><div class="bike-icon-wrapper" id="bike-icon-inner"><svg width="38" height="38" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="22" cy="22" r="20" fill="#0D1117" stroke="#D4AF37" stroke-width="2.5"/><polygon points="22,3 26.5,10 17.5,10" fill="#F59E0B"/><rect x="20" y="8" width="4" height="6.5" rx="1.5" fill="#2B2D31" stroke="#D4AF37" stroke-width="0.8"/><line x1="13" y1="14" x2="31" y2="14" stroke="#F1F5F9" stroke-width="2.8" stroke-linecap="round"/><circle cx="13" cy="14" r="1.8" fill="#F59E0B"/><circle cx="31" cy="14" r="1.8" fill="#F59E0B"/><path d="M19 14.5 L25 14.5 L24 18.5 L20 18.5 Z" fill="#F59E0B"/><circle cx="22" cy="15.5" r="1.2" fill="#FFFFFF"/><ellipse cx="22" cy="22" rx="5.2" ry="5.8" fill="#1E293B" stroke="#D4AF37" stroke-width="1.2"/><path d="M18.5 20.5 C19.5 18.5 24.5 18.5 25.5 20.5" stroke="#38BDF8" stroke-width="2.2" stroke-linecap="round"/><path d="M14.5 25.5 C14.5 23.5 29.5 23.5 29.5 25.5 L28 29 L16 29 Z" fill="#334155"/><rect x="16.5" y="27" width="11" height="9.5" rx="2" fill="#D4AF37" stroke="#FFFFFF" stroke-width="1"/><circle cx="22" cy="31.8" r="1.6" fill="#0D1117"/><rect x="20" y="37" width="4" height="1.6" rx="0.8" fill="#EF4444"/></svg></div>';
       riderMarker = new maplibregl.Marker({element: bikeEl, anchor: 'center'}).setLngLat([lng, lat]).addTo(map);
     } else {
       riderMarker.setLngLat([lng, lat]);
@@ -862,10 +863,11 @@ function buildMiniOlaMapHtml(
     .pin{width:12px;height:12px;border-radius:6px;background:#000;border:2px solid #F2CA50;}
     .cust{width:12px;height:12px;border-radius:6px;background:#000;border:2px solid #FFF;}
     .mini-bike{
-      width:18px;height:18px;border-radius:9px;background:#0F172A;border:1.5px solid #38BDF8;
+      width:24px;height:24px;border-radius:12px;background:#0D1117;border:2px solid #D4AF37;
       display:flex;align-items:center;justify-content:center;
       transform-origin:center center;
       transition:transform 0.35s ease;
+      box-shadow:0 2px 6px rgba(0,0,0,0.5);
     }
   </style>
 </head>
@@ -961,7 +963,7 @@ function buildMiniOlaMapHtml(
       var p3 = document.createElement('div');
       p3.className = 'mini-bike';
       p3.id = 'mini-bike-inner';
-      p3.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="#38BDF8"><polygon points="12,2 20,18 12,14 4,18"/></svg>';
+      p3.innerHTML = '<svg width="18" height="18" viewBox="0 0 44 44" fill="none"><polygon points="22,3 26.5,10 17.5,10" fill="#F59E0B"/><rect x="20" y="8" width="4" height="6.5" rx="1.5" fill="#555"/><line x1="13" y1="14" x2="31" y2="14" stroke="#FFF" stroke-width="3" stroke-linecap="round"/><ellipse cx="22" cy="22" rx="5.5" ry="6" fill="#1E293B" stroke="#D4AF37" stroke-width="1.5"/><path d="M18.5 20.5 C19.5 18.5 24.5 18.5 25.5 20.5" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round"/><rect x="16.5" y="27" width="11" height="9.5" rx="2" fill="#D4AF37"/></svg>';
       riderMarker = new maplibregl.Marker({element: p3, anchor: 'center'}).setLngLat([lng, lat]).addTo(map);
     } else {
       riderMarker.setLngLat([lng, lat]);
@@ -1097,74 +1099,6 @@ const calculateDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: num
   return R * c;
 };
 
-// ─── Default Rich Mock Data for Instant Preview / Design Editing ─────────────
-const DEFAULT_MOCK_ORDER = {
-  id: 'ORD-98421',
-  orderId: 'ORD-98421',
-  restaurantName: 'The Maharaja Restaurant',
-  restaurantAddress: 'Plot 42, Patrapada, Bhubaneswar',
-  restaurantPhone: '+91 98765 43210',
-  restaurantLatitude: 20.3009,
-  restaurantLongitude: 85.8199,
-  deliveryAddress: 'Flat 402, Royal Palms, Infocity, Bhubaneswar',
-  customerLatitude: 20.2505,
-  customerLongitude: 85.7882,
-  status: 'placed',
-  prepTimeMinutes: 20,
-  extendedPrepMinutes: 0,
-  etaMinutes: 28,
-  createdAt: new Date().toISOString(),
-  totalAmount: 589,
-  itemTotal: 520,
-  tax: 26,
-  deliveryFee: 0,
-  platformFee: 5,
-  discount: 140,
-  couponCode: 'DELULU4FOOD',
-  paymentMethod: 'UPI (PhonePe)',
-  items: [
-    {
-      id: 'item_1',
-      menuItemName: 'Paneer Butter Masala (Special)',
-      name: 'Paneer Butter Masala (Special)',
-      quantity: 1,
-      price: 280,
-      isVeg: true,
-      customization: 'Spicy • Extra Butter',
-    },
-    {
-      id: 'item_2',
-      menuItemName: 'Butter Garlic Naan',
-      name: 'Butter Garlic Naan',
-      quantity: 2,
-      price: 60,
-      isVeg: true,
-    },
-    {
-      id: 'item_3',
-      menuItemName: 'Hyderabadi Veg Dum Biryani',
-      name: 'Hyderabadi Veg Dum Biryani',
-      quantity: 1,
-      price: 220,
-      isVeg: true,
-      customization: 'With Raita & Salan',
-    },
-  ],
-};
-
-const DEFAULT_MOCK_TRACKING = {
-  orderId: 'ORD-98421',
-  status: 'placed',
-  riderId: null,
-  currentLat: 20.2750,
-  currentLng: 85.8040,
-  restaurantLat: 20.3009,
-  restaurantLng: 85.8199,
-  customerLat: 20.2505,
-  customerLng: 85.7882,
-  etaMinutes: 18,
-};
-
 // Kitchen status lifecycle rank (strictly restaurant order states)
 const KITCHEN_STATUS_RANK: Record<string, number> = {
   placed: 1,
@@ -1261,35 +1195,123 @@ export const getOrderTotalAmount = (order: any, itemsList: any[] = []): number =
   return 0;
 };
 
+// ─── UPGRADED PICKUP HANDOVER OTP BADGE (High-End Security Pass Styling) ──────
+const PickupHandoverOtpBadge: React.FC<{ otp: string | number }> = ({ otp }) => {
+  const [copied, setCopied] = useState(false);
+  const otpStr = String(otp ?? '').trim();
+  const digits = otpStr ? otpStr.split('') : [];
+
+  const handlePress = useCallback(() => {
+    setCopied(true);
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(`Pickup OTP ${otpStr} copied to clipboard`, ToastAndroid.SHORT);
+    }
+    setTimeout(() => {
+      setCopied(false);
+    }, 1800);
+  }, [otpStr]);
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.75}
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`Pickup Handover OTP is ${otpStr}. Tap to copy.`}
+      style={styles.pickupOtpContainer}
+    >
+      {/* Left side: Shield Icon with micro glow & uppercase label */}
+      <View style={styles.pickupOtpLeft}>
+        <View style={styles.pickupOtpIconGlow}>
+          <ShieldCheck size={11.5 * SCALE} color="#F5B800" strokeWidth={2.6} />
+        </View>
+        <Text style={styles.pickupOtpLabel}>PICKUP OTP</Text>
+      </View>
+
+      {/* Vertical hairline divider */}
+      <View style={styles.pickupOtpDivider} />
+
+      {/* Right side: 4 individual micro digit cells or COPIED feedback */}
+      {copied ? (
+        <View style={styles.pickupOtpCopiedPill}>
+          <Check size={10 * SCALE} color="#FFFFFF" strokeWidth={3} style={{ marginRight: 2.5 * SCALE }} />
+          <Text style={styles.pickupOtpCopiedText}>COPIED</Text>
+        </View>
+      ) : (
+        <View style={styles.pickupOtpDigitsRow}>
+          {digits.map((digit, idx) => (
+            <View key={idx} style={styles.pickupOtpDigitBox}>
+              <Text style={styles.pickupOtpDigitText}>{digit}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+};
+
 interface TrackingScreenProps {
   orderId: string | null;
   onBack: () => void;
 }
 
+// Helper to extract permanent delivery destination from order details or notes
+const parseOrderDeliveryInfo = (order: any) => {
+  let addr = order?.deliveryAddress || order?.delivery_address || order?.address || order?.delivery?.address || order?.delivery?.customerAddress;
+  let lat = order?.customerLatitude || order?.customer_latitude || order?.deliveryLatitude || order?.latitude || order?.delivery?.customerLat;
+  let lng = order?.customerLongitude || order?.customer_longitude || order?.deliveryLongitude || order?.longitude || order?.delivery?.customerLng;
+
+  if (order?.notes && typeof order.notes === 'string') {
+    try {
+      if (order.notes.startsWith('{') && order.notes.endsWith('}')) {
+        const parsed = JSON.parse(order.notes);
+        if (!addr && parsed.address) addr = parsed.address;
+        if (!lat && parsed.latitude) lat = Number(parsed.latitude);
+        if (!lng && parsed.longitude) lng = Number(parsed.longitude);
+      }
+    } catch (e) {}
+  }
+
+  return {
+    address: addr as string | undefined,
+    latitude: lat !== undefined && lat !== null && !isNaN(Number(lat)) ? Number(lat) : undefined,
+    longitude: lng !== undefined && lng !== null && !isNaN(Number(lng)) ? Number(lng) : undefined,
+  };
+};
+
 export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack }) => {
   const insets = useSafeAreaInsets();
-  const { authState, currentLocation, savedAddresses, allRestaurants, cartItems } = useViewModel();
+  const { authState, currentLocation, savedAddresses, allRestaurants, cartItems, userOrders = [] } = useViewModel();
   const sessionToken = authState.type === 'Authenticated' ? authState.sessionToken : '';
 
-  const isRealOrder = Boolean(orderId && orderId !== 'ORD-98421');
+  const isRealOrder = Boolean(orderId);
 
   const [loading, setLoading] = useState(false);
   const [orderDetail, setOrderDetail] = useState<any>(() => {
-    if (!isRealOrder) return DEFAULT_MOCK_ORDER;
+    const cachedOrder = userOrders?.find((o: any) => o.id === orderId || o.orderId === orderId);
+    if (cachedOrder) {
+      const parsedInfo = parseOrderDeliveryInfo(cachedOrder);
+      return {
+        ...cachedOrder,
+        id: orderId,
+        orderId: orderId,
+        deliveryAddress: parsedInfo.address || cachedOrder.deliveryAddress || '',
+        customerLatitude: parsedInfo.latitude || cachedOrder.customerLatitude || 0,
+        customerLongitude: parsedInfo.longitude || cachedOrder.customerLongitude || 0,
+        prepTimeMinutes: cachedOrder.prepTimeMinutes || cachedOrder.prep_time_minutes || 15,
+        extendedPrepMinutes: cachedOrder.extendedPrepMinutes || cachedOrder.extended_prep_minutes || 0,
+      };
+    }
     return {
       id: orderId,
       orderId: orderId,
       status: 'placed',
-      prepTimeMinutes: 20,
+      prepTimeMinutes: 15,
       extendedPrepMinutes: 0,
       createdAt: new Date().toISOString(),
       items: [],
     };
   });
-  const [trackingData, setTrackingData] = useState<any>(() => {
-    if (!isRealOrder) return DEFAULT_MOCK_TRACKING;
-    return null;
-  });
+  const [trackingData, setTrackingData] = useState<any>(null);
   const [riderInfo, setRiderInfo] = useState<any>(null);
   const [olaTransitMins, setOlaTransitMins] = useState<number | null>(null);
   const [roadRouteCoords, setRoadRouteCoords] = useState<[number, number][]>([]);
@@ -1501,11 +1523,16 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     (cartItems && cartItems.length > 0 && (r.id === cartItems[0].restaurantId || (r as any)._id === cartItems[0].restaurantId))
   );
 
+  const orderDeliveryInfo = parseOrderDeliveryInfo(orderDetail);
+
+  // The delivery destination is permanently locked to the order placed — header browsing location can NEVER alter this
   const deliveryAddress =
+    orderDeliveryInfo.address ||
+    trackingData?.customerAddress ||
+    trackingData?.deliveryAddress ||
     orderDetail?.deliveryAddress ||
     orderDetail?.address ||
-    currentLocation?.address ||
-    (savedAddresses.length > 0 ? savedAddresses[0].address : 'Delivery Location');
+    (savedAddresses.length > 0 && savedAddresses[0].address ? savedAddresses[0].address : 'Delivery Location');
 
   const restaurantName =
     orderDetail?.restaurantName ||
@@ -1526,7 +1553,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
           price: typeof c.price === 'number' ? c.price : (c.foodItem?.price || 0),
           unitPrice: typeof c.price === 'number' ? c.price : (c.foodItem?.price || 0),
         }))
-        : (!isRealOrder ? DEFAULT_MOCK_ORDER.items : []));
+        : []);
   const itemsCount = orderItemsList.reduce(
     (sum: number, i: any) => sum + Math.max(1, parseInt(String(i.quantity || i.qty || 1), 10)),
     0
@@ -1539,25 +1566,27 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })
     .replace(' ', '');
 
-  // Coordinates
+  // Coordinates strictly bound to the order's restaurant & delivery destination
   const restLat =
     trackingData?.restaurantLat ||
     orderDetail?.restaurantLatitude ||
     currentRestaurant?.latitude ||
-    20.30095002919744;
+    0;
   const restLng =
     trackingData?.restaurantLng ||
     orderDetail?.restaurantLongitude ||
     currentRestaurant?.longitude ||
-    85.81996598190754;
+    0;
   const custLat =
-    trackingData?.customerLat ||
-    currentLocation?.latitude ||
-    (savedAddresses.length > 0 && savedAddresses[0].latitude ? savedAddresses[0].latitude : 20.2505);
+    (trackingData?.customerLat ? Number(trackingData.customerLat) : undefined) ||
+    orderDeliveryInfo.latitude ||
+    (orderDetail?.customerLatitude ? Number(orderDetail.customerLatitude) : undefined) ||
+    (savedAddresses.length > 0 && savedAddresses[0].latitude ? savedAddresses[0].latitude : 0);
   const custLng =
-    trackingData?.customerLng ||
-    currentLocation?.longitude ||
-    (savedAddresses.length > 0 && savedAddresses[0].longitude ? savedAddresses[0].longitude : 85.7882);
+    (trackingData?.customerLng ? Number(trackingData.customerLng) : undefined) ||
+    orderDeliveryInfo.longitude ||
+    (orderDetail?.customerLongitude ? Number(orderDetail.customerLongitude) : undefined) ||
+    (savedAddresses.length > 0 && savedAddresses[0].longitude ? savedAddresses[0].longitude : 0);
   const hasRealRiderCoords = Boolean(
     trackingData?.currentLat &&
     trackingData?.currentLng &&
@@ -1774,15 +1803,34 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   // ── Dynamic Live ETA: Exact Restaurant Preparation Time + Delivery Transit Time ──
   const basePrepMins = Number(orderDetail?.prepTimeMinutes ?? orderDetail?.prep_time_minutes) > 0
     ? Number(orderDetail.prepTimeMinutes ?? orderDetail.prep_time_minutes)
-    : ((currentRestaurant as any)?.prepTime || 20);
+    : ((currentRestaurant as any)?.prepTime || 15);
   const extraPrepMins = Number(orderDetail?.extendedPrepMinutes ?? orderDetail?.extended_prep_minutes) || 0;
   const totalKitchenPrepTime = basePrepMins + extraPrepMins;
 
-  // 3. Road delivery transit time (Ola Maps driving directions if available, or road distance ~3 mins/km, min 2-3 mins)
-  const distKm = calculateDistanceKm(restLat, restLng, custLat, custLng);
+  // 3. Road delivery transit time (Ola Maps driving directions if available, or road distance ~3 mins/km)
+  const hasRealRestaurantCoords = Boolean(
+    trackingData?.restaurantLat ||
+    orderDetail?.restaurantLatitude ||
+    orderDetail?.restaurant_latitude ||
+    currentRestaurant?.latitude
+  );
+  const hasRealCustCoords = Boolean(
+    trackingData?.customerLat ||
+    orderDeliveryInfo.latitude ||
+    orderDetail?.customerLatitude ||
+    (savedAddresses.length > 0 && savedAddresses[0].latitude)
+  );
+
+  const distKm = (hasRealRestaurantCoords && hasRealCustCoords)
+    ? calculateDistanceKm(restLat, restLng, custLat, custLng)
+    : 0;
+
   const transitMins = olaTransitMins !== null && olaTransitMins > 0
     ? olaTransitMins
-    : (distKm > 0 ? Math.max(2, Math.ceil(distKm * 3)) : 3);
+    : (distKm > 0
+        ? Math.max(2, Math.ceil(distKm * 3))
+        : (currentRestaurant?.deliveryTime ? Math.max(3, currentRestaurant.deliveryTime - basePrepMins) : 8)
+      );
 
   // 4. Live Remaining Preparation & Delivery Time
   const isDineIn = Boolean(orderDetail?.tableId && !orderDetail?.deliveryAddress && !orderDetail?.address && !trackingData?.riderId && !isRiderAccepted);
@@ -1843,10 +1891,14 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     }
   }
 
-  // Exact Preparation Time + Delivery Time (Live Updating in Real-Time)
+  // Exact Preparation Time + Delivery Time (Live Updating in Real-Time without initial flicker)
+  const rawCalculatedEta = Math.max(1, activePrepMins + activeDeliveryMins);
+  const explicitOrderEta = Number(orderDetail?.etaMinutes ?? orderDetail?.eta_minutes);
   const etaMinutes = (isCancelled || isOrderDelivered)
     ? 0
-    : Math.max(1, activePrepMins + activeDeliveryMins);
+    : (!hasRealRestaurantCoords && explicitOrderEta > 0 && !isReady && !isPickedUp)
+      ? explicitOrderEta
+      : rawCalculatedEta;
 
   const getStatusDisplay = () => {
     // ── STAGE 6: CANCELLED / REJECTED ──
@@ -2016,7 +2068,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   };
 
   const fetchInitialData = async () => {
-    if (!orderId || !isRealOrder) {
+    if (!orderId) {
       setLoading(false);
       return;
     }
@@ -2038,6 +2090,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             const neonJson = await neonResp.json();
             if (neonJson.rows && neonJson.rows.length > 0) {
               const row = neonJson.rows[0];
+              const parsedInfo = parseOrderDeliveryInfo(row);
               const livePrepMins = Number(row.prep_time_minutes) > 0 ? Number(row.prep_time_minutes) : undefined;
               const liveExtPrepMins = row.extended_prep_minutes !== null && row.extended_prep_minutes !== undefined ? Number(row.extended_prep_minutes) : undefined;
               setOrderDetail((prev: any) => {
@@ -2046,6 +2099,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                 return {
                   ...prev,
                   ...row,
+                  deliveryAddress: parsedInfo.address || row.deliveryAddress || prev?.deliveryAddress,
+                  customerLatitude: parsedInfo.latitude || row.customerLatitude || prev?.customerLatitude,
+                  customerLongitude: parsedInfo.longitude || row.customerLongitude || prev?.customerLongitude,
                   status: resolvedStatus,
                   ...(livePrepMins ? { prepTimeMinutes: livePrepMins } : {}),
                   ...(liveExtPrepMins !== undefined ? { extendedPrepMinutes: liveExtPrepMins } : {}),
@@ -2101,6 +2157,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             ? Number(data.order.extendedPrepMinutes ?? data.order.extended_prep_minutes)
             : undefined;
 
+          const parsedInfo = parseOrderDeliveryInfo(data.order);
           setOrderDetail((prev: any) => {
             const resolvedStatus = mergeKitchenStatus(prev?.status, data.order.status);
             const acceptedTime = data.order.acknowledgedAt || data.order.acceptedTime || (resolvedStatus === 'preparing' ? (data.order.updatedAt || prev?.acceptedTime) : undefined) || prev?.acceptedTime;
@@ -2108,6 +2165,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             return {
               ...prev,
               ...data.order,
+              deliveryAddress: parsedInfo.address || data.order.deliveryAddress || prev?.deliveryAddress,
+              customerLatitude: parsedInfo.latitude || data.order.customerLatitude || prev?.customerLatitude,
+              customerLongitude: parsedInfo.longitude || data.order.customerLongitude || prev?.customerLongitude,
               items,
               status: resolvedStatus,
               ...(prepMins ? { prepTimeMinutes: prepMins } : {}),
@@ -2216,7 +2276,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   };
 
   useEffect(() => {
-    if (!orderId || orderId === 'ORD-98421') return;
+    if (!orderId) return;
     hasHydratedLocalRef.current = false;
     fetchInitialData();
     const interval = setInterval(() => {
@@ -2235,6 +2295,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      socket.emit('join-order', orderId);
+    });
+    socket.on('reconnect', () => {
       socket.emit('join-order', orderId);
     });
 
@@ -2478,9 +2541,22 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       }));
     });
 
-    socket.on('chat-message', (message: any) => {
-      setChatMessagesList((prev) => [...prev, message]);
-    });
+    // Real-time chat events: listen to both 'new-message' and 'chat-message' for seamless delivery updates
+    const handleIncomingChatMessage = (message: any) => {
+      if (!message || !message.text) return;
+      setChatMessagesList((prev) => {
+        if (prev.some((m) => (m.id && m.id === message.id) || (m.createdAt === message.createdAt && m.text === message.text))) {
+          return prev;
+        }
+        return [...prev, message];
+      });
+      setTimeout(() => {
+        chatScrollRef.current?.scrollToEnd({ animated: true });
+      }, 80);
+    };
+
+    socket.on('new-message', handleIncomingChatMessage);
+    socket.on('chat-message', handleIncomingChatMessage);
 
     return () => {
       socket.disconnect();
@@ -2490,13 +2566,35 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const fetchChatMessages = async () => {
     if (!orderId) return;
     try {
+      let activeToken = sessionToken;
+      if (!activeToken) {
+        try {
+          activeToken = (await SecureStorage.getSessionToken()) || '';
+        } catch (e) {}
+      }
+      if (!activeToken) {
+        try {
+          const storedAuth = await AsyncStorage.getItem('@auth_state');
+          if (storedAuth) {
+            const parsed = JSON.parse(storedAuth);
+            if (parsed?.sessionToken) activeToken = parsed.sessionToken;
+          }
+        } catch (e) {}
+      }
+      if (!activeToken) {
+        activeToken = PUBLIC_FALLBACK_TRACKING_TOKEN;
+      }
+
       const res = await fetch(`${BACKEND_URL}/api/chat/${orderId}/messages`, {
-        headers: { ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
+        headers: { ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}) },
       });
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.messages) {
           setChatMessagesList(data.messages);
+          setTimeout(() => {
+            chatScrollRef.current?.scrollToEnd({ animated: false });
+          }, 60);
         }
       }
     } catch (err) {
@@ -2515,20 +2613,61 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     const textToSend = inputText.trim();
     setInputText('');
     setSendingMessage(true);
+
+    // Optimistically render message immediately in real time
+    const tempMsgId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const optimisticMsg = {
+      id: tempMsgId,
+      orderId,
+      sender: 'customer',
+      text: textToSend,
+      createdAt: new Date().toISOString(),
+    };
+    setChatMessagesList((prev) => [...prev, optimisticMsg]);
+    setTimeout(() => {
+      chatScrollRef.current?.scrollToEnd({ animated: true });
+    }, 50);
+
     try {
+      let activeToken = sessionToken;
+      if (!activeToken) {
+        try {
+          activeToken = (await SecureStorage.getSessionToken()) || '';
+        } catch (e) {}
+      }
+      if (!activeToken) {
+        try {
+          const storedAuth = await AsyncStorage.getItem('@auth_state');
+          if (storedAuth) {
+            const parsed = JSON.parse(storedAuth);
+            if (parsed?.sessionToken) activeToken = parsed.sessionToken;
+          }
+        } catch (e) {}
+      }
+      if (!activeToken) {
+        activeToken = PUBLIC_FALLBACK_TRACKING_TOKEN;
+      }
+
       const res = await fetch(`${BACKEND_URL}/api/chat/${orderId}/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {})
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {})
         },
         body: JSON.stringify({
           text: textToSend,
           sender: 'customer',
         }),
       });
-      if (!res.ok) {
-        console.warn('Failed to send message to backend');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.message) {
+          setChatMessagesList((prev) =>
+            prev.map((m) => (m.id === tempMsgId ? data.message : m))
+          );
+        }
+      } else {
+        console.warn('Failed to send message to backend, status:', res.status);
       }
     } catch (err) {
       console.error('Error sending chat message:', err);
@@ -2553,9 +2692,49 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         onBack={onBack}
         onRateDelivery={(rating) => {
           console.log('Rated delivery:', rating);
+          const targetRestaurantId = currentRestaurant?.id || (orderDetail as any)?.restaurantId;
+          const targetRiderId = riderInfo?.id || (trackingData as any)?.riderId;
+          RatingService.submitRating({
+            orderId: orderId || undefined,
+            restaurantId: targetRestaurantId,
+            deliveryRating: rating,
+            riderId: targetRiderId,
+            userId: (authState as any)?.userId || (authState as any)?.id || undefined,
+          }).catch(console.warn);
         }}
         onRateItems={() => {
-          Alert.alert('Rate Items', 'Thank you! Item rating submitted successfully.');
+          const targetRestaurantId = currentRestaurant?.id || (orderDetail as any)?.restaurantId;
+          const targetRiderId = riderInfo?.id || (trackingData as any)?.riderId;
+          const submitStars = async (stars: number) => {
+            try {
+              await RatingService.submitRating({
+                orderId: orderId || undefined,
+                restaurantId: targetRestaurantId,
+                foodRating: stars,
+                items: orderItemsList,
+                riderId: targetRiderId,
+                userId: (authState as any)?.userId || (authState as any)?.id || undefined,
+              });
+              if (Platform.OS === 'android') {
+                ToastAndroid.show(`🎉 Rated food & items ${stars} stars!`, ToastAndroid.SHORT);
+              } else {
+                Alert.alert('Thank You!', `Rated food & items ${stars} stars.`);
+              }
+            } catch (err) {
+              console.warn('Error submitting food rating:', err);
+            }
+          };
+
+          Alert.alert(
+            'Rate Food & Items',
+            `How was your meal from ${restaurantName}?`,
+            [
+              { text: '5 Stars ★★★★★', onPress: () => submitStars(5) },
+              { text: '4 Stars ★★★★☆', onPress: () => submitStars(4) },
+              { text: '3 Stars ★★★☆☆', onPress: () => submitStars(3) },
+              { text: 'Cancel', style: 'cancel' },
+            ]
+          );
         }}
         onContactSupport={() => {
           if (riderInfo?.phone) {
@@ -3062,19 +3241,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
                       {/* Swiggy Handover / Delivery Pickup OTP Badge */}
                       {orderDetail?.handoverOtp && orderDetail?.status !== 'cancelled' && orderDetail?.status !== 'served' && (
-                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#1A1811', borderColor: '#F5B800', marginTop: 6, justifyContent: 'space-between' }]}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <ShieldCheck size={14} color="#F5B800" style={{ marginRight: 6 }} />
-                            <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', fontWeight: '700' }]}>
-                              Pickup Handover OTP:
-                            </Text>
-                          </View>
-                          <View style={{ backgroundColor: '#F5B800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '800', color: '#000000', letterSpacing: 2 }}>
-                              {orderDetail.handoverOtp}
-                            </Text>
-                          </View>
-                        </View>
+                        <PickupHandoverOtpBadge otp={orderDetail.handoverOtp} />
                       )}
 
                       {/* Restaurant rush cancellation banner if cancelled */}
@@ -3171,19 +3338,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
                       {/* Swiggy Handover / Delivery Pickup OTP Badge */}
                       {orderDetail?.handoverOtp && orderDetail?.status !== 'cancelled' && orderDetail?.status !== 'served' && (
-                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#1A1811', borderColor: '#F5B800', marginTop: 6, justifyContent: 'space-between' }]}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <ShieldCheck size={14} color="#F5B800" style={{ marginRight: 6 }} />
-                            <Text style={[styles.waitingPartnerBadgeText, { color: '#F5B800', fontWeight: '700' }]}>
-                              Pickup Handover OTP:
-                            </Text>
-                          </View>
-                          <View style={{ backgroundColor: '#F5B800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '800', color: '#000000', letterSpacing: 2 }}>
-                              {orderDetail.handoverOtp}
-                            </Text>
-                          </View>
-                        </View>
+                        <PickupHandoverOtpBadge otp={orderDetail.handoverOtp} />
                       )}
                     </Animated.View>
 
@@ -4105,6 +4260,93 @@ const styles = StyleSheet.create({
     fontSize: 11.5 * SCALE,
     fontFamily: 'Outfit-Medium',
     letterSpacing: 0.2,
+  },
+  // Upgraded Pickup Handover OTP Badge Styles (Ultra-compact, luxury security badge)
+  pickupOtpContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#151209',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 184, 0, 0.42)',
+    borderRadius: 7 * SCALE,
+    paddingHorizontal: 7 * SCALE,
+    paddingVertical: 3.5 * SCALE,
+    marginTop: 6 * SCALE,
+    marginBottom: 3 * SCALE,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  pickupOtpLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pickupOtpIconGlow: {
+    width: 17 * SCALE,
+    height: 17 * SCALE,
+    borderRadius: 4 * SCALE,
+    backgroundColor: 'rgba(245, 184, 0, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 5 * SCALE,
+  },
+  pickupOtpLabel: {
+    color: '#F5B800',
+    fontSize: 9.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  pickupOtpDivider: {
+    width: 1,
+    height: 12 * SCALE,
+    backgroundColor: 'rgba(245, 184, 0, 0.28)',
+    marginHorizontal: 6.5 * SCALE,
+  },
+  pickupOtpDigitsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pickupOtpDigitBox: {
+    width: 14 * SCALE,
+    height: 18 * SCALE,
+    borderRadius: 3.5 * SCALE,
+    backgroundColor: '#F5B800',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 1.25 * SCALE,
+    shadowColor: '#F5B800',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 1.5,
+    elevation: 1.5,
+  },
+  pickupOtpDigitText: {
+    fontSize: 11 * SCALE,
+    fontFamily: 'Urbanist-ExtraBold',
+    fontWeight: '900',
+    color: '#050505',
+    includeFontPadding: false,
+    textAlign: 'center',
+  },
+  pickupOtpCopiedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 18 * SCALE,
+    paddingHorizontal: 6 * SCALE,
+    backgroundColor: '#10B981',
+    borderRadius: 3.5 * SCALE,
+  },
+  pickupOtpCopiedText: {
+    fontSize: 9.5 * SCALE,
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
   kitchenPrepPill: {
     flexDirection: 'row',

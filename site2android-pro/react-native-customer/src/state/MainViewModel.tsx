@@ -13,6 +13,7 @@ import { RestaurantRepository } from '../data/RestaurantRepository';
 import { RestaurantDatabase } from '../data/RestaurantDatabase';
 import { BACKEND_URL, NEON_SQL_ENDPOINT, NEON_CONN_STRING } from '../config';
 import { SecureStorage } from '../utils/secureStorage';
+import { cleanLocationLabel } from '../services/LocationService';
 
 export interface SavedAddress {
   id: string;
@@ -95,109 +96,6 @@ interface ViewModelContextType {
 
 const ViewModelContext = createContext<ViewModelContextType | undefined>(undefined);
 
-export const DEFAULT_FALLBACK_RESTAURANTS: Restaurant[] = [
-  {
-    id: "yn0V3SFlmu2UMCY1IkY0M",
-    name: "MyQuro",
-    description: "An elegant culinary destination showcasing modern gastronomy and world-class service.",
-    image: "https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600&auto=format&fit=crop&q=60",
-    rating: 4.8,
-    reviewCount: 120,
-    cuisine: "Multi-Cuisine, Continental, Indian",
-    category: "Fine Dining",
-    dishesCategory: "Specials",
-    city: "Bhubaneswar",
-    isFavourite: false,
-    phone: "9777653495",
-    email: "test5@gmail.com",
-    address: "MyQuro, Cosmopolis Apartment, Unnamed Road, Arya Village, Bhubaneswar, Odisha, 751019, India",
-    isClosed: false,
-    closedReason: "",
-    latitude: 20.2505,
-    longitude: 85.78819,
-  },
-  {
-    id: "D2nCXr-XW_De3z7yBYeVc",
-    name: "Hotel Mayfair",
-    description: "Hotel Mayfair serves fresh, flavorful meals in a welcoming environment.",
-    image: "https://i.ibb.co/hqk8czs/216c8f86638e.webp",
-    rating: 4.6,
-    reviewCount: 95,
-    cuisine: "Cafe, Continental, North Indian",
-    category: "Cafe",
-    dishesCategory: "Specials",
-    city: "Bhubaneswar",
-    isFavourite: false,
-    phone: "9876543210",
-    email: "mayfair@gmail.com",
-    address: "Mayfair Hotels & Resorts Ltd, 8-B, Jayadev Vihar, Bhubaneswar, Odisha 751013",
-    isClosed: false,
-    closedReason: "",
-    latitude: 20.256542,
-    longitude: 85.78801,
-  },
-  {
-    id: "XZ68KZHyPstlRbvwN1i5h",
-    name: "Hotel Crown",
-    description: "Hotel Crown offers a delightful dining experience with a menu crafted from fresh ingredients.",
-    image: "https://i.ibb.co/BH5pxb2X/90a793f36f0b.jpg",
-    rating: 4.4,
-    reviewCount: 78,
-    cuisine: "Fine Dining, Mughlai, Chinese",
-    category: "Fine Dining",
-    dishesCategory: "Specials",
-    city: "Bokaro",
-    isFavourite: false,
-    phone: "9800000003",
-    email: "test1@gmail.com",
-    address: "Bokaro, Ranchi",
-    isClosed: false,
-    closedReason: "",
-    latitude: 23.6693,
-    longitude: 86.1511,
-  },
-  {
-    id: "pKuC3Mw-Nglk-RPlEz1S7",
-    name: "Hotel Green Chillyz",
-    description: "At Hotel Green Chillyz, great food meets royal hospitality.",
-    image: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=600&auto=format&fit=crop&q=60",
-    rating: 4.2,
-    reviewCount: 54,
-    cuisine: "Fast Food, Biryani, Street Food",
-    category: "Fast Food",
-    dishesCategory: "Specials",
-    city: "Bokaro",
-    isFavourite: false,
-    phone: "9800000001",
-    email: "chillyz@gmail.com",
-    address: "Bokaro, Jamshedpur",
-    isClosed: true,
-    closedReason: "Kitchen offline",
-    latitude: 23.6693,
-    longitude: 86.1511,
-  },
-  {
-    id: "atSX94VJBX2pKeeTEZN9I",
-    name: "Taj ITC",
-    description: "Hotel ITC is your go-to destination for delicious food and comfortable seating.",
-    image: "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&auto=format&fit=crop&q=60",
-    rating: 4.3,
-    reviewCount: 62,
-    cuisine: "Buffet, South Indian, North Indian",
-    category: "Buffet",
-    dishesCategory: "Specials",
-    city: "Bokaro",
-    isFavourite: false,
-    phone: "9800000002",
-    email: "itc@gmail.com",
-    address: "Bokaro, Ranchi",
-    isClosed: true,
-    closedReason: "Kitchen offline",
-    latitude: 23.3441,
-    longitude: 85.3096,
-  }
-];
-
 export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isBiometricsEnabled, setIsBiometricsEnabled] = useState(true);
@@ -209,7 +107,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [selectedCategoryTab, setSelectedCategoryTab] = useState('Overall');
   const [selectedDishCategory, setSelectedDishCategory] = useState<string | null>(null);
 
-  const [allRestaurants, setAllRestaurants] = useState<Restaurant[]>(DEFAULT_FALLBACK_RESTAURANTS);
+  const [allRestaurants, setAllRestaurants] = useState<Restaurant[]>([]);
   const [allRestaurantsWithMetrics, setAllRestaurantsWithMetrics] = useState<Restaurant[]>([]);
   const [restaurantsList, setRestaurantsList] = useState<Restaurant[]>([]);
   const [favouriteRestaurantsList, setFavouriteRestaurantsList] = useState<Restaurant[]>([]);
@@ -227,16 +125,20 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
 
   // Global currentLocation state
   const [currentLocation, setCurrentLocation] = useState({
-    label: "Home",
+    label: "",
     address: "",
-    latitude: 20.2508,
-    longitude: 85.7886,
+    latitude: 0,
+    longitude: 0,
   });
 
   const updateCurrentLocation = async (loc: typeof currentLocation) => {
-    setCurrentLocation(loc);
+    const cleanLoc = {
+      ...loc,
+      label: cleanLocationLabel(loc.label),
+    };
+    setCurrentLocation(cleanLoc);
     try {
-      await AsyncStorage.setItem('@current_location', JSON.stringify(loc));
+      await AsyncStorage.setItem('@current_location', JSON.stringify(cleanLoc));
     } catch (e) {
       console.error("❌ [MainViewModel] Error saving current location:", e);
     }
@@ -256,7 +158,11 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       try {
         const storedLoc = await AsyncStorage.getItem('@current_location');
         if (storedLoc) {
-          setCurrentLocation(JSON.parse(storedLoc));
+          const parsed = JSON.parse(storedLoc);
+          setCurrentLocation({
+            ...parsed,
+            label: cleanLocationLabel(parsed.label),
+          });
         }
       } catch (err) {
         console.error("❌ [MainViewModel] Error loading stored location:", err);
@@ -277,19 +183,18 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       } catch (err) {
         console.error("❌ [MainViewModel] Error loading stored addresses:", err);
       }
-      // Strictly clear any legacy offline order caches — past orders must show strictly database data
-      setUserOrders([]);
+      // Hydrate persisted orders from cache so past orders never disappear on startup/network fluctuation
       try {
-        const allKeys = await AsyncStorage.getAllKeys();
-        const orderKeys = allKeys.filter(k => 
-          (k.toLowerCase().includes('order') || k.toLowerCase().includes('placed')) && 
-          k !== '@auth_state' && 
-          k !== '@cart_items'
-        );
-        if (orderKeys.length > 0) {
-          await AsyncStorage.multiRemove(orderKeys);
+        const storedOrders = await AsyncStorage.getItem('@myquro_persisted_user_orders');
+        if (storedOrders) {
+          const parsed = JSON.parse(storedOrders);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setUserOrders(parsed);
+          }
         }
-      } catch (e) {}
+      } catch (err) {
+        console.error("❌ [MainViewModel] Error loading cached user orders:", err);
+      }
     };
     loadStoredData();
   }, []);
@@ -460,36 +365,47 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         }
       }
 
-      // Parse delivery address from notes if structured
+      // Parse delivery address and coordinates from notes if structured
       remoteOrders = remoteOrders.map((o: any) => {
         let deliveryAddress = o.deliveryAddress;
-        if (!deliveryAddress && o.notes && typeof o.notes === 'string') {
+        let customerLatitude = o.customerLatitude || o.customer_latitude || o.latitude;
+        let customerLongitude = o.customerLongitude || o.customer_longitude || o.longitude;
+        if (o.notes && typeof o.notes === 'string') {
           try {
             if (o.notes.startsWith('{') && o.notes.endsWith('}')) {
               const parsed = JSON.parse(o.notes);
-              if (parsed.address) deliveryAddress = parsed.address;
+              if (!deliveryAddress && parsed.address) deliveryAddress = parsed.address;
+              if (!customerLatitude && parsed.latitude) customerLatitude = Number(parsed.latitude);
+              if (!customerLongitude && parsed.longitude) customerLongitude = Number(parsed.longitude);
             }
           } catch {}
         }
         return {
           ...o,
           deliveryAddress,
+          customerLatitude: customerLatitude ? Number(customerLatitude) : undefined,
+          customerLongitude: customerLongitude ? Number(customerLongitude) : undefined,
         };
       });
 
-      // Past orders MUST show strictly real database orders!
-      setUserOrders(remoteOrders);
-      try {
-        const allKeys = await AsyncStorage.getAllKeys();
-        const orderKeys = allKeys.filter(k => 
-          (k.toLowerCase().includes('order') || k.toLowerCase().includes('placed')) && 
-          k !== '@auth_state' && 
-          k !== '@cart_items'
-        );
-        if (orderKeys.length > 0) {
-          await AsyncStorage.multiRemove(orderKeys);
-        }
-      } catch (e) {}
+      // Persist orders reliably and guard against accidental clearing
+      if (remoteOrders.length > 0) {
+        setUserOrders(remoteOrders);
+        try {
+          await AsyncStorage.setItem('@myquro_persisted_user_orders', JSON.stringify(remoteOrders));
+        } catch (e) {}
+      } else {
+        // If remote call returned empty or failed due to network latency, preserve cached orders
+        try {
+          const cached = await AsyncStorage.getItem('@myquro_persisted_user_orders');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setUserOrders(parsed);
+            }
+          }
+        } catch (e) {}
+      }
     } catch (err) {
       console.warn('[MainViewModel] Error in refreshUserOrders:', err);
     }
@@ -654,30 +570,51 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [authState]);
 
   // Helper to map any raw restaurant record from backend or direct Neon DB query
-  const formatRestaurantRecord = (r: any, favIds: Set<string>): Restaurant => ({
-    id: r.id,
-    name: r.restaurantName || r.restaurant_name || 'Restaurant',
-    description: r.description || 'An elegant culinary destination showcasing modern gastronomy and world-class service.',
-    image: r.restaurantBanner || r.restaurant_banner || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600&auto=format&fit=crop&q=60',
-    rating: Number(r.rating || 0) > 0 ? Number(r.rating) : 4.5,
-    reviewCount: r.ratingCount || r.rating_count || 45,
-    cuisine: Array.isArray(r.cuisine)
+  const formatRestaurantRecord = (r: any, favIds: Set<string>): Restaurant => {
+    const rawType = (r.restaurantType || r.restaurant_type || '').trim();
+    const rawName = (r.restaurantName || r.restaurant_name || 'Restaurant').trim();
+    const rawCuisine = Array.isArray(r.cuisine)
       ? r.cuisine.join(', ')
       : typeof r.cuisine === 'string'
         ? r.cuisine
-        : r.restaurantType || r.restaurant_type || 'Indian, Chinese',
-    category: (r.restaurantType || r.restaurant_type || 'Overall').split(',')[0],
-    dishesCategory: 'Specials',
-    city: r.city || 'Bhubaneswar',
-    isFavourite: favIds.has(r.id),
-    phone: r.phoneNumber || r.phone_number || '+91 70619 03429',
-    email: r.email || 'info.myquro@gmail.com',
-    address: r.restaurantAddress || r.restaurant_address || 'Bhubaneswar, Odisha, India',
-    isClosed: !(r.isOpen !== undefined ? r.isOpen : r.is_open),
-    closedReason: (r.isOpen !== undefined ? r.isOpen : r.is_open) ? '' : 'Kitchen offline',
-    latitude: r.latitude !== null && r.latitude !== undefined ? Number(r.latitude) : undefined,
-    longitude: r.longitude !== null && r.longitude !== undefined ? Number(r.longitude) : undefined,
-  });
+        : rawType || 'Indian, Chinese';
+
+    // Explicit non-veg keywords that strictly prevent pure veg classification
+    const hasNonVegKeywords = /non-?veg|chicken|mutton|fish|meat|beef|pork|prawn|seafood|kebab|biryani.*chicken/i.test(
+      `${rawType} ${rawName} ${rawCuisine}`
+    );
+
+    // Pure veg qualification based on restaurant type and details
+    const isPureVeg = !hasNonVegKeywords && (
+      /pure\s*veg|vegetarian|100%\s*veg|jain/i.test(rawType) ||
+      /pure\s*veg|vegetarian|100%\s*veg|jain/i.test(rawName) ||
+      (r.isPureVeg === true) ||
+      (r.category?.toLowerCase() === 'veg')
+    );
+
+    return {
+      id: r.id,
+      name: rawName,
+      restaurantType: rawType,
+      isPureVeg,
+      description: r.description || 'An elegant culinary destination showcasing modern gastronomy and world-class service.',
+      image: r.restaurantBanner || r.restaurant_banner || 'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=600&auto=format&fit=crop&q=60',
+      rating: Number(r.rating || 0) > 0 ? Number(Number(r.rating).toFixed(1)) : 0,
+      reviewCount: Number(r.ratingCount || r.rating_count || 0),
+      cuisine: rawCuisine,
+      category: (rawType || 'Overall').split(',')[0],
+      dishesCategory: 'Specials',
+      city: r.city || '',
+      isFavourite: favIds.has(r.id),
+      phone: r.phoneNumber || r.phone_number || '',
+      email: r.email || '',
+      address: r.restaurantAddress || r.restaurant_address || '',
+      isClosed: !(r.isOpen !== undefined ? r.isOpen : r.is_open),
+      closedReason: (r.isOpen !== undefined ? r.isOpen : r.is_open) ? '' : 'Kitchen offline',
+      latitude: r.latitude !== null && r.latitude !== undefined ? Number(r.latitude) : undefined,
+      longitude: r.longitude !== null && r.longitude !== undefined ? Number(r.longitude) : undefined,
+    };
+  };
 
   // Initialize and load restaurants data from backend API with instant Neon DB fallback
   const loadData = async () => {
@@ -718,7 +655,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            query: `SELECT id, restaurant_name, restaurant_status, is_open, city, restaurant_address, restaurant_banner, rating, rating_count, phone_number, email, latitude, longitude FROM restaurants WHERE restaurant_status = 'active';`
+            query: `SELECT id, restaurant_name, restaurant_type, cuisine, restaurant_status, is_open, city, restaurant_address, restaurant_banner, rating, rating_count, phone_number, email, latitude, longitude FROM restaurants WHERE restaurant_status = 'active';`
           }),
         });
         if (neonResp.ok) {
@@ -752,8 +689,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         } catch {}
       }
       if (liveRestaurants.length === 0) {
-        liveRestaurants = DEFAULT_FALLBACK_RESTAURANTS;
-        setAllRestaurants(liveRestaurants);
+        setAllRestaurants([]);
       }
     }
 
@@ -876,10 +812,10 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
           if (Array.isArray(parsed) && parsed.length > 0) {
             setAllRestaurants(parsed);
           } else {
-            setAllRestaurants(DEFAULT_FALLBACK_RESTAURANTS);
+            setAllRestaurants([]);
           }
         } else {
-          setAllRestaurants(DEFAULT_FALLBACK_RESTAURANTS);
+          setAllRestaurants([]);
         }
         const cachedFoods = await AsyncStorage.getItem('@all_food_items');
         if (cachedFoods) {
@@ -887,7 +823,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         }
       } catch (err) {
         console.warn("[MainViewModel] Error loading cached data:", err);
-        setAllRestaurants(DEFAULT_FALLBACK_RESTAURANTS);
+        setAllRestaurants([]);
       }
       await loadData();
     };

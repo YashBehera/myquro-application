@@ -13,6 +13,7 @@ import {
   StatusBar,
   ToastAndroid,
   RefreshControl,
+  Animated,
 } from 'react-native';
 import {
   Calendar,
@@ -42,6 +43,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
+import { cleanLocationLabel } from '../services/LocationService';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
 import { DineoutRestaurantDetailScreen } from './DineoutRestaurantDetailScreen';
 import { DiningCategoryScreen, DiningMoodKey } from './DiningCategoryScreen';
@@ -148,11 +150,11 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
   const { authState, currentLocation, favouriteRestaurantsList, toggleFavourite, allRestaurants = [] } = useViewModel();
   const userFirstName = authState?.type === 'Authenticated' && (authState as any).username ? (authState as any).username.split(' ')[0] : 'Foodie';
 
-  // Safe area top padding calculation ensuring status bar & notch are never collided
-  const safeTopPadding = Math.max(
+  // Adaptive top offset for safe area / Dynamic Island (iPhone 15+) or Android status bar
+  const safeStickyTop = Math.max(
     insets.top,
     Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 44
-  ) + (Platform.OS === 'android' ? 8 : 4);
+  );
 
   // Screen Tabs: 'explore' | 'bookings'
   const [activeTab, setActiveTab] = useState<'explore' | 'bookings'>('explore');
@@ -268,7 +270,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         reviewsCount: r.reviewCount ? `${r.reviewCount}` : '50+',
         costForTwo: r.offer ? `₹${r.offer} for two` : '₹800 for two',
         cuisine: r.cuisine || r.dishesCategory || 'Multi-cuisine',
-        location: r.address || r.city || 'Bhubaneswar',
+        location: r.address || r.city || '',
         distance: distanceStr,
         discountTag: r.discount || 'Flat 20% OFF',
         instantBooking: true,
@@ -517,6 +519,9 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent={false} />
 
+      {/* Solid Black Top Safe Area Inset / Dynamic Island Header */}
+      <View style={{ height: safeStickyTop, backgroundColor: '#000000', width: '100%' }} />
+
       <ScrollView
         style={styles.root}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 + insets.bottom }]}
@@ -535,7 +540,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 0] TOP HEADER (100% Pixel-Identical to HomeScreen.tsx)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={[styles.header, { paddingTop: safeTopPadding }]}>
+        <View style={[styles.header, { paddingTop: Platform.OS === 'android' ? 8 : 4 }]}>
           {/* Left Column: Home label + Location Address */}
           <View style={styles.headerLeftCol}>
             <TouchableOpacity
@@ -543,7 +548,9 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
               activeOpacity={0.75}
               onPress={() => setShowLocationSheet(true)}
             >
-              <Text style={styles.homeText}>{currentLocation?.label || 'Home'}</Text>
+              <Text style={styles.homeText} numberOfLines={1} ellipsizeMode="tail">
+                {cleanLocationLabel(currentLocation?.label) || 'Home'}
+              </Text>
               <Image source={imgImage44} style={styles.goldChevronImg} />
             </TouchableOpacity>
 
@@ -2266,6 +2273,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 3,
+    maxWidth: '100%',
   },
   homeText: {
     fontFamily: 'Urbanist-Bold',
@@ -2273,11 +2281,13 @@ const styles = StyleSheet.create({
     color: '#A5822B',
     marginRight: 6,
     letterSpacing: -0.2,
+    flexShrink: 1,
   },
   goldChevronImg: {
     width: 9 * SCALE,
     height: 13 * SCALE,
     resizeMode: 'contain',
+    flexShrink: 0,
   },
   addressRow: {
     flexDirection: 'row',
@@ -2527,10 +2537,11 @@ const styles = StyleSheet.create({
   // ── 3. STICKY SEARCH & TAB SWITCHER WRAPPER ───────────────────
   stickySearchAndNavWrapper: {
     backgroundColor: '#000000',
-    paddingTop: 0,
-    paddingBottom: 2,
+    paddingBottom: 4,
     zIndex: 20,
     elevation: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1813',
   },
   tabContentContainer: {
     paddingTop: 8,

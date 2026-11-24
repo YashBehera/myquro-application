@@ -16,6 +16,8 @@ export interface Restaurant {
   cuisine: string;
   category: string; // "Fine Dining", "Cafe", etc.
   dishesCategory: string; // "Pizza", "Broast", etc.
+  restaurantType?: string;
+  isPureVeg?: boolean;
   city: string;
   isFavourite: boolean;
   phone: string;

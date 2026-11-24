@@ -84,29 +84,8 @@ export const ChooseDeliveryAddressModal: React.FC<ChooseDeliveryAddressModalProp
     return <Home size={20 * SCALE} color="#DEA430" />;
   };
 
-  // Display addresses list (if none saved, show current location or sample addresses)
-  const displayList: SavedAddress[] = savedAddresses.length > 0
-    ? savedAddresses
-    : [
-        {
-          id: 'default-1',
-          type: 'Home',
-          houseNo: 'F-134',
-          landmark: 'Cosmopolis',
-          area: 'Khandagiri',
-          city: 'Bhubaneswar',
-          address: currentLocation?.address || 'F-134, Cosmopolis, Khandagiri, Cosmopolis Road, Dumduma, Bhubaneswar, Odisha 751019, India',
-        },
-        {
-          id: 'default-2',
-          type: 'Other',
-          houseNo: 'Plot No - 784',
-          landmark: 'The Iron Fist Gym',
-          area: 'Jagamara',
-          city: 'Bhubaneswar',
-          address: 'The Iron Fist Gym, Jagamara, Plot No - 784, 2nd Floor, L.s Complex, Jagamara, Bhubaneswar, Odisha 751030',
-        },
-      ];
+  // Display addresses list (strictly saved addresses, no mock fallbacks)
+  const displayList: SavedAddress[] = savedAddresses;
 
   const isAddressSelected = (addr: SavedAddress, index: number): boolean => {
     if (currentLocation?.address && addr.address && currentLocation.address.trim() === addr.address.trim()) {
@@ -237,15 +216,15 @@ export const ChooseDeliveryAddressModal: React.FC<ChooseDeliveryAddressModalProp
 const styles = StyleSheet.create({
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
     justifyContent: 'flex-end',
   },
   sheetContainer: {
-    backgroundColor: '#121214',
+    backgroundColor: '#000000',
     borderTopLeftRadius: 28 * SCALE,
     borderTopRightRadius: 28 * SCALE,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    borderTopColor: '#1F1E19',
     maxHeight: SCREEN_HEIGHT * 0.82,
     paddingTop: 18 * SCALE,
   },
@@ -266,7 +245,7 @@ const styles = StyleSheet.create({
     width: 32 * SCALE,
     height: 32 * SCALE,
     borderRadius: 16 * SCALE,
-    backgroundColor: '#27272A',
+    backgroundColor: '#1A1813',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -288,7 +267,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: '#DEA430',
-    backgroundColor: '#18191D',
+    backgroundColor: '#0A0A08',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14 * SCALE,
@@ -301,12 +280,12 @@ const styles = StyleSheet.create({
 
   divider: {
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: '#1A1813',
     marginVertical: 12 * SCALE,
   },
   itemDivider: {
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: '#1A1813',
     marginVertical: 14 * SCALE,
   },
 
@@ -320,9 +299,9 @@ const styles = StyleSheet.create({
     width: 50 * SCALE,
     height: 52 * SCALE,
     borderRadius: 12 * SCALE,
-    backgroundColor: '#191A1F',
+    backgroundColor: '#0B0A08',
     borderWidth: 1,
-    borderColor: '#24252B',
+    borderColor: '#1F1E19',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14 * SCALE,

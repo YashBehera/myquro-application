@@ -256,6 +256,8 @@ router.get("/:restaurantId/menu", async (req, res) => {
         isVeg: menuItems.isVeg,
         isAvailable: menuItems.isAvailable,
         isActive: menuItems.isActive,
+        rating: menuItems.rating,
+        ratingCount: menuItems.ratingCount,
       })
       .from(menuItems)
       .where(

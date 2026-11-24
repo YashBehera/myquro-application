@@ -101,3 +101,47 @@ export const requireAuth = async (
     return res.status(401).json({ error: "Invalid session" });
   }
 };
+
+export const optionalAuth = async (
+  req: RequestWithHeaders,
+  res: ResponseLike,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    let session = (await auth.api.getSession({
+      headers: fromNodeHeaders(req.headers),
+    })) as Session | null;
+
+    if (!session || !session.user) {
+      const authHeader = req.headers.authorization;
+      if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        const dbSession = await db
+          .select({
+            user: {
+              id: authUsers.id,
+              name: authUsers.name,
+              email: authUsers.email,
+              role: authUsers.role,
+            }
+          })
+          .from(authSessions)
+          .innerJoin(authUsers, eq(authSessions.userId, authUsers.id))
+          .where(eq(authSessions.token, token))
+          .limit(1)
+          .then(res => res[0]);
+
+        if (dbSession) {
+          session = { user: dbSession.user };
+        }
+      }
+    }
+
+    if (session?.user) {
+      req.user = session.user;
+    }
+  } catch (err) {
+    // Ignore error in optional auth
+  }
+  next();
+};

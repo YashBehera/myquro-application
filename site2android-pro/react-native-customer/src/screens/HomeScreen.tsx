@@ -40,6 +40,7 @@ import {
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
+import { cleanLocationLabel } from '../services/LocationService';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
 import { Restaurant } from '../types';
@@ -57,60 +58,60 @@ const BANNER_WIDTH = Math.min(SCREEN_WIDTH - 28, isTablet ? 640 : SCREEN_WIDTH -
 const BANNER_HEIGHT = BANNER_WIDTH * (941 / 1672);
 
 // ─── Direct Figma Asset Imports (Node 3019:288) ────────────────────────────────
-const imgImage44      = require('../assets/home/figma/imgImage44.png'); // Gold Chevron
-const imgImage40      = require('../assets/home/figma/imgImage40.png'); // Gold Location Pin
-const imgImage43      = require('../assets/home/figma/imgImage43.png'); // Scooter Graphic
-const imgImage42      = require('../assets/home/figma/imgImage42.png'); // Yellow Profile Pin
-const imgImage41      = require('../assets/home/figma/imgImage41.png'); // Hamburger 3 Lines
+const imgImage44 = require('../assets/home/figma/imgImage44.png'); // Gold Chevron
+const imgImage40 = require('../assets/home/figma/imgImage40.png'); // Gold Location Pin
+const imgImage43 = require('../assets/home/figma/imgImage43.png'); // Scooter Graphic
+const imgImage42 = require('../assets/home/figma/imgImage42.png'); // Yellow Profile Pin
+const imgImage41 = require('../assets/home/figma/imgImage41.png'); // Hamburger 3 Lines
 
 // Category Tiles Assets
-const imgImage39      = require('../assets/home/figma/imgImage39.png'); // Food Burger
-const imgImage38      = require('../assets/home/figma/imgImage38.png'); // Instamart Bag
-const imgImage37      = require('../assets/home/figma/imgImage37.png'); // Dineout Cloche
-const imgImage36      = require('../assets/home/figma/imgImage36.png'); // Wine Stores Bottle/Glass
+const imgImage39 = require('../assets/home/figma/imgImage39.png'); // Food Burger
+const imgImage38 = require('../assets/home/figma/imgImage38.png'); // Instamart Bag
+const imgImage37 = require('../assets/home/figma/imgImage37.png'); // Dineout Cloche
+const imgImage36 = require('../assets/home/figma/imgImage36.png'); // Wine Stores Bottle/Glass
 
 // Search & Veg Assets
-const imgImage35      = require('../assets/home/figma/imgImage35.png'); // Search Glass
-const imgImage34      = require('../assets/home/figma/imgImage34.png'); // Yellow Mic
+const imgImage35 = require('../assets/home/figma/imgImage35.png'); // Search Glass
+const imgImage34 = require('../assets/home/figma/imgImage34.png'); // Yellow Mic
 const imgBackground11 = require('../assets/home/figma/imgBackground11.png'); // Divider
 
 // 70% OFF Hero Banner Assets
-const imgImage26      = require('../assets/hero_floating_burger.png'); // New Burger
-const imgImage23      = require('../assets/hero_floating_pizza.png'); // New Pizza
+const imgImage26 = require('../assets/hero_floating_burger.png'); // New Burger
+const imgImage23 = require('../assets/hero_floating_pizza.png'); // New Pizza
 const imgNew70OffCenter = require('../assets/hero_banner_70off.png'); // New 70% Off Center
 
 // Deals Row Assets
-const imgImage22      = require('../assets/home/deal_delightful_70off.png'); // Delightful Deals (70% Off Badge)
-const imgImage21      = require('../assets/home/deal_free_treat.png'); // Get A Free Treat (Gulab Jamun + Shake)
-const imgImage20      = require('../assets/home/deal_min200_pizza.png'); // Min. ₹200 OFF (Whole Pizza)
+const imgImage22 = require('../assets/home/deal_delightful_70off.png'); // Delightful Deals (70% Off Badge)
+const imgImage21 = require('../assets/home/deal_free_treat.png'); // Get A Free Treat (Gulab Jamun + Shake)
+const imgImage20 = require('../assets/home/deal_min200_pizza.png'); // Min. ₹200 OFF (Whole Pizza)
 
 // Reorder Restaurant Cards Icons
-const imgImage17      = require('../assets/home/figma/imgImage17.png'); // Star icon
-const imgImage14      = require('../assets/home/figma/imgImage14.png'); // Star icon
-const imgImage11      = require('../assets/home/figma/imgImage11.png'); // Star icon
+const imgImage17 = require('../assets/home/figma/imgImage17.png'); // Star icon
+const imgImage14 = require('../assets/home/figma/imgImage14.png'); // Star icon
+const imgImage11 = require('../assets/home/figma/imgImage11.png'); // Star icon
 
 // ─── "WHAT'S ON YOUR MIND?" Food Category Assets ──────────────────────────────
-const catImgSpecials    = require('../assets/categories/cat_specials.png');
-const catImgBiryani     = require('../assets/categories/cat_biryani.png');
-const catImgPizzas      = require('../assets/categories/cat_pizzas.png');
-const catImgBurgers     = require('../assets/categories/cat_burgers.png');
-const catImgRolls       = require('../assets/categories/cat_rolls.png');
+const catImgSpecials = require('../assets/categories/cat_specials.png');
+const catImgBiryani = require('../assets/categories/cat_biryani.png');
+const catImgPizzas = require('../assets/categories/cat_pizzas.png');
+const catImgBurgers = require('../assets/categories/cat_burgers.png');
+const catImgRolls = require('../assets/categories/cat_rolls.png');
 const catImgNorthIndian = require('../assets/categories/cat_north_indian.png');
-const catImgChinese     = require('../assets/categories/cat_chinese.png');
+const catImgChinese = require('../assets/categories/cat_chinese.png');
 const catImgSouthIndian = require('../assets/categories/cat_south_indian.png');
-const catImgDesserts    = require('../assets/categories/cat_desserts.png');
-const catImgBeverages   = require('../assets/categories/cat_beverages.png');
-const catImgChaat       = require('../assets/categories/cat_chaat.png');
-const catImgHealthy     = require('../assets/categories/cat_healthy.png');
-const catImgMomos       = require('../assets/categories/cat_momos.png');
-const catImgThali       = require('../assets/categories/cat_thali.png');
+const catImgDesserts = require('../assets/categories/cat_desserts.png');
+const catImgBeverages = require('../assets/categories/cat_beverages.png');
+const catImgChaat = require('../assets/categories/cat_chaat.png');
+const catImgHealthy = require('../assets/categories/cat_healthy.png');
+const catImgMomos = require('../assets/categories/cat_momos.png');
+const catImgThali = require('../assets/categories/cat_thali.png');
 
 // Vertical Cards Icons
 const expImg18 = require('../assets/home/figma_explore/imgImage18.png'); // Truck icon
 const expImg19 = require('../assets/home/figma_explore/imgImage19.png'); // Green Star icon
 const expImg13 = require('../assets/home/figma_explore/imgImage13.png'); // Truck icon
 const expImg14 = require('../assets/home/figma_explore/imgImage14.png'); // Green Star icon
-const expImg8  = require('../assets/home/figma_explore/imgImage8.png');  // Truck icon
+const expImg8 = require('../assets/home/figma_explore/imgImage8.png');  // Truck icon
 // QURO Gold Badge
 const quroBadgeImg = require('../assets/images/quro_badge.png');
 
@@ -169,11 +170,11 @@ export const HomeScreen = ({
 
   const [showLocationSheet, setShowLocationSheet] = useState(false);
   const [isSearchSheetOpen, setIsSearchSheetOpen] = useState(false);
-  const [isVegOnly, setIsVegOnly]                 = useState(false);
-  const [refreshing, setRefreshing]               = useState(false);
-  const [activeSegment, setActiveSegment]         = useState<'reorder' | 'food15'>('reorder');
-  const [activeExploreCat, setActiveExploreCat]   = useState('Specials');
-  const [activeDealOffer, setActiveDealOffer]     = useState<string | null>(null);
+  const [isVegOnly, setIsVegOnly] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeSegment, setActiveSegment] = useState<'reorder' | 'food15'>('reorder');
+  const [activeExploreCat, setActiveExploreCat] = useState('Specials');
+  const [activeDealOffer, setActiveDealOffer] = useState<string | null>(null);
   const [restaurantMenuAnchor, setRestaurantMenuAnchor] = useState<{
     restaurant: Restaurant;
     top: number;
@@ -185,6 +186,12 @@ export const HomeScreen = ({
     insets.top,
     Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 44
   ) + (Platform.OS === 'android' ? 8 : 4);
+
+  // Adaptive top offset for sticky header below Dynamic Island (iPhone 15+) or Android status bar
+  const safeStickyTop = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 44
+  );
 
   // ─── Cinematic Ambient & Interactive Animations ───
   const bounceAnim = useRef(new Animated.Value(0)).current;
@@ -295,7 +302,7 @@ export const HomeScreen = ({
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     if (refreshUserOrders) {
-      refreshUserOrders().catch(() => {});
+      refreshUserOrders().catch(() => { });
     }
     setTimeout(() => setRefreshing(false), 600);
   }, [refreshUserOrders]);
@@ -319,11 +326,49 @@ export const HomeScreen = ({
     }
   };
 
+  // Helper to accurately classify if a restaurant qualifies for the Pure Veg filter
+  const isPureVegRestaurant = useCallback((res: Restaurant): boolean => {
+    // 1. Check if model already classified it as pure veg
+    if (res.isPureVeg === true) {
+      return true;
+    }
+
+    const rType = (res.restaurantType || (res as any).restaurant_type || res.category || '').toLowerCase();
+    const fullText = `${res.name} ${rType} ${res.cuisine || ''} ${res.dishesCategory || ''} ${res.description || ''} ${(res.tags || []).join(' ')}`.toLowerCase();
+
+    // 2. Explicit non-veg disqualifiers (meats, poultry, seafood, mughlai, kebabs, etc.)
+    if (/chicken|mutton|fish|meat|beef|pork|prawn|kebab|mughlai|bbq|barbeque|seafood|non\s*veg|non-veg/i.test(fullText)) {
+      return false;
+    }
+
+    // 3. Explicit pure veg / vegetarian type or name
+    if (/pure\s*veg|purely\s*veg|100%\s*veg|vegetarian|jain/i.test(rType) || /pure\s*veg|purely\s*veg|100%\s*veg|vegetarian|jain/i.test(res.name)) {
+      return true;
+    }
+
+    if (rType === 'veg' || res.category?.toLowerCase() === 'veg') {
+      return true;
+    }
+
+    // 4. Check foodItems menu items if loaded: ALL items must be veg and AT LEAST ONE veg item
+    if (foodItems && foodItems.length > 0) {
+      const restDishes = foodItems.filter((f: any) => f.restaurantId === res.id || f.restaurantName === res.name);
+      if (restDishes.length > 0) {
+        const hasVeg = restDishes.some((d: any) => d.isVeg === true || d.isVeg === 'true' || d.isVeg === 1);
+        const hasNonVeg = restDishes.some((d: any) => d.isVeg === false || d.isVeg === 'false' || d.isVeg === 0);
+        if (hasVeg && !hasNonVeg) return true;
+        if (hasNonVeg) return false;
+      }
+    }
+
+    return false;
+  }, [foodItems]);
+
   const handleToggleVeg = () => {
     const nextState = !isVegOnly;
     setIsVegOnly(nextState);
     if (Platform.OS === 'android') {
-      ToastAndroid.show(nextState ? 'Showing Pure Veg only' : 'Showing All Foods', ToastAndroid.SHORT);
+      ToastAndroid.show(nextState ? 'Showing Pure Veg restaurants' : 'Showing All restaurants', ToastAndroid.SHORT);
     }
   };
 
@@ -339,10 +384,7 @@ export const HomeScreen = ({
     return sourceRestaurants.filter((res) => {
       // 1. Veg Filter
       if (isVegOnly) {
-        const isNonVeg = /chicken|meat|fish|egg|kebab|biryani.*mutton/i.test(
-          `${res.name} ${res.cuisine} ${res.dishesCategory}`
-        );
-        if (isNonVeg && !/veg/i.test(res.name)) return false;
+        if (!isPureVegRestaurant(res)) return false;
       }
 
       // 2. Category Filter (Specials, Biryani, Pizzas, Burgers, Rolls, etc.)
@@ -351,7 +393,7 @@ export const HomeScreen = ({
         const targetRegex = catDef?.regex || new RegExp(activeExploreCat, 'i');
         const resText = `${res.cuisine || ''} ${res.dishesCategory || ''} ${res.name || ''} ${res.category || ''}`;
         const directMatch = targetRegex.test(resText);
-        
+
         const dishMatch = foodItems && foodItems.length > 0
           ? foodItems.some((f: any) => (f.restaurantId === res.id || f.restaurantName === res.name) && targetRegex.test(`${f.name || ''} ${f.category || ''} ${f.description || ''}`))
           : false;
@@ -370,12 +412,16 @@ export const HomeScreen = ({
 
       return true;
     });
-  }, [sourceRestaurants, isVegOnly, activeExploreCat, activeDealOffer, foodItems]);
+  }, [sourceRestaurants, isVegOnly, isPureVegRestaurant, activeExploreCat, activeDealOffer, foodItems]);
 
   // Horizontal cards based on active segment (Reorder vs Food in 15 mins)
   const horizontalCardList = useMemo(() => {
+    let baseList = sourceRestaurants;
+    if (isVegOnly) {
+      baseList = baseList.filter(isPureVegRestaurant);
+    }
     if (activeSegment === 'food15') {
-      return sourceRestaurants
+      return baseList
         .filter((r) => r.deliveryTime && r.deliveryTime <= 25)
         .slice(0, 5);
     }
@@ -383,18 +429,18 @@ export const HomeScreen = ({
     if (userOrders && userOrders.length > 0) {
       const orderedRestIds = Array.from(new Set(userOrders.map((o: any) => o.restaurantId).filter(Boolean)));
       const orderedRestaurants = orderedRestIds
-        .map(id => sourceRestaurants.find(r => r.id === id))
+        .map(id => baseList.find(r => r.id === id))
         .filter(Boolean) as Restaurant[];
-      const otherPlaces = sourceRestaurants.filter(
+      const otherPlaces = baseList.filter(
         r => !orderedRestIds.includes(r.id) && (isFav(r.id) || r.rating >= 4.0)
       );
       return [...orderedRestaurants, ...otherPlaces].slice(0, 5);
     }
     // Fallback: Favorite and highly rated places
-    return sourceRestaurants
+    return baseList
       .filter((r) => isFav(r.id) || r.rating >= 4.0)
       .slice(0, 5);
-  }, [sourceRestaurants, activeSegment, favouriteRestaurantsList, isFav, userOrders]);
+  }, [sourceRestaurants, isVegOnly, isPureVegRestaurant, activeSegment, favouriteRestaurantsList, isFav, userOrders]);
 
   const handleHeroBannerPress = () => {
     if (onNavigateToDelightfulDeals) {
@@ -448,6 +494,9 @@ export const HomeScreen = ({
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" translucent={false} />
 
+      {/* Solid Black Top Safe Area Inset / Dynamic Island Header */}
+      <View style={{ height: safeStickyTop, backgroundColor: '#000000', width: '100%' }} />
+
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 110 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
@@ -469,7 +518,7 @@ export const HomeScreen = ({
           style={[
             styles.header,
             {
-              paddingTop: safeTopPadding,
+              paddingTop: Platform.OS === 'android' ? 8 : 4,
               opacity: headerAnim,
               transform: [
                 {
@@ -489,7 +538,9 @@ export const HomeScreen = ({
               activeOpacity={0.75}
               onPress={() => setShowLocationSheet(true)}
             >
-              <Text style={styles.homeText}>{currentLocation?.label || 'Home'}</Text>
+              <Text style={styles.homeText} numberOfLines={1} ellipsizeMode="tail">
+                {cleanLocationLabel(currentLocation?.label) || 'Home'}
+              </Text>
               <Image source={imgImage44} style={styles.goldChevronImg} />
             </TouchableOpacity>
 
@@ -499,7 +550,7 @@ export const HomeScreen = ({
               onPress={() => setShowLocationSheet(true)}
             >
               <Image source={imgImage40} style={styles.locationPinImg} />
-              <Text style={styles.addressText} numberOfLines={1}>
+              <Text style={styles.addressText} numberOfLines={1} ellipsizeMode="tail">
                 {currentLocation?.address || 'Select your delivery location'}
               </Text>
             </TouchableOpacity>
@@ -626,7 +677,8 @@ export const HomeScreen = ({
           {/* Functional Responsive VEG Toggle Button */}
           <TouchableOpacity
             style={[styles.vegBtn, isVegOnly && styles.vegBtnActive]}
-            activeOpacity={0.85}
+            activeOpacity={0.7}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             onPress={handleToggleVeg}
           >
             <Text style={[styles.vegBtnText, isVegOnly && styles.vegBtnTextActive]}>VEG</Text>
@@ -895,7 +947,7 @@ export const HomeScreen = ({
                   <View style={styles.resMetaRow}>
                     <Image source={imgImage17} style={styles.resStarImg} />
                     <Text style={styles.resMetaText}>
-                      {restaurant.rating} • {restaurant.deliveryTime || 25} mins
+                      {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : 'NEW'} • {restaurant.deliveryTime || 25} mins
                     </Text>
                   </View>
                   <Text style={styles.resCuisineText} numberOfLines={1}>
@@ -1054,7 +1106,7 @@ export const HomeScreen = ({
                   {/* Left Photo & Badges */}
                   <View style={styles.vResImgBox}>
                     <Image source={resImg} style={styles.vResImg} />
-                    
+
                     {/* Interactive Favorite Heart */}
                     <TouchableOpacity
                       style={styles.vResHeartBtn}
@@ -1101,8 +1153,13 @@ export const HomeScreen = ({
                     <View style={styles.vResRatingRow}>
                       <Image source={expImg19} style={styles.vResGreenStar} />
                       <Text style={styles.vResRatingText}>
-                        {restaurant.rating} {restaurant.reviewCount ? `(${restaurant.reviewCount})` : ''} • {restaurant.deliveryTime || 25} mins
+                        {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : 'NEW'} {Number(restaurant.reviewCount) > 0 ? `(${restaurant.reviewCount})` : ''} • {restaurant.deliveryTime || 25} mins
                       </Text>
+                      {isPureVegRestaurant(restaurant) && (
+                        <View style={{ backgroundColor: '#051A0E', borderWidth: 1, borderColor: '#00A352', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 6 }}>
+                          <Text style={{ color: '#00D06C', fontSize: 9 * SCALE, fontFamily: 'Urbanist-Bold' }}>PURE VEG</Text>
+                        </View>
+                      )}
                     </View>
 
                     <Text style={styles.vResCuisineText} numberOfLines={1}>
@@ -1204,7 +1261,7 @@ export const HomeScreen = ({
                     await Share.share({
                       message: `Check out ${r.name} (${r.cuisine}) on MyQuro!`,
                     });
-                  } catch (e) {}
+                  } catch (e) { }
                 }}
               >
                 <Share2 size={13 * SCALE} color="#DEA430" style={{ marginRight: 8 * SCALE }} />
@@ -1272,6 +1329,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 3,
+    maxWidth: '100%',
   },
   homeText: {
     fontFamily: 'Urbanist-Bold',
@@ -1279,11 +1337,13 @@ const styles = StyleSheet.create({
     color: '#A5822B',
     marginRight: 6,
     letterSpacing: -0.2,
+    flexShrink: 1,
   },
   goldChevronImg: {
     width: 9 * SCALE,
     height: 13 * SCALE,
     resizeMode: 'contain',
+    flexShrink: 0,
   },
   addressRow: {
     flexDirection: 'row',

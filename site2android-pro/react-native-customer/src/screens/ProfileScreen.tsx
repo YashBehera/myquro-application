@@ -65,6 +65,7 @@ import { SettingsSubView } from './profile/SettingsSubView';
 import { LogoutSubView } from './profile/LogoutSubView';
 import { OrderDetailsSubView } from './profile/OrderDetailsSubView';
 import { RefundScreen } from './profile/RefundScreen';
+import { RatingService } from '../services/RatingService';
 
 // ─── Figma Node 3025:799 & 3029:1729 Profile Assets ──────────────────────────
 const profHeadphones         = require('../assets/profile/profHeadphones.png');
@@ -146,7 +147,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
 
   // Orders list state strictly reflecting real database orders
-  const [ordersList, setOrdersList] = useState<any[]>([]);
+  const [ordersList, setOrdersList] = useState<any[]>(() => (userOrders && userOrders.length > 0 ? userOrders : []));
+
+  // Sync orders from ViewModel whenever hydrated
+  useEffect(() => {
+    if (userOrders && userOrders.length > 0) {
+      setOrdersList((prev) => (prev.length > userOrders.length ? prev : userOrders));
+    }
+  }, [userOrders]);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -180,6 +188,36 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
   const [reorderSuccessPill, setReorderSuccessPill] = useState<{ visible: boolean; restaurantName: string; count: number } | null>(null);
   const [ratingCompliments, setRatingCompliments] = useState<Record<string, string[]>>({});
+
+  // Hydrate stored ratings for user orders
+  useEffect(() => {
+    let isMounted = true;
+    const hydrateRatings = async () => {
+      if (!userOrders || userOrders.length === 0) return;
+      const loadedRatings: Record<string, { food: number; delivery: number }> = {};
+      const loadedCompliments: Record<string, string[]> = {};
+      for (const order of userOrders) {
+        const oId = order.id || order.orderId;
+        if (oId) {
+          const cached = await RatingService.getOrderRating(oId);
+          if (cached) {
+            if (cached.food || cached.delivery) {
+              loadedRatings[oId] = { food: cached.food || 0, delivery: cached.delivery || 0 };
+            }
+            if (cached.compliments && cached.compliments.length > 0) {
+              loadedCompliments[oId] = cached.compliments;
+            }
+          }
+        }
+      }
+      if (isMounted && Object.keys(loadedRatings).length > 0) {
+        setRatings((prev) => ({ ...loadedRatings, ...prev }));
+        setRatingCompliments((prev) => ({ ...loadedCompliments, ...prev }));
+      }
+    };
+    hydrateRatings();
+    return () => { isMounted = false; };
+  }, [userOrders]);
 
   const normalizePrice = (raw: any): number => {
     if (raw === undefined || raw === null || raw === '') return 0;
@@ -313,27 +351,51 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         }
       }
 
-      // Purge any legacy offline order caches from AsyncStorage
-      try {
-        const allKeys = await AsyncStorage.getAllKeys();
-        const orderKeys = allKeys.filter(k => 
-          (k.toLowerCase().includes('order') || k.toLowerCase().includes('placed')) && 
-          k !== '@auth_state' && 
-          k !== '@cart_items'
-        );
-        if (orderKeys.length > 0) {
-          await AsyncStorage.multiRemove(orderKeys);
-        }
-      } catch (e) {}
+      if (remoteOrders.length > 0) {
+        const enrichedOrders = remoteOrders.map((o: any) => {
+          let deliveryAddress = o.deliveryAddress;
+          let customerLatitude = o.customerLatitude || o.customer_latitude || o.latitude;
+          let customerLongitude = o.customerLongitude || o.customer_longitude || o.longitude;
+          if (o.notes && typeof o.notes === 'string') {
+            try {
+              if (o.notes.startsWith('{') && o.notes.endsWith('}')) {
+                const parsed = JSON.parse(o.notes);
+                if (!deliveryAddress && parsed.address) deliveryAddress = parsed.address;
+                if (!customerLatitude && parsed.latitude) customerLatitude = Number(parsed.latitude);
+                if (!customerLongitude && parsed.longitude) customerLongitude = Number(parsed.longitude);
+              }
+            } catch {}
+          }
+          return {
+            ...o,
+            deliveryAddress,
+            customerLatitude: customerLatitude ? Number(customerLatitude) : undefined,
+            customerLongitude: customerLongitude ? Number(customerLongitude) : undefined,
+          };
+        });
 
-      // Strictly show ONLY real database orders from the server
-      const sorted = remoteOrders.sort((a, b) => {
-        const timeA = new Date(a.createdAt || a.date || a.updatedAt || 0).getTime();
-        const timeB = new Date(b.createdAt || b.date || b.updatedAt || 0).getTime();
-        return timeB - timeA;
-      });
+        const sorted = enrichedOrders.sort((a, b) => {
+          const timeA = new Date(a.createdAt || a.date || a.updatedAt || 0).getTime();
+          const timeB = new Date(b.createdAt || b.date || b.updatedAt || 0).getTime();
+          return timeB - timeA;
+        });
 
-      setOrdersList(sorted);
+        setOrdersList(sorted);
+        try {
+          await AsyncStorage.setItem('@myquro_persisted_user_orders', JSON.stringify(sorted));
+        } catch (e) {}
+      } else {
+        // If remote response had latency or was momentarily empty, retain existing orders and fallback to cache
+        try {
+          const cached = await AsyncStorage.getItem('@myquro_persisted_user_orders');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setOrdersList((prev) => (prev.length > 0 ? prev : parsed));
+            }
+          }
+        } catch (e) {}
+      }
     } catch (err) {
       console.warn('[ProfileScreen] Error loading orders:', err);
     }
@@ -356,7 +418,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   };
 
-  const handleRate = (orderId: string, type: 'food' | 'delivery', rating: number) => {
+  const handleRate = async (orderOrId: any, type: 'food' | 'delivery', rating: number) => {
+    const orderObj = typeof orderOrId === 'object' ? orderOrId : (displayOrders.find(o => (o.id || o.orderId) === orderOrId) || {});
+    const orderId = orderObj.id || orderObj.orderId || (typeof orderOrId === 'string' ? orderOrId : '');
+    const restaurantId = orderObj.restaurantId || orderObj.restaurant_id;
+    const riderId = orderObj.riderId || orderObj.rider_id;
+
+    let itemsArr: any[] = [];
+    if (Array.isArray(orderObj.items)) {
+      itemsArr = orderObj.items;
+    } else if (typeof orderObj.items === 'string') {
+      try {
+        const parsed = JSON.parse(orderObj.items);
+        if (Array.isArray(parsed)) itemsArr = parsed;
+      } catch (e) {}
+    }
+
     setRatings((prev) => ({
       ...prev,
       [orderId]: {
@@ -364,7 +441,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         [type]: rating,
       },
     }));
-    showToast(`Rated ${type === 'food' ? 'food' : 'delivery'} ${rating} star${rating > 1 ? 's' : ''}`);
+    showToast(`Rated ${type === 'food' ? 'food & restaurant' : 'delivery partner'} ${rating} star${rating > 1 ? 's' : ''}`);
+
+    try {
+      await RatingService.submitRating({
+        orderId,
+        restaurantId,
+        foodRating: type === 'food' ? rating : undefined,
+        deliveryRating: type === 'delivery' ? rating : undefined,
+        riderId,
+        items: itemsArr,
+        compliments: ratingCompliments[orderId] || [],
+        userId: (authState as any)?.userId || (authState as any)?.id || undefined,
+      });
+    } catch (err) {
+      console.warn('Rating submit error:', err);
+    }
   };
 
   const handleReorder = (order: any) => {
@@ -438,13 +530,32 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }));
   };
 
-  const handleComplimentTag = (orderId: string, tag: string) => {
-    setRatingCompliments((prev) => {
-      const current = prev[orderId] || [];
-      const updated = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag];
-      return { ...prev, [orderId]: updated };
-    });
+  const handleComplimentTag = async (orderOrId: any, tag: string) => {
+    const orderObj = typeof orderOrId === 'object' ? orderOrId : (displayOrders.find(o => (o.id || o.orderId) === orderOrId) || {});
+    const orderId = orderObj.id || orderObj.orderId || (typeof orderOrId === 'string' ? orderOrId : '');
+    const currentTags = ratingCompliments[orderId] || [];
+    const updatedTags = currentTags.includes(tag) ? currentTags.filter((t) => t !== tag) : [...currentTags, tag];
+
+    setRatingCompliments((prev) => ({
+      ...prev,
+      [orderId]: updatedTags,
+    }));
     showToast(`Added compliment: ${tag}`);
+
+    const currentR = ratings[orderId] || { food: 0, delivery: 0 };
+    if (currentR.food > 0 || currentR.delivery > 0) {
+      try {
+        await RatingService.submitRating({
+          orderId,
+          restaurantId: orderObj.restaurantId || orderObj.restaurant_id,
+          foodRating: currentR.food || undefined,
+          deliveryRating: currentR.delivery || undefined,
+          riderId: orderObj.riderId || orderObj.rider_id,
+          compliments: updatedTags,
+          userId: (authState as any)?.userId || (authState as any)?.id || undefined,
+        });
+      } catch (e) {}
+    }
   };
 
   const formatOrderDate = (rawDate: any): string => {
@@ -1297,7 +1408,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       <View style={styles.locationRow}>
                         <MapPin size={11} color="#747474" style={{ marginRight: 4 }} />
                         <Text style={styles.locationText} numberOfLines={1}>
-                          {order.location || order.restaurantAddress || order.city || order.deliveryAddress || 'Bhubaneswar'}
+                          {order.location || order.restaurantAddress || order.city || order.deliveryAddress || ''}
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -1486,7 +1597,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                                 <TouchableOpacity
                                   key={starVal}
                                   activeOpacity={0.7}
-                                  onPress={() => handleRate(orderId, 'food', starVal)}
+                                  onPress={() => handleRate(order, 'food', starVal)}
                                   style={{ padding: 2 }}
                                 >
                                   <Star
@@ -1512,7 +1623,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                                 <TouchableOpacity
                                   key={starVal}
                                   activeOpacity={0.7}
-                                  onPress={() => handleRate(orderId, 'delivery', starVal)}
+                                  onPress={() => handleRate(order, 'delivery', starVal)}
                                   style={{ padding: 2 }}
                                 >
                                   <Star
@@ -1542,7 +1653,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                                     isSelected && styles.complimentChipSelected,
                                   ]}
                                   activeOpacity={0.7}
-                                  onPress={() => handleComplimentTag(orderId, tag)}
+                                  onPress={() => handleComplimentTag(order, tag)}
                                 >
                                   <Text
                                     style={[

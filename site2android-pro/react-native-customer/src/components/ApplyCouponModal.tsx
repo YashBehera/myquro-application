@@ -71,23 +71,6 @@ export interface SimCoupon {
 
 export const ALL_COUPONS: SimCoupon[] = [
   {
-    code: 'SWIGGYIT',
-    badge: '40% OFF',
-    discount: 80,
-    minOrder: 199,
-    discountType: 'percentage',
-    discountValue: 40,
-    maxDiscount: 80,
-    benefitHighlight: 'Get 40% off',
-    description: 'Use code SWIGGYIT & get 40% off on orders above ₹199. Maximum discount: ₹80.',
-    terms: [
-      'Valid on total order value above ₹199',
-      'Maximum discount is capped at ₹80',
-      'Applicable on all eligible menu items',
-      'Cannot be clubbed with other promotional coupons',
-    ],
-  },
-  {
     code: 'FLAVORFUL',
     badge: '₹125 OFF',
     discount: 125,

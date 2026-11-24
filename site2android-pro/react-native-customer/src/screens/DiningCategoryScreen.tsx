@@ -265,7 +265,7 @@ export const DiningCategoryScreen: React.FC<DiningCategoryScreenProps> = ({
             'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800&auto=format&fit=crop&q=80';
       const distStr =
         typeof r.distance === 'number' && !isNaN(r.distance) ? `${r.distance.toFixed(1)} km` : '';
-      const locStr = r.address ? `${r.address}${distStr ? `, ${distStr}` : ''}` : (r.city || 'Bhubaneswar');
+      const locStr = r.address ? `${r.address}${distStr ? `, ${distStr}` : ''}` : (r.city || '');
 
       return {
         id: r.id,

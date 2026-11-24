@@ -74,6 +74,45 @@ export const getCoordsFromPlaceId = async (placeId: string): Promise<{ lat: numb
 };
 
 /**
+ * Sanitize verbose POI names, keywords, or marketing descriptions into clean, single-line location labels.
+ */
+export const cleanLocationLabel = (name?: string): string => {
+  if (!name) return 'Home';
+  let cleaned = name.trim();
+  // Strip pipe marketing slogans e.g. "Lilac Women Wellness Centre | Best Rehab | Bhubaneswar" -> "Lilac Women Wellness Centre"
+  if (cleaned.includes('|')) {
+    cleaned = cleaned.split('|')[0].trim();
+  }
+  // Strip dash marketing or secondary phrases
+  if (cleaned.includes(' - ')) {
+    cleaned = cleaned.split(' - ')[0].trim();
+  } else if (cleaned.includes(' – ')) {
+    cleaned = cleaned.split(' – ')[0].trim();
+  }
+  // Strip comma secondary descriptions if overly verbose
+  if (cleaned.includes(',')) {
+    const parts = cleaned.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 0 && parts[0].length >= 3) {
+      cleaned = parts[0];
+    }
+  }
+  // Keep punchy and prevent multi-line overflow (max ~28 chars)
+  if (cleaned.length > 28) {
+    const words = cleaned.split(' ');
+    let shortName = '';
+    for (const w of words) {
+      if ((shortName ? `${shortName} ${w}` : w).length <= 26) {
+        shortName = shortName ? `${shortName} ${w}` : w;
+      } else {
+        break;
+      }
+    }
+    cleaned = shortName && shortName.length >= 4 ? shortName : cleaned.slice(0, 26).trim();
+  }
+  return cleaned || 'Home';
+};
+
+/**
  * Reverse Geocode: Convert coordinates to readable neighborhood/city names and formatted address (Using Ola Maps API)
  */
 export const reverseGeocode = async (lat: number, lng: number): Promise<{ label: string; address: string } | null> => {
@@ -97,7 +136,8 @@ export const reverseGeocode = async (lat: number, lng: number): Promise<{ label:
       const sublocality = addressComponents.find((c: any) => c.types?.includes("sublocality") || c.types?.includes("neighborhood"));
       const locality = addressComponents.find((c: any) => c.types?.includes("locality"));
       
-      const label = result.name || (sublocality ? sublocality.long_name : (locality ? locality.long_name : "Current Location"));
+      const rawLabel = result.name || (sublocality ? sublocality.long_name : (locality ? locality.long_name : "Current Location"));
+      const label = cleanLocationLabel(rawLabel);
       const address = result.formatted_address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
       return { label, address };
     }
@@ -116,8 +156,8 @@ export const detectCurrentLocationWithOla = async (): Promise<{
   latitude: number;
   longitude: number;
 }> => {
-  let latitude = 20.2520;
-  let longitude = 85.7820;
+  let latitude = 0;
+  let longitude = 0;
 
   try {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -152,13 +192,6 @@ export const detectCurrentLocationWithOla = async (): Promise<{
     console.warn('Error fetching GPS hardware position:', err);
   }
 
-  // If outside India (e.g. simulator default in US), default to Bhubaneswar center
-  const isOutsideIndia = latitude < 6.0 || latitude > 38.0 || longitude < 68.0 || longitude > 98.0;
-  if (isOutsideIndia) {
-    latitude = 20.2520;
-    longitude = 85.7820;
-  }
-
   // Reverse geocode via Ola Maps
   try {
     const olaInfo = await reverseGeocode(latitude, longitude);
@@ -179,10 +212,10 @@ export const detectCurrentLocationWithOla = async (): Promise<{
     const [expoGeo] = await Location.reverseGeocodeAsync({ latitude, longitude });
     if (expoGeo) {
       const label = expoGeo.name || expoGeo.subregion || expoGeo.street || 'Current Location';
-      const address = `${expoGeo.name ? expoGeo.name + ', ' : ''}${expoGeo.street ? expoGeo.street + ', ' : ''}${expoGeo.subregion || expoGeo.city || 'Bhubaneswar'}, ${expoGeo.region || 'Odisha'} ${expoGeo.postalCode || ''}`.trim();
+      const address = `${expoGeo.name ? expoGeo.name + ', ' : ''}${expoGeo.street ? expoGeo.street + ', ' : ''}${expoGeo.subregion || expoGeo.city || ''}, ${expoGeo.region || ''} ${expoGeo.postalCode || ''}`.trim();
       return {
         label,
-        address: address || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+        address: address || (latitude && longitude ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` : ''),
         latitude,
         longitude,
       };
@@ -193,7 +226,7 @@ export const detectCurrentLocationWithOla = async (): Promise<{
 
   return {
     label: 'Current Location',
-    address: 'Near Infocity Avenue, Patia, Bhubaneswar, Odisha 751024',
+    address: latitude && longitude ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` : '',
     latitude,
     longitude,
   };

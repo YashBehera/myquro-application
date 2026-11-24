@@ -117,7 +117,7 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
         ratingCount: r.reviewCount ? `${r.reviewCount}+` : '2.8K+',
         time: '25–35 mins',
         cuisines: r.cuisine || r.category || 'Multi-cuisine',
-        location: r.address || r.city || 'Bhubaneswar',
+        location: r.address || r.city || '',
         distance: distStr,
         discountAmount: idx % 2 === 0 ? '₹200 OFF' : '₹250 OFF',
         discountCondition: idx % 2 === 0 ? 'ABOVE ₹499' : 'ABOVE ₹599',
