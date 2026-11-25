@@ -20,9 +20,9 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useRider } from '@/context/RiderContext';
-import { BACKEND_URL } from '@/config';
+import { useRider, TripOrder } from '@/context/RiderContext';
 import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
+import { submitRiderSupportTicket } from '../utils/supportTicketApi';
 
 export default function TripEarningScreen() {
   const router = useRouter();
@@ -31,7 +31,9 @@ export default function TripEarningScreen() {
 
   const [disputeModalVisible, setDisputeModalVisible] = useState(false);
   const [selectedDayName, setSelectedDayName] = useState('');
+  const [selectedTrip, setSelectedTrip] = useState<TripOrder | null>(null);
   const [disputeReason, setDisputeReason] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [customAlert, setCustomAlert] = useState<{
     visible: boolean;
     type?: ModalType;
@@ -62,7 +64,7 @@ export default function TripEarningScreen() {
     setCustomAlert((prev) => ({ ...prev, visible: false }));
   };
 
-  // Dynamically generate the past 7 days
+  // Dynamically generate the past 7 days matched against real tripHistory dates
   const daysList = React.useMemo(() => {
     const list = [];
     const now = new Date();
@@ -76,6 +78,7 @@ export default function TripEarningScreen() {
         dayName: dayNames[d.getDay()],
         dateText: `${d.getDate()} ${monthNames[d.getMonth()]}`,
         fullDateStr: `${dayNames[d.getDay()]}, ${d.getDate()} ${monthNames[d.getMonth()]}`,
+        dateKey: d.toDateString(),
       });
     }
     return list;
@@ -97,8 +100,9 @@ export default function TripEarningScreen() {
     setExpandedDay((prev) => (prev === dayName ? null : dayName));
   };
 
-  const handleOpenDispute = (fullDateStr: string) => {
+  const handleOpenDispute = (fullDateStr: string, trip?: TripOrder | null) => {
     setSelectedDayName(fullDateStr);
+    setSelectedTrip(trip || null);
     setDisputeReason('');
     setDisputeModalVisible(true);
   };
@@ -116,42 +120,51 @@ export default function TripEarningScreen() {
       return;
     }
 
-    setDisputeModalVisible(false);
-    let ticketId = `TRIP-${Date.now().toString().slice(-5)}`;
+    setIsSubmitting(true);
+    const result = await submitRiderSupportTicket({
+      sessionToken,
+      category: 'trip_earning',
+      subject: selectedTrip
+        ? `Trip Earning Issue for Order #${selectedTrip.id}`
+        : `Trip Earning Issue on ${selectedDayName}`,
+      description: disputeReason.trim(),
+      orderId: selectedTrip?.id || null,
+      metadata: {
+        day: selectedDayName,
+        ...(selectedTrip
+          ? {
+              tripId: selectedTrip.id,
+              fareAmount: selectedTrip.fareAmount,
+              distanceKm: selectedTrip.distanceKm,
+            }
+          : {}),
+      },
+    });
+    setIsSubmitting(false);
 
-    if (sessionToken) {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-ticket`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`,
-            'Origin': 'http://localhost:3000',
-          },
-          body: JSON.stringify({
-            category: 'trip_earning',
-            subject: `Trip Earning Issue on ${selectedDayName}`,
-            description: disputeReason,
-            metadata: { day: selectedDayName },
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ticket?.id) ticketId = data.ticket.id;
-        }
-      } catch (err) {
-        console.error('Trip earning dispute error:', err);
-      }
+    if (!result.success || !result.ticket?.id) {
+      showAlertModal({
+        type: 'warning',
+        title: 'Submission Failed',
+        subtitle: result.error || 'Could not raise trip earning dispute on server.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
+      return;
     }
 
+    setDisputeModalVisible(false);
     showAlertModal({
       type: 'success_online',
       title: 'Dispute Submitted 🎉',
-      subtitle: `Your trip earning dispute (Ticket #${ticketId}) for ${selectedDayName} has been submitted. Our team will verify the trip distance & fare breakdown within 2-4 hours.`,
+      subtitle: `Your trip earning dispute (Ticket #${result.ticket.id}) for ${
+        selectedTrip ? `Order #${selectedTrip.id}` : selectedDayName
+      } has been registered with support.`,
       primaryButtonText: 'Got It',
       onPrimaryPress: () => {
         hideAlertModal();
         setDisputeReason('');
+        setSelectedTrip(null);
       },
     });
   };
@@ -182,6 +195,14 @@ export default function TripEarningScreen() {
           <View style={styles.daysContainer}>
             {daysList.map((item) => {
               const isExpanded = expandedDay === item.dayName;
+              const dayTrips = (tripHistory || []).filter((t) => {
+                if (!t.createdAt) return false;
+                try {
+                  return new Date(t.createdAt).toDateString() === item.dateKey;
+                } catch {
+                  return false;
+                }
+              });
 
               return (
                 <View
@@ -213,17 +234,55 @@ export default function TripEarningScreen() {
                   {/* Expanded Content View */}
                   {isExpanded && (
                     <View style={styles.expandedContentBox}>
-                      <View style={styles.warningIconCircle}>
-                        <Text style={styles.warningExclamation}>!</Text>
-                      </View>
-                      <Text style={styles.emptyStateText}>No orders assigned on this day</Text>
-                      <TouchableOpacity
-                        onPress={() => handleOpenDispute(item.fullDateStr)}
-                        style={styles.raiseDisputeBtn}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.raiseDisputeBtnText}>Dispute trip fare on this day</Text>
-                      </TouchableOpacity>
+                      {dayTrips.length > 0 ? (
+                        <View style={{ width: '100%', gap: 10 }}>
+                          {dayTrips.map((trip) => (
+                            <View
+                              key={trip.id}
+                              style={{
+                                backgroundColor: '#141414',
+                                borderRadius: 12,
+                                borderWidth: 1,
+                                borderColor: 'rgba(242, 202, 80, 0.25)',
+                                padding: 12,
+                              }}
+                            >
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                                <Text style={{ color: '#F2CA50', fontWeight: '700', fontSize: 13 }}>
+                                  Order #{String(trip.id).slice(-8)}
+                                </Text>
+                                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>
+                                  ₹{trip.fareAmount || 0}
+                                </Text>
+                              </View>
+                              <Text style={{ color: '#A0A0A0', fontSize: 12, marginBottom: 8 }} numberOfLines={1}>
+                                {trip.pickupAddress} → {trip.dropoffAddress}
+                              </Text>
+                              <TouchableOpacity
+                                onPress={() => handleOpenDispute(item.fullDateStr, trip)}
+                                style={styles.raiseDisputeBtn}
+                                activeOpacity={0.85}
+                              >
+                                <Text style={styles.raiseDisputeBtnText}>Dispute this trip fare</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      ) : (
+                        <>
+                          <View style={styles.warningIconCircle}>
+                            <Text style={styles.warningExclamation}>!</Text>
+                          </View>
+                          <Text style={styles.emptyStateText}>No orders completed on this day</Text>
+                          <TouchableOpacity
+                            onPress={() => handleOpenDispute(item.fullDateStr, null)}
+                            style={styles.raiseDisputeBtn}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={styles.raiseDisputeBtnText}>Dispute trip fare on this day</Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
                     </View>
                   )}
                 </View>
@@ -262,7 +321,6 @@ export default function TripEarningScreen() {
               }}
             >
               <TouchableWithoutFeedback onPress={(e) => {
-                // Prevent modal close on content tap, but allow dismissing keyboard if tapping non-input
                 e.stopPropagation?.();
                 Keyboard.dismiss();
               }}>
@@ -278,7 +336,9 @@ export default function TripEarningScreen() {
                       <Ionicons name="close" size={24} color="#FFFFFF" />
                     </TouchableOpacity>
                   </View>
-                  <Text style={styles.modalSub}>{selectedDayName}</Text>
+                  <Text style={styles.modalSub}>
+                    {selectedTrip ? `Order #${selectedTrip.id} · ${selectedDayName}` : selectedDayName}
+                  </Text>
                   <TextInput
                     style={styles.modalInput}
                     placeholder="Describe the trip/order number and fare discrepancy..."
@@ -291,8 +351,15 @@ export default function TripEarningScreen() {
                     returnKeyType="done"
                     onSubmitEditing={Keyboard.dismiss}
                   />
-                  <TouchableOpacity onPress={handleSubmitDispute} style={styles.modalSubmitBtn} activeOpacity={0.85}>
-                    <Text style={styles.modalSubmitBtnText}>SUBMIT DISPUTE</Text>
+                  <TouchableOpacity
+                    onPress={handleSubmitDispute}
+                    style={[styles.modalSubmitBtn, isSubmitting && { opacity: 0.6 }]}
+                    disabled={isSubmitting}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.modalSubmitBtnText}>
+                      {isSubmitting ? 'SUBMITTING...' : 'SUBMIT DISPUTE'}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </TouchableWithoutFeedback>

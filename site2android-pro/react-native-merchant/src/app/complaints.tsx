@@ -54,6 +54,10 @@ export default function ComplaintsScreen() {
 
   useEffect(() => {
     loadComplaints();
+    const interval = setInterval(() => {
+      loadComplaints(undefined, true);
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const activeCount = getActiveComplaintsCount();

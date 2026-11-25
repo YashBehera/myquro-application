@@ -4,7 +4,7 @@
  * Detailed Completed/Delivered Past Order Summary View (Zero Hardcoded Fallbacks)
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   Platform,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -25,13 +26,18 @@ import {
   Clock,
   RotateCcw,
   Navigation,
+  ChevronRight,
+  Camera,
+  MessageSquare,
 } from 'lucide-react-native';
 import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
+import { BACKEND_URL } from '../../config';
 
 interface OrderDetailsSubViewProps {
   order: any;
   onBack: () => void;
   onHelp?: () => void;
+  onOpenConversation?: (complaint: any) => void;
   onReorder?: (order: any) => void;
   onNavigateToTracking?: (orderId: string) => void;
 }
@@ -40,6 +46,7 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
   order,
   onBack,
   onHelp,
+  onOpenConversation,
   onReorder,
   onNavigateToTracking,
 }) => {
@@ -93,6 +100,59 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
   // Order identifiers
   const rawOrderId = order.id || order.orderId || order._id || '';
   const cleanOrderNum = String(rawOrderId).replace(/^order_/, '') || 'N/A';
+
+  // Conversations for this order state
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false);
+
+  // Fetch complaints / conversations linked to this order from PostgreSQL database
+  const fetchConversations = async (silent = false) => {
+    const rawId = order.id || order.orderId || order._id || '';
+    if (!rawId) return;
+    try {
+      if (!silent) setIsLoadingConversations(true);
+      const res = await fetch(`${BACKEND_URL}/api/complaints/order/${rawId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.complaints)) {
+          setConversations(data.complaints);
+        }
+      }
+    } catch (err) {
+      if (!silent) console.warn('Error fetching order complaints:', err);
+    } finally {
+      if (!silent) setIsLoadingConversations(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchConversations(false);
+    const interval = setInterval(() => fetchConversations(true), 6000);
+    return () => clearInterval(interval);
+  }, [order.id, order.orderId]);
+
+  // Formatter matching screenshot: "Tue, Nov 24, 8:22 PM"
+  const formatConversationDate = (dateVal: any) => {
+    if (!dateVal) return '';
+    try {
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return '';
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const dayName = days[d.getDay()];
+      const monthName = months[d.getMonth()];
+      const dateNum = d.getDate();
+      let hours = d.getHours();
+      const minutes = d.getMinutes();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      const strMinutes = minutes < 10 ? '0' + minutes : minutes;
+      return `${dayName}, ${monthName} ${dateNum}, ${hours}:${strMinutes} ${ampm}`;
+    } catch {
+      return '';
+    }
+  };
 
   // Items processing
   let itemsList: any[] = [];
@@ -230,56 +290,47 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
 
   return (
     <View style={styles.root}>
-      {/* ─── [1] TOP BRAND & HELP HEADER ─── */}
+      {/* ─── [1] TOP HEADER (Matching Screenshot) ─── */}
       <View style={[styles.topHeader, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
+        <TouchableOpacity
+          style={styles.backBtnCircle}
+          activeOpacity={0.75}
+          onPress={onBack}
+        >
+          <ArrowLeft size={20} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <View style={styles.topHeaderTitleCol}>
+          <Text style={styles.topHeaderOrderId} numberOfLines={1}>
+            Order #{cleanOrderNum}
+          </Text>
+          <Text style={styles.topHeaderOrderMeta} numberOfLines={1}>
+            {displayStatus}, {itemsCount} {itemsCount === 1 ? 'Item' : 'Items'}, {totalBillFormatted}
+          </Text>
+        </View>
+
         <TouchableOpacity
           style={styles.helpBtn}
           activeOpacity={0.8}
           onPress={onHelp}
         >
-          <Headphones size={15} color="#A18A3B" style={{ marginRight: 6 }} />
           <Text style={styles.helpBtnText}>HELP</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: getSafeBottomPadding(insets.bottom, 40) }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingBottom:
+              (isActive && onNavigateToTracking ? 190 : 120) + Math.max(insets.bottom, 24) + 28,
+          },
+        ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── [2] TOP CARD: ORDER HEADER & ROUTE TIMELINE (Figma Node 3029:1600) ─── */}
+        {/* ─── [2] TOP CARD: ROUTE TIMELINE (Figma Node 3029:1600) ─── */}
         <View style={styles.orderStatusCard}>
-          {/* Card Header Row */}
-          <View style={styles.cardHeaderRow}>
-            <TouchableOpacity
-              style={styles.backBtnCircle}
-              activeOpacity={0.75}
-              onPress={onBack}
-            >
-              <ArrowLeft size={18} color="#FFFFFF" />
-            </TouchableOpacity>
-
-            <View style={styles.orderTitleCol}>
-              <Text style={styles.orderIdTitle} numberOfLines={1}>
-                Order #{cleanOrderNum}
-              </Text>
-              <Text style={styles.orderSubtitle}>
-                {displayStatus}, {itemsCount} {itemsCount === 1 ? 'Item' : 'Items'}, {totalBillFormatted}
-              </Text>
-            </View>
-
-            <View style={[styles.deliveredStatusBadge, isActive && { backgroundColor: '#1A180E', borderColor: '#4A3E14' }]}>
-              {isActive ? (
-                <Clock size={13} color="#D4AF37" style={{ marginRight: 4 }} />
-              ) : (
-                <CheckCircle2 size={13} color="#D4AF37" style={{ marginRight: 4 }} />
-              )}
-              <Text style={styles.deliveredStatusText}>{displayStatus.toUpperCase()}</Text>
-            </View>
-          </View>
-
-          <View style={styles.horizontalDivider} />
-
           {/* Route Timeline */}
           <View style={styles.timelineContainer}>
             {/* Step 1: Restaurant */}
@@ -481,10 +532,87 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
             </View>
           </View>
         </View>
+
+        {/* ─── [4] CONVERSATIONS FOR THIS ORDER (Matching Screenshot) ─── */}
+        <View style={styles.conversationsSection}>
+          <Text style={styles.conversationsSectionHeader}>CONVERSATIONS FOR THIS ORDER</Text>
+
+          {conversations.length > 0 ? (
+            conversations.map((conv: any) => {
+              const convDate = conv.createdAt ? formatConversationDate(conv.createdAt) : '';
+              const evidenceList = Array.isArray(conv.evidence)
+                ? conv.evidence
+                : typeof conv.evidence === 'string'
+                ? JSON.parse(conv.evidence || '[]')
+                : [];
+              const hasPhotos = evidenceList.length > 0;
+
+              return (
+                <TouchableOpacity
+                  key={conv.id}
+                  style={styles.conversationCard}
+                  activeOpacity={0.85}
+                  onPress={() => (onOpenConversation ? onOpenConversation(conv) : onHelp && onHelp())}
+                >
+                  <View style={styles.conversationCardContent}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={[styles.conversationTitle, { flex: 1, marginRight: 8 }]} numberOfLines={1}>
+                        {conv.reason || conv.categoryLabel || conv.description || 'Order Issue'}
+                      </Text>
+                      {conv.status && (
+                        <View style={{ backgroundColor: 'rgba(242, 202, 80, 0.14)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 10, color: '#F2CA50', fontWeight: '700' }}>
+                            {String(conv.status).replace(/_/g, ' ')}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.conversationSubtitle} numberOfLines={1}>
+                      Order #{cleanOrderNum}{convDate ? ` | ${convDate}` : ''}
+                    </Text>
+
+                    {/* Photo indicator if photos were uploaded */}
+                    {hasPhotos && (
+                      <View style={styles.convEvidenceBadge}>
+                        <Camera size={12} color="#F2CA50" style={{ marginRight: 5 }} />
+                        <Text style={styles.convEvidenceText}>
+                          {evidenceList.length} {evidenceList.length === 1 ? 'photo' : 'photos'} attached
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <ChevronRight size={18} color="#8A8A8A" />
+                </TouchableOpacity>
+              );
+            })
+          ) : (
+            <TouchableOpacity
+              style={styles.noConversationCard}
+              activeOpacity={0.85}
+              onPress={onHelp}
+            >
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <Text style={styles.noConvTitle}>Have an issue with this order?</Text>
+                <Text style={styles.noConvSubtitle}>
+                  Chat with our team for missing items, spillage or quality queries
+                </Text>
+              </View>
+              <View style={styles.startChatPill}>
+                <Text style={styles.startChatPillText}>START CHAT</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
       </ScrollView>
 
       {/* ─── [4] BOTTOM STICKY ACTION BUTTONS ─── */}
-      <View style={styles.bottomActionBar}>
+      <View
+        style={[
+          styles.bottomActionBar,
+          { paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 24 : 16) },
+        ]}
+      >
         {isActive && onNavigateToTracking && (
           <TouchableOpacity
             style={styles.trackMainBtn}
@@ -514,36 +642,46 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
 
-  // ─── [1] TOP HEADER ───
+  // ─── [1] TOP HEADER (Matching Screenshot) ───
   topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 8 : 14,
     paddingBottom: 12,
     backgroundColor: '#000000',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
-  brandLogo: {
-    width: 104,
-    height: 38,
+  topHeaderTitleCol: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 10,
+  },
+  topHeaderOrderId: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  topHeaderOrderMeta: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12,
+    color: '#8A8A8A',
+    marginTop: 2,
   },
   helpBtn: {
-    flexDirection: 'row',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#000000',
-    borderWidth: 1,
-    borderColor: '#35301E',
-    borderRadius: 9,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
   },
   helpBtnText: {
     fontFamily: 'Urbanist-Bold',
-    fontSize: 13,
-    color: '#A18A3B',
-    letterSpacing: 0.8,
+    fontSize: 13.5,
+    color: '#F2CA50',
+    fontWeight: '800',
+    letterSpacing: 0.6,
   },
 
   // ─── SCROLL VIEW ───
@@ -893,7 +1031,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 16,
     borderTopWidth: 1,
     borderTopColor: '#121212',
   },
@@ -947,5 +1084,99 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#FFFFFF',
     marginLeft: 12,
+  },
+  // ─── CONVERSATIONS SECTION (Matching Screenshot) ───
+  conversationsSection: {
+    marginTop: 22,
+    marginBottom: 20,
+  },
+  conversationsSectionHeader: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 12,
+    color: '#8A8A8A',
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  conversationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0F0F0F',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 10,
+  },
+  conversationCardContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  conversationTitle: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  conversationSubtitle: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12,
+    color: '#8A8A8A',
+    marginTop: 4,
+  },
+  convEvidenceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(242, 202, 80, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.25)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  convEvidenceText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 11,
+    color: '#F2CA50',
+    fontWeight: '600',
+  },
+  noConversationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0E0E0E',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 14,
+    padding: 16,
+  },
+  noConvTitle: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  noConvSubtitle: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12,
+    color: '#777777',
+    marginTop: 3,
+  },
+  startChatPill: {
+    backgroundColor: 'rgba(242, 202, 80, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.3)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 12,
+  },
+  startChatPillText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11,
+    color: '#F2CA50',
+    fontWeight: '700',
+    letterSpacing: 0.6,
   },
 });

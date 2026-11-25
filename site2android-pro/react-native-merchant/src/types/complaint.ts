@@ -33,7 +33,7 @@ export interface Message {
   complaintId: string;
   senderId: string;
   senderName: string;
-  senderType: 'CUSTOMER' | 'RESTAURANT' | 'MYQURO_SUPPORT';
+  senderType: 'CUSTOMER' | 'RESTAURANT' | 'RIDER' | 'MYQURO_SUPPORT';
   message: string;
   timestamp: string; // ISO String
   attachmentUrl?: string;
@@ -66,6 +66,7 @@ export interface ResolutionRecord {
 
 export interface Complaint {
   id: string;
+  ticketType?: string;
   orderId: string;
   orderNumber: string; // e.g. "#MQ-10294"
   customerId: string;
@@ -76,6 +77,8 @@ export interface Complaint {
   customerPastComplaintsCount?: number;
   outletId: string;
   outletName: string;
+  riderId?: string;
+  metadata?: Record<string, any>;
   orderDate: string; // ISO String
   createdAt: string; // ISO String
   updatedAt: string; // ISO String

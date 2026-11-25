@@ -66,6 +66,7 @@ import { LogoutSubView } from './profile/LogoutSubView';
 import { OrderDetailsSubView } from './profile/OrderDetailsSubView';
 import { RefundScreen } from './profile/RefundScreen';
 import { RatingService } from '../services/RatingService';
+import { OrderRatingModal } from '../components/OrderRatingModal';
 
 // ─── Figma Node 3025:799 & 3029:1729 Profile Assets ──────────────────────────
 const profHeadphones         = require('../assets/profile/profHeadphones.png');
@@ -127,6 +128,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
   // Selected Order for Figma Node 3029:1553 Details View
   const [selectedOrderForDetails, setSelectedOrderForDetails] = useState<any>(null);
+  const [selectedComplaintForHelp, setSelectedComplaintForHelp] = useState<any>(null);
+  const [helpOriginView, setHelpOriginView] = useState<'main' | 'order_details'>('main');
 
   // Menu popup state
   const [showMenuOptions, setShowMenuOptions] = useState(false);
@@ -181,7 +184,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   };
 
   // Interactive Ratings state per order
-  const [ratings, setRatings] = useState<Record<string, { food: number; delivery: number }>>({});
+  const [ratings, setRatings] = useState<Record<string, { food: number; delivery: number; foodLocked?: boolean; deliveryLocked?: boolean; isLocked?: boolean }>>({});
+  const [ratingModalVisible, setRatingModalVisible] = useState(false);
+  const [selectedOrderForRating, setSelectedOrderForRating] = useState<any>(null);
+  const [ratingModalType, setRatingModalType] = useState<'food' | 'delivery'>('food');
+  const [ratingModalInitialScore, setRatingModalInitialScore] = useState<number>(5);
   const [searchOrderQuery, setSearchOrderQuery] = useState('');
   const [orderFilterTab, setOrderFilterTab] = useState<'all' | 'active' | 'delivered' | 'cancelled'>('all');
   const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
@@ -194,18 +201,38 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     let isMounted = true;
     const hydrateRatings = async () => {
       if (!userOrders || userOrders.length === 0) return;
-      const loadedRatings: Record<string, { food: number; delivery: number }> = {};
+      const loadedRatings: Record<string, { food: number; delivery: number; foodLocked?: boolean; deliveryLocked?: boolean; isLocked?: boolean }> = {};
       const loadedCompliments: Record<string, string[]> = {};
       for (const order of userOrders) {
         const oId = order.id || order.orderId;
         if (oId) {
           const cached = await RatingService.getOrderRating(oId);
           if (cached) {
-            if (cached.food || cached.delivery) {
-              loadedRatings[oId] = { food: cached.food || 0, delivery: cached.delivery || 0 };
+            if (cached.food || cached.delivery || cached.foodLocked || cached.deliveryLocked) {
+              loadedRatings[oId] = {
+                food: cached.food || 0,
+                delivery: cached.delivery || 0,
+                foodLocked: cached.foodLocked,
+                deliveryLocked: cached.deliveryLocked,
+                isLocked: cached.isLocked,
+              };
             }
             if (cached.compliments && cached.compliments.length > 0) {
               loadedCompliments[oId] = cached.compliments;
+            }
+          } else if (order.foodRating || order.deliveryRating || order.is_rated || order.isRated || order.rating) {
+            const foodVal = Number(order.foodRating || order.rating || 0);
+            const delVal = Number(order.deliveryRating || 0);
+            const fLocked = foodVal > 0;
+            const dLocked = delVal > 0;
+            if (fLocked || dLocked) {
+              loadedRatings[oId] = {
+                food: foodVal,
+                delivery: delVal,
+                foodLocked: fLocked,
+                deliveryLocked: dLocked,
+                isLocked: fLocked && dLocked,
+              };
             }
           }
         }
@@ -418,44 +445,87 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   };
 
-  const handleRate = async (orderOrId: any, type: 'food' | 'delivery', rating: number) => {
+  const handleRate = (orderOrId: any, type: 'food' | 'delivery', rating: number) => {
     const orderObj = typeof orderOrId === 'object' ? orderOrId : (displayOrders.find(o => (o.id || o.orderId) === orderOrId) || {});
     const orderId = orderObj.id || orderObj.orderId || (typeof orderOrId === 'string' ? orderOrId : '');
-    const restaurantId = orderObj.restaurantId || orderObj.restaurant_id;
-    const riderId = orderObj.riderId || orderObj.rider_id;
+    if (!orderId) return;
 
-    let itemsArr: any[] = [];
-    if (Array.isArray(orderObj.items)) {
-      itemsArr = orderObj.items;
-    } else if (typeof orderObj.items === 'string') {
-      try {
-        const parsed = JSON.parse(orderObj.items);
-        if (Array.isArray(parsed)) itemsArr = parsed;
-      } catch (e) {}
+    const currentR = ratings[orderId];
+    if (type === 'food' && (currentR?.foodLocked || (currentR?.food && currentR.food > 0))) {
+      showToast('Meal rating has already been submitted and locked.');
+      return;
+    }
+    if (type === 'delivery' && (currentR?.deliveryLocked || (currentR?.delivery && currentR.delivery > 0))) {
+      showToast('Delivery rating has already been submitted and locked.');
+      return;
     }
 
+    setSelectedOrderForRating(orderObj);
+    setRatingModalType(type);
+    setRatingModalInitialScore(rating);
+    setRatingModalVisible(true);
+  };
+
+  const handleRatingModalSubmit = async (result: {
+    foodRating?: number;
+    deliveryRating?: number;
+    dishesRating: Record<string, 'up' | 'down'>;
+    reviewText: string;
+    compliments: string[];
+    items: Array<{ id?: string; menuItemId?: string; name?: string; rating?: number }>;
+  }) => {
+    if (!selectedOrderForRating) return;
+    const orderId = selectedOrderForRating.id || selectedOrderForRating.orderId;
+    if (!orderId) return;
+
+    const currentR = ratings[orderId] || { food: 0, delivery: 0, foodLocked: false, deliveryLocked: false, isLocked: false };
+
+    const newFood = result.foodRating !== undefined ? result.foodRating : currentR.food;
+    const newFoodLocked = result.foodRating !== undefined ? true : Boolean(currentR.foodLocked || (currentR.food && currentR.food > 0));
+
+    const newDelivery = result.deliveryRating !== undefined ? result.deliveryRating : currentR.delivery;
+    const newDeliveryLocked = result.deliveryRating !== undefined ? true : Boolean(currentR.deliveryLocked || (currentR.delivery && currentR.delivery > 0));
+
+    // Immediately update rating in state so UI updates and locks the appropriate rating
     setRatings((prev) => ({
       ...prev,
       [orderId]: {
-        ...(prev[orderId] || { food: 0, delivery: 0 }),
-        [type]: rating,
+        food: newFood,
+        delivery: newDelivery,
+        foodLocked: newFoodLocked,
+        deliveryLocked: newDeliveryLocked,
+        isLocked: Boolean(newFoodLocked && newDeliveryLocked),
       },
     }));
-    showToast(`Rated ${type === 'food' ? 'food & restaurant' : 'delivery partner'} ${rating} star${rating > 1 ? 's' : ''}`);
+
+    if (result.compliments.length > 0) {
+      setRatingCompliments((prev) => ({
+        ...prev,
+        [orderId]: Array.from(new Set([...(prev[orderId] || []), ...result.compliments])),
+      }));
+    }
+
+    setRatingModalVisible(false);
+    showToast(
+      result.deliveryRating !== undefined
+        ? '🎉 Delivery partner rating submitted!'
+        : '🎉 Meal & dish review submitted!'
+    );
 
     try {
       await RatingService.submitRating({
         orderId,
-        restaurantId,
-        foodRating: type === 'food' ? rating : undefined,
-        deliveryRating: type === 'delivery' ? rating : undefined,
-        riderId,
-        items: itemsArr,
-        compliments: ratingCompliments[orderId] || [],
+        restaurantId: selectedOrderForRating.restaurantId || selectedOrderForRating.restaurant_id,
+        foodRating: result.foodRating,
+        deliveryRating: result.deliveryRating,
+        riderId: selectedOrderForRating.riderId || selectedOrderForRating.rider_id,
+        reviewText: result.reviewText,
+        compliments: result.compliments,
+        items: result.items,
         userId: (authState as any)?.userId || (authState as any)?.id || undefined,
       });
     } catch (err) {
-      console.warn('Rating submit error:', err);
+      console.warn('Error submitting rating from modal:', err);
     }
   };
 
@@ -704,16 +774,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       <HelpSubView
         isDarkMode={isDarkMode}
         initialOrder={selectedOrderForDetails}
+        initialComplaint={selectedComplaintForHelp}
         pastOrders={ordersList}
         customerProfile={{
-          id: authState.type === 'Authenticated' ? ((authState as any).user?.id || (authState as any).id || 'CUST') : 'CUST',
+          id: authState.type === 'Authenticated' ? (authState.userId || (authState as any).user?.id || (authState as any).id || '') : '',
           name: authState.type === 'Authenticated' ? (authState.username || (authState as any).user?.name || 'Customer') : 'Customer',
           phone: authState.type === 'Authenticated' ? ((authState as any).phone || (authState as any).user?.phone || '') : '',
           avatar: authState.type === 'Authenticated' ? ((authState as any).user?.image || '') : '',
         }}
         onBack={() => {
-          setSelectedOrderForDetails(null);
-          setCurrentView('main');
+          setSelectedComplaintForHelp(null);
+          if (helpOriginView === 'order_details' && selectedOrderForDetails) {
+            setCurrentView('order_details');
+          } else {
+            setSelectedOrderForDetails(null);
+            setCurrentView('main');
+          }
         }}
       />
     );
@@ -815,14 +891,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         order={selectedOrderForDetails}
         onBack={() => {
           setSelectedOrderForDetails(null);
+          setSelectedComplaintForHelp(null);
           setCurrentView('main');
         }}
-        onHelp={() => setCurrentView('help')}
+        onHelp={() => {
+          setSelectedComplaintForHelp(null);
+          setHelpOriginView('order_details');
+          setCurrentView('help');
+        }}
+        onOpenConversation={(complaint) => {
+          setSelectedComplaintForHelp(complaint);
+          setHelpOriginView('order_details');
+          setCurrentView('help');
+        }}
         onReorder={(ord) => {
           handleReorder(ord);
         }}
         onNavigateToTracking={onNavigateToTracking ? (ordId) => {
           setSelectedOrderForDetails(null);
+          setSelectedComplaintForHelp(null);
           setCurrentView('main');
           onNavigateToTracking(ordId);
         } : undefined}
@@ -849,7 +936,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <TouchableOpacity
             style={styles.helpBtn}
             activeOpacity={0.8}
-            onPress={() => setCurrentView('help')}
+            onPress={() => {
+              setSelectedOrderForDetails(null);
+              setSelectedComplaintForHelp(null);
+              setHelpOriginView('main');
+              setCurrentView('help');
+            }}
           >
             <Image source={profHeadphones} style={styles.helpIcon} />
             <Text style={styles.helpText}>Help</Text>
@@ -1585,6 +1677,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       activeOpacity={0.8}
                       onPress={() => {
                         setSelectedOrderForDetails(order);
+                        setSelectedComplaintForHelp(null);
+                        setHelpOriginView('main');
                         setCurrentView('help');
                       }}
                     >
@@ -1599,84 +1693,105 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       <View style={styles.dividerThin} />
                       <View style={styles.ratingsRow}>
                         {/* Food Rating */}
-                        <View style={styles.ratingCol}>
-                          <Text style={styles.ratingLabel}>Rate Food</Text>
-                          <View style={styles.starsRow}>
-                            {[1, 2, 3, 4, 5].map((starVal) => {
-                              const isFilled = starVal <= currentRating.food;
-                              return (
-                                <TouchableOpacity
-                                  key={starVal}
-                                  activeOpacity={0.7}
-                                  onPress={() => handleRate(order, 'food', starVal)}
-                                  style={{ padding: 2 }}
-                                >
-                                  <Star
-                                    size={17}
-                                    color="#DEA430"
-                                    fill={isFilled ? '#DEA430' : 'transparent'}
-                                  />
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </View>
-                        </View>
+                        {(() => {
+                          const isFoodLocked = Boolean(currentRating.foodLocked || (currentRating.food && currentRating.food > 0));
+                          const isDeliveryLocked = Boolean(currentRating.deliveryLocked || (currentRating.delivery && currentRating.delivery > 0));
 
-                        <View style={styles.ratingVerticalDivider} />
+                          return (
+                            <>
+                              <View style={styles.ratingCol}>
+                                <View style={styles.ratingHeaderRow}>
+                                  <Text style={styles.ratingLabel}>Rate Food</Text>
+                                  {isFoodLocked && currentRating.food > 0 && (
+                                    <View style={styles.ratingScoreBadge}>
+                                      <Text style={styles.ratingScoreBadgeText}>★ {currentRating.food}</Text>
+                                    </View>
+                                  )}
+                                </View>
+                                <View style={styles.starsRow}>
+                                  {[1, 2, 3, 4, 5].map((starVal) => {
+                                    const isFilled = starVal <= currentRating.food;
+                                    return (
+                                      <TouchableOpacity
+                                        key={starVal}
+                                        activeOpacity={isFoodLocked ? 1 : 0.7}
+                                        disabled={isFoodLocked}
+                                        onPress={() => handleRate(order, 'food', starVal)}
+                                        style={{ padding: 2 }}
+                                      >
+                                        <Star
+                                          size={17}
+                                          color="#DEA430"
+                                          fill={isFilled ? '#DEA430' : 'transparent'}
+                                        />
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              </View>
 
-                        {/* Delivery Rating */}
-                        <View style={styles.ratingCol}>
-                          <Text style={styles.ratingLabel}>Rate Delivery</Text>
-                          <View style={styles.starsRow}>
-                            {[1, 2, 3, 4, 5].map((starVal) => {
-                              const isFilled = starVal <= currentRating.delivery;
-                              return (
-                                <TouchableOpacity
-                                  key={starVal}
-                                  activeOpacity={0.7}
-                                  onPress={() => handleRate(order, 'delivery', starVal)}
-                                  style={{ padding: 2 }}
-                                >
-                                  <Star
-                                    size={17}
-                                    color="#DEA430"
-                                    fill={isFilled ? '#DEA430' : 'transparent'}
-                                  />
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </View>
-                        </View>
+                              <View style={styles.ratingVerticalDivider} />
+
+                              {/* Delivery Rating */}
+                              <View style={styles.ratingCol}>
+                                <View style={styles.ratingHeaderRow}>
+                                  <Text style={styles.ratingLabel}>Rate Delivery</Text>
+                                  {isDeliveryLocked && currentRating.delivery > 0 && (
+                                    <View style={styles.ratingScoreBadge}>
+                                      <Text style={styles.ratingScoreBadgeText}>★ {currentRating.delivery}</Text>
+                                    </View>
+                                  )}
+                                </View>
+                                <View style={styles.starsRow}>
+                                  {[1, 2, 3, 4, 5].map((starVal) => {
+                                    const isFilled = starVal <= currentRating.delivery;
+                                    return (
+                                      <TouchableOpacity
+                                        key={starVal}
+                                        activeOpacity={isDeliveryLocked ? 1 : 0.7}
+                                        disabled={isDeliveryLocked}
+                                        onPress={() => handleRate(order, 'delivery', starVal)}
+                                        style={{ padding: 2 }}
+                                      >
+                                        <Star
+                                          size={17}
+                                          color="#DEA430"
+                                          fill={isFilled ? '#DEA430' : 'transparent'}
+                                        />
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              </View>
+                            </>
+                          );
+                        })()}
                       </View>
 
-                      {/* Compliments Chips Row */}
-                      {(currentRating.food > 0 || currentRating.delivery > 0) && (
+                      {/* Submitted Compliments Read-Only Badges */}
+                      {(ratingCompliments[orderId] || []).length > 0 && (
                         <View style={styles.complimentsContainer}>
-                          <Text style={styles.complimentsPromptText}>What did you love most?</Text>
+                          <Text style={styles.complimentsPromptText}>Feedback Submitted</Text>
                           <View style={styles.complimentsChipsRow}>
-                            {['Delicious 😋', 'Super Fast ⚡', 'Hot & Fresh ♨️', 'Neat Packaging 🛍️', 'Great Value 🌟'].map((tag) => {
-                              const isSelected = (ratingCompliments[orderId] || []).includes(tag);
-                              return (
-                                <TouchableOpacity
-                                  key={tag}
+                            {(ratingCompliments[orderId] || []).map((tag) => (
+                              <View
+                                key={tag}
+                                style={[
+                                  styles.complimentChip,
+                                  styles.complimentChipSelected,
+                                  { opacity: 0.95 },
+                                ]}
+                              >
+                                <Text
                                   style={[
-                                    styles.complimentChip,
-                                    isSelected && styles.complimentChipSelected,
+                                    styles.complimentChipText,
+                                    styles.complimentChipTextSelected,
                                   ]}
-                                  activeOpacity={0.7}
-                                  onPress={() => handleComplimentTag(order, tag)}
                                 >
-                                  <Text
-                                    style={[
-                                      styles.complimentChipText,
-                                      isSelected && styles.complimentChipTextSelected,
-                                    ]}
-                                  >
-                                    {tag}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })}
+                                  {tag}
+                                </Text>
+                              </View>
+                            ))}
                           </View>
                         </View>
                       )}
@@ -1715,6 +1830,20 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </>
         )}
       </ScrollView>
+
+      {/* Order Rating Modal (Opens on tapping unrated stars, locks independently) */}
+      <OrderRatingModal
+        visible={ratingModalVisible}
+        order={selectedOrderForRating}
+        initialType={ratingModalType}
+        initialRating={ratingModalInitialScore}
+        existingFoodRating={selectedOrderForRating ? (ratings[selectedOrderForRating.id || selectedOrderForRating.orderId]?.food || 0) : 0}
+        existingDeliveryRating={selectedOrderForRating ? (ratings[selectedOrderForRating.id || selectedOrderForRating.orderId]?.delivery || 0) : 0}
+        isFoodLocked={Boolean(selectedOrderForRating && (ratings[selectedOrderForRating.id || selectedOrderForRating.orderId]?.foodLocked || (ratings[selectedOrderForRating.id || selectedOrderForRating.orderId]?.food && ratings[selectedOrderForRating.id || selectedOrderForRating.orderId]?.food > 0)))}
+        isDeliveryLocked={Boolean(selectedOrderForRating && (ratings[selectedOrderForRating.id || selectedOrderForRating.orderId]?.deliveryLocked || (ratings[selectedOrderForRating.id || selectedOrderForRating.orderId]?.delivery && ratings[selectedOrderForRating.id || selectedOrderForRating.orderId]?.delivery > 0)))}
+        onClose={() => setRatingModalVisible(false)}
+        onSubmit={handleRatingModalSubmit}
+      />
     </View>
   );
 };
@@ -2186,11 +2315,33 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'flex-start',
   },
+  ratingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingRight: 6,
+    marginBottom: 4,
+  },
+  ratingScoreBadge: {
+    backgroundColor: 'rgba(222, 164, 48, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(222, 164, 48, 0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  ratingScoreBadgeText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11,
+    color: '#DEA430',
+    fontWeight: '700',
+  },
   ratingLabel: {
     fontFamily: 'Urbanist-Medium',
     fontSize: 13,
     color: '#969696',
-    marginBottom: 6,
+    marginBottom: 0,
   },
   starsRow: {
     flexDirection: 'row',

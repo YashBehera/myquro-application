@@ -67,12 +67,12 @@ export default function SOSScreen() {
   const handleCallHelpline = () => {
     showAlertModal({
       type: 'info',
-      title: 'MyQuro Helpline 📞',
-      subtitle: 'Connect immediately to MyQuro 24x7 Emergency Rider Safety & Operations Desk.',
-      primaryButtonText: 'Call 1800-123-9999',
+      title: 'MyQuro Partner Support Desk',
+      subtitle: 'Connect directly with MyQuro Operations Support via your active ticket center for urgent rider assistance.',
+      primaryButtonText: 'Open Support Desk',
       onPrimaryPress: () => {
         hideAlertModal();
-        Linking.openURL('tel:18001239999').catch(() => {});
+        router.push('/help-support');
       },
       secondaryButtonText: 'Cancel',
       onSecondaryPress: hideAlertModal,

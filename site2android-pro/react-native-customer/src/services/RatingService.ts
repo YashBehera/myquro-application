@@ -38,11 +38,24 @@ export class RatingService {
         const storedKey = `@order_rating_${orderId}`;
         const existingRaw = await AsyncStorage.getItem(storedKey);
         const existing = existingRaw ? JSON.parse(existingRaw) : {};
+
+        const isFoodSubmitted = Boolean(foodRating && foodRating > 0);
+        const isDeliverySubmitted = Boolean(deliveryRating && deliveryRating > 0);
+
+        const newFoodLocked = isFoodSubmitted ? true : Boolean(existing.foodLocked || (existing.food && existing.food > 0));
+        const newDeliveryLocked = isDeliverySubmitted ? true : Boolean(existing.deliveryLocked || (existing.delivery && existing.delivery > 0));
+
         const merged = {
           ...existing,
           food: foodRating || existing.food || 0,
           delivery: deliveryRating || existing.delivery || 0,
+          foodLocked: newFoodLocked,
+          deliveryLocked: newDeliveryLocked,
+          isLocked: Boolean(newFoodLocked && newDeliveryLocked),
+          foodLockedAt: isFoodSubmitted ? new Date().toISOString() : existing.foodLockedAt,
+          deliveryLockedAt: isDeliverySubmitted ? new Date().toISOString() : existing.deliveryLockedAt,
           compliments: Array.from(new Set([...(existing.compliments || []), ...compliments])),
+          reviewText: reviewText || existing.reviewText || '',
           updatedAt: new Date().toISOString(),
         };
         await AsyncStorage.setItem(storedKey, JSON.stringify(merged));
@@ -179,10 +192,33 @@ export class RatingService {
   /**
    * Get cached rating for an order if user has rated it
    */
-  static async getOrderRating(orderId: string): Promise<{ food: number; delivery: number; compliments: string[] } | null> {
+  static async getOrderRating(orderId: string): Promise<{
+    food: number;
+    delivery: number;
+    foodLocked: boolean;
+    deliveryLocked: boolean;
+    isLocked: boolean;
+    compliments: string[];
+    reviewText?: string;
+    lockedAt?: string;
+  } | null> {
     try {
       const raw = await AsyncStorage.getItem(`@order_rating_${orderId}`);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Ensure foodLocked & deliveryLocked are accurately derived even for older records
+        const foodLocked = Boolean(parsed.foodLocked || (parsed.food && parsed.food > 0));
+        const deliveryLocked = Boolean(parsed.deliveryLocked || (parsed.delivery && parsed.delivery > 0));
+        return {
+          ...parsed,
+          food: parsed.food || 0,
+          delivery: parsed.delivery || 0,
+          foodLocked,
+          deliveryLocked,
+          isLocked: Boolean(foodLocked && deliveryLocked),
+          compliments: parsed.compliments || [],
+        };
+      }
     } catch (e) {}
     return null;
   }

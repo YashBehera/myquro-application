@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,12 @@ import {
   Modal,
   TextInput,
   Alert,
-  Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import apiClient from '../services/apiClient';
 
 interface IssueCategory {
   id: string;
@@ -32,6 +33,14 @@ export default function HelpSupportScreen() {
   const [ticketMessage, setTicketMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [activeTab, setActiveTab] = useState<'raise' | 'tickets'>('raise');
+  const [restaurantInfo, setRestaurantInfo] = useState<{ id: string; name: string } | null>(null);
+  const [myTickets, setMyTickets] = useState<any[]>([]);
+  const [isLoadingTickets, setIsLoadingTickets] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState<any | null>(null);
+  const [ticketReply, setTicketReply] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
+
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -39,6 +48,46 @@ export default function HelpSupportScreen() {
       router.replace('/(tabs)/more' as any);
     }
   };
+
+  const fetchRestaurantAndTickets = async (silent = false) => {
+    try {
+      if (!silent) setIsLoadingTickets(true);
+      let info = restaurantInfo;
+      if (!info) {
+        const restRes = await apiClient.get('/restaurants/my-restaurant');
+        const rest = restRes.data?.restaurant || restRes.data;
+        if (rest?.id) {
+          info = { id: rest.id, name: rest.name || 'Restaurant Partner' };
+          setRestaurantInfo(info);
+        }
+      }
+
+      if (info?.id) {
+        const res = await apiClient.get(`/complaints/merchant/${info.id}?ticketType=merchant_issue`);
+        if (res.data?.success && Array.isArray(res.data?.complaints)) {
+          setMyTickets(res.data.complaints);
+          if (selectedTicket) {
+            const refreshed = res.data.complaints.find((t: any) => t.id === selectedTicket.id);
+            if (refreshed) setSelectedTicket(refreshed);
+          }
+        }
+      }
+    } catch (err) {
+      if (!silent) console.warn('Could not load merchant support tickets:', err);
+    } finally {
+      if (!silent) setIsLoadingTickets(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRestaurantAndTickets(false);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'tickets' && !selectedTicket) return;
+    const interval = setInterval(() => fetchRestaurantAndTickets(true), 5000);
+    return () => clearInterval(interval);
+  }, [activeTab, selectedTicket?.id, restaurantInfo?.id]);
 
   const issuesList: IssueCategory[] = [
     {
@@ -127,27 +176,89 @@ export default function HelpSupportScreen() {
           item.description.toLowerCase().includes(searchQuery.toLowerCase())
       );
 
-  const handleCallSupport = () => {
-    Linking.openURL('tel:18001087876').catch(() => {
-      Alert.alert('Helpline', 'Call 24/7 Restaurant Partner Support at 1800-108-7876');
-    });
-  };
-
-  const handleSubmitTicket = () => {
-    if (!ticketMessage.trim()) {
+  const handleSubmitTicket = async () => {
+    if (!ticketMessage.trim() || !selectedIssue) {
       Alert.alert('Required', 'Please describe your issue so our support team can assist you.');
       return;
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      let restInfo = restaurantInfo;
+      if (!restInfo) {
+        const restRes = await apiClient.get('/restaurants/my-restaurant');
+        const rest = restRes.data?.restaurant || restRes.data;
+        if (rest?.id) {
+          restInfo = { id: rest.id, name: rest.name || 'Restaurant Partner' };
+          setRestaurantInfo(restInfo);
+        }
+      }
+
+      if (!restInfo?.id) {
+        Alert.alert('Account Error', 'Could not resolve your restaurant outlet profile. Please try again.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const res = await apiClient.post('/complaints', {
+        ticketType: 'merchant_issue',
+        outletId: restInfo.id,
+        outletName: restInfo.name,
+        customerId: restInfo.id,
+        customerName: restInfo.name,
+        category: 'RESTAURANT_OUTLET',
+        categoryLabel: selectedIssue.title,
+        reason: selectedIssue.title,
+        description: ticketMessage.trim(),
+        initialMessage: ticketMessage.trim(),
+        senderType: 'RESTAURANT',
+      });
+
+      if (!res.data?.success || !res.data?.complaint) {
+        Alert.alert('Submission Failed', res.data?.error || 'Could not register support ticket.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const created = res.data.complaint;
+      setMyTickets((prev) => [created, ...prev]);
+      setSelectedIssue(null);
+      setTicketMessage('');
+      setActiveTab('tickets');
+      setSelectedTicket(created);
+    } catch (err: any) {
       Alert.alert(
-        'Ticket Raised! 🎉',
-        `Your priority support ticket for "${selectedIssue?.title}" has been registered. An executive will call you within 15 minutes.`,
-        [{ text: 'Done', onPress: () => { setSelectedIssue(null); setTicketMessage(''); } }]
+        'Network Error',
+        err?.response?.data?.error || err?.message || 'Could not submit support ticket to server.'
       );
-    }, 800);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSendTicketReply = async () => {
+    if (!selectedTicket || !ticketReply.trim() || isSendingReply) return;
+    const text = ticketReply.trim();
+    setIsSendingReply(true);
+    try {
+      const res = await apiClient.post(`/complaints/${selectedTicket.id}/message`, {
+        senderId: restaurantInfo?.id || selectedTicket.outletId,
+        senderName: restaurantInfo?.name || selectedTicket.outletName || 'Restaurant Partner',
+        senderType: 'RESTAURANT',
+        message: text,
+      });
+      if (!res.data?.success || !res.data?.complaint) {
+        Alert.alert('Failed', res.data?.error || 'Could not send message.');
+        return;
+      }
+      setTicketReply('');
+      setSelectedTicket(res.data.complaint);
+      setMyTickets((prev) => prev.map((t) => (t.id === res.data.complaint.id ? res.data.complaint : t)));
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.error || 'Could not send follow-up message.');
+    } finally {
+      setIsSendingReply(false);
+    }
   };
 
   return (
@@ -161,12 +272,17 @@ export default function HelpSupportScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          onPress={handleCallSupport}
+          onPress={() => {
+            setActiveTab(activeTab === 'raise' ? 'tickets' : 'raise');
+            fetchRestaurantAndTickets(false);
+          }}
           style={styles.callSupportPill}
           activeOpacity={0.8}
         >
-          <Ionicons name="call" size={14} color="#0B0B0B" style={{ marginRight: 6 }} />
-          <Text style={styles.callSupportText}>24/7 Helpline</Text>
+          <Ionicons name="chatbubbles" size={14} color="#0B0B0B" style={{ marginRight: 6 }} />
+          <Text style={styles.callSupportText}>
+            {activeTab === 'raise' ? `My Tickets (${myTickets.length})` : 'Raise Issue'}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -176,106 +292,148 @@ export default function HelpSupportScreen() {
         contentContainerStyle={{ paddingBottom: 60 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* HERO SECTION */}
-        <View style={styles.heroSection}>
-          <Text style={styles.welcomeSubtitle}>Welcome to the</Text>
-          <Text style={styles.heroTitleText}>
-            Restaurant Partner <Text style={styles.heroTitleGold}>Help Center</Text>
-          </Text>
-
-          {/* Underline Gold Arc Line */}
-          <View style={styles.goldArcLine} />
-
-          {/* 3D Support Agent Mascot Graphic */}
-          <View style={styles.agentCircleWrapper}>
-            <View style={styles.agentOuterCircle}>
-              <Image
-                source={require('../../assets/images/3d_support_agent_namaste.png')}
-                style={styles.agentImage}
-                resizeMode="cover"
-              />
-            </View>
-
-            {/* Sparkles */}
-            <Ionicons name="sparkles" size={16} color="#E8C547" style={styles.sparkleLeft} />
-            <Ionicons name="sparkles" size={14} color="#E8C547" style={styles.sparkleRight} />
-          </View>
-
-          <Text style={styles.needHelpText}>Need any help with your outlet?</Text>
-          <Text style={styles.myQuroText}>My Quro Partner Support is here for you 24/7.</Text>
-        </View>
-
-        {/* SEARCH BOX */}
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={18} color="#E8C547" style={{ marginRight: 10 }} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search issues (e.g. payout, printer, delayed rider)..."
-            placeholderTextColor="#8E8E8E"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={18} color="#8E8E8E" />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* RAISE A NEW ISSUE SECTION */}
-        <Text style={styles.sectionHeaderTitle}>Raise a New Issue</Text>
-
-        <View style={styles.issuesCardContainer}>
-          {filteredIssues.map((item, index) => {
-            const isLast = index === filteredIssues.length - 1;
-
-            return (
-              <View key={item.id}>
+        {activeTab === 'tickets' ? (
+          <View style={{ paddingTop: 16 }}>
+            <Text style={styles.sectionHeaderTitle}>My Support Tickets</Text>
+            {isLoadingTickets && myTickets.length === 0 ? (
+              <ActivityIndicator size="small" color="#E8C547" style={{ marginVertical: 24 }} />
+            ) : myTickets.length === 0 ? (
+              <View style={[styles.issuesCardContainer, { padding: 24, alignItems: 'center' }]}>
+                <Ionicons name="document-text-outline" size={32} color="#8E8E8E" />
+                <Text style={[styles.issueTitleText, { marginTop: 10 }]}>No Partner Tickets Yet</Text>
+                <Text style={[styles.issueDescText, { textAlign: 'center', marginTop: 4 }]}>
+                  Raise an issue under Help Center and track live support responses here.
+                </Text>
+              </View>
+            ) : (
+              myTickets.map((ticket) => (
                 <TouchableOpacity
-                  onPress={() => setSelectedIssue(item)}
-                  style={styles.issueRow}
-                  activeOpacity={0.8}
+                  key={ticket.id}
+                  style={[styles.issuesCardContainer, { marginBottom: 12, padding: 14 }]}
+                  activeOpacity={0.85}
+                  onPress={() => setSelectedTicket(ticket)}
                 >
-                  <View style={styles.issueLeftGroup}>
-                    {/* Circle Icon Box */}
-                    <View style={styles.iconCircleBox}>
-                      <Ionicons name={item.icon} size={20} color="#E8C547" />
-                    </View>
-
-                    <View style={styles.issueTextCol}>
-                      <Text style={styles.issueTitleText}>{item.title}</Text>
-                      <Text style={styles.issueDescText} numberOfLines={1}>
-                        {item.description}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <Text style={{ color: '#E8C547', fontSize: 12, fontWeight: '700' }}>#{ticket.id}</Text>
+                    <View style={{ backgroundColor: 'rgba(232,197,71,0.16)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                      <Text style={{ color: '#E8C547', fontSize: 10.5, fontWeight: '700' }}>
+                        {String(ticket.status || 'OPEN').replace(/_/g, ' ')}
                       </Text>
                     </View>
                   </View>
-
-                  <Ionicons name="chevron-forward" size={18} color="#E8C547" />
+                  <Text style={styles.issueTitleText}>{ticket.reason || ticket.categoryLabel || 'Support Ticket'}</Text>
+                  <Text style={[styles.issueDescText, { marginTop: 4 }]} numberOfLines={2}>
+                    {ticket.description}
+                  </Text>
                 </TouchableOpacity>
-
-                {!isLast && <View style={styles.dottedDivider} />}
-              </View>
-            );
-          })}
-        </View>
-
-        {/* DIRECT CALL HELPLINE BANNER */}
-        <TouchableOpacity
-          onPress={handleCallSupport}
-          style={styles.callBannerCard}
-          activeOpacity={0.85}
-        >
-          <View style={styles.callBannerLeft}>
-            <View style={styles.callBannerIconBox}>
-              <Ionicons name="headset" size={24} color="#E8C547" />
-            </View>
-            <View>
-              <Text style={styles.callBannerTitle}>Emergency Kitchen Support</Text>
-              <Text style={styles.callBannerSubtitle}>Toll Free 1800-108-7876 • Instant Call Connect</Text>
-            </View>
+              ))
+            )}
           </View>
-          <Ionicons name="call-outline" size={20} color="#E8C547" />
-        </TouchableOpacity>
+        ) : (
+          <>
+            {/* HERO SECTION */}
+            <View style={styles.heroSection}>
+              <Text style={styles.welcomeSubtitle}>Welcome to the</Text>
+              <Text style={styles.heroTitleText}>
+                Restaurant Partner <Text style={styles.heroTitleGold}>Help Center</Text>
+              </Text>
+
+              <View style={styles.goldArcLine} />
+
+              <View style={styles.agentCircleWrapper}>
+                <View style={styles.agentOuterCircle}>
+                  <Image
+                    source={require('../../assets/images/3d_support_agent_namaste.png')}
+                    style={styles.agentImage}
+                    resizeMode="cover"
+                  />
+                </View>
+
+                <Ionicons name="sparkles" size={16} color="#E8C547" style={styles.sparkleLeft} />
+                <Ionicons name="sparkles" size={14} color="#E8C547" style={styles.sparkleRight} />
+              </View>
+
+              <Text style={styles.needHelpText}>Need any help with your outlet?</Text>
+              <Text style={styles.myQuroText}>Raise a live ticket synced directly with MyQuro Support.</Text>
+            </View>
+
+            {/* SEARCH BOX */}
+            <View style={styles.searchContainer}>
+              <Ionicons name="search" size={18} color="#E8C547" style={{ marginRight: 10 }} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search issues (e.g. payout, printer, delayed rider)..."
+                placeholderTextColor="#8E8E8E"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Ionicons name="close-circle" size={18} color="#8E8E8E" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* RAISE A NEW ISSUE SECTION */}
+            <Text style={styles.sectionHeaderTitle}>Raise a New Issue</Text>
+
+            <View style={styles.issuesCardContainer}>
+              {filteredIssues.map((item, index) => {
+                const isLast = index === filteredIssues.length - 1;
+
+                return (
+                  <View key={item.id}>
+                    <TouchableOpacity
+                      onPress={() => setSelectedIssue(item)}
+                      style={styles.issueRow}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.issueLeftGroup}>
+                        <View style={styles.iconCircleBox}>
+                          <Ionicons name={item.icon} size={20} color="#E8C547" />
+                        </View>
+
+                        <View style={styles.issueTextCol}>
+                          <Text style={styles.issueTitleText}>{item.title}</Text>
+                          <Text style={styles.issueDescText} numberOfLines={1}>
+                            {item.description}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Ionicons name="chevron-forward" size={18} color="#E8C547" />
+                    </TouchableOpacity>
+
+                    {!isLast && <View style={styles.dottedDivider} />}
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* ACTIVE PARTNER TICKETS BANNER */}
+            <TouchableOpacity
+              onPress={() => {
+                setActiveTab('tickets');
+                fetchRestaurantAndTickets(false);
+              }}
+              style={styles.callBannerCard}
+              activeOpacity={0.85}
+            >
+              <View style={styles.callBannerLeft}>
+                <View style={styles.callBannerIconBox}>
+                  <Ionicons name="headset" size={24} color="#E8C547" />
+                </View>
+                <View>
+                  <Text style={styles.callBannerTitle}>View Your Partner Support Tickets</Text>
+                  <Text style={styles.callBannerSubtitle}>
+                    {myTickets.length} {myTickets.length === 1 ? 'ticket' : 'tickets'} synced with backend support
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#E8C547" />
+            </TouchableOpacity>
+          </>
+        )}
       </ScrollView>
 
       {/* ISSUE DETAILS & TICKET MODAL */}
@@ -288,7 +446,6 @@ export default function HelpSupportScreen() {
         >
           <View style={styles.modalOverlay}>
             <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) + 16 }]}>
-              {/* Header */}
               <View style={styles.modalHeader}>
                 <View style={styles.modalTitleRow}>
                   <Ionicons name={selectedIssue.icon} size={22} color="#E8C547" style={{ marginRight: 10 }} />
@@ -300,7 +457,6 @@ export default function HelpSupportScreen() {
               </View>
 
               <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-                {/* FAQs */}
                 <Text style={styles.faqSectionHeading}>Frequently Asked Solutions</Text>
                 {selectedIssue.faqs.map((faq, idx) => (
                   <View key={idx} style={styles.faqItemBox}>
@@ -309,7 +465,6 @@ export default function HelpSupportScreen() {
                   </View>
                 ))}
 
-                {/* Ticket Form */}
                 <Text style={styles.ticketSectionHeading}>Still need help? Raise a ticket</Text>
                 <TextInput
                   style={styles.ticketInput}
@@ -332,6 +487,77 @@ export default function HelpSupportScreen() {
                   </Text>
                 </TouchableOpacity>
               </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* LIVE SUPPORT TICKET CONVERSATION MODAL */}
+      {selectedTicket && (
+        <Modal
+          visible={selectedTicket !== null}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setSelectedTicket(null)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) + 12, maxHeight: '85%' }]}>
+              <View style={styles.modalHeader}>
+                <View style={{ flex: 1, marginRight: 10 }}>
+                  <Text style={{ color: '#E8C547', fontSize: 12, fontWeight: '700' }}>
+                    #{selectedTicket.id} · {String(selectedTicket.status || 'OPEN').replace(/_/g, ' ')}
+                  </Text>
+                  <Text style={[styles.modalTitle, { fontSize: 16, marginTop: 2 }]} numberOfLines={1}>
+                    {selectedTicket.reason || 'Partner Support Ticket'}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setSelectedTicket(null)}>
+                  <Ionicons name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                {(Array.isArray(selectedTicket.messages) ? selectedTicket.messages : []).map((m: any, idx: number) => {
+                  const isMine = m.senderType === 'RESTAURANT';
+                  return (
+                    <View
+                      key={m.id || idx}
+                      style={{
+                        alignSelf: isMine ? 'flex-end' : 'flex-start',
+                        maxWidth: '84%',
+                        backgroundColor: isMine ? '#E8C547' : '#1E1E1E',
+                        borderRadius: 12,
+                        padding: 10,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <Text style={{ fontSize: 10.5, fontWeight: '700', color: isMine ? '#0B0B0B' : '#E8C547', marginBottom: 2 }}>
+                        {isMine ? 'You' : m.senderName || 'MyQuro Support'}
+                      </Text>
+                      <Text style={{ fontSize: 13, color: isMine ? '#0B0B0B' : '#FFFFFF' }}>{m.message}</Text>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+
+              {selectedTicket.status !== 'RESOLVED' && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 8 }}>
+                  <TextInput
+                    style={[styles.ticketInput, { flex: 1, height: 44, marginBottom: 0, paddingVertical: 10 }]}
+                    placeholder="Reply to support..."
+                    placeholderTextColor="#8E8E8E"
+                    value={ticketReply}
+                    onChangeText={setTicketReply}
+                  />
+                  <TouchableOpacity
+                    style={[styles.submitTicketBtn, { marginBottom: 0, paddingHorizontal: 16, height: 44, justifyContent: 'center' }]}
+                    onPress={handleSendTicketReply}
+                    disabled={isSendingReply || !ticketReply.trim()}
+                  >
+                    <Ionicons name="send" size={18} color="#0B0B0B" />
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </View>
         </Modal>

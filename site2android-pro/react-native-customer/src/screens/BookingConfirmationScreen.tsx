@@ -507,7 +507,7 @@ export const BookingConfirmationScreen: React.FC<BookingConfirmationScreenProps>
         <TouchableOpacity
           style={styles.helpLinkRow}
           activeOpacity={0.8}
-          onPress={onHelp ? onHelp : () => Alert.alert('Customer Support', 'Contact us at support@myquro.com or call 1800-123-4567 for reservation assistance.')}
+          onPress={onHelp ? onHelp : () => Alert.alert('Reservation Support', 'Need help with this reservation? Visit Profile → Help & Support in the app to message our team directly.')}
         >
           <Text style={styles.helpTextRegular}>
             Need help with this order?{' '}

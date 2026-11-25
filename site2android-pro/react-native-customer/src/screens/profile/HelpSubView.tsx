@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -12,29 +12,29 @@ import {
   Image,
   ActivityIndicator,
   Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
 import {
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   ArrowLeft,
-  Phone,
-  Mail,
-  Search,
   X,
-  AlertCircle,
+  Check,
+  Send,
+  Camera,
+  Image as ImageIcon,
   CheckCircle2,
   Clock,
-  MessageSquare,
-  Send,
-  PlusCircle,
-  FileText,
-  RotateCcw,
-  ShieldAlert,
+  Sparkles,
+  Phone,
+  Mail,
 } from 'lucide-react-native';
 import { scale } from './profileUtils';
 import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
 import { BACKEND_URL } from '../../config';
+import * as ImagePicker from 'expo-image-picker';
 
 interface HelpSubViewProps {
   isDarkMode: boolean;
@@ -46,61 +46,101 @@ interface HelpSubViewProps {
     phone?: string;
     avatar?: string;
   };
+  initialComplaint?: any;
   onBack: () => void;
 }
 
-type TabType = 'complaints' | 'faq';
+interface OrderItemEntry {
+  id: string;
+  name: string;
+  variant?: string;
+  quantity: number;
+  isVeg: boolean;
+  price?: number;
+}
 
-const CATEGORIES = [
-  { key: 'FOOD_QUALITY', label: 'Food Quality / Cold Food', icon: '🍲' },
-  { key: 'ORDER_PACKAGING', label: 'Missing Item / Spill', icon: '📦' },
-  { key: 'OTHER', label: 'Delayed Delivery / Rider', icon: '⏱️' },
-  { key: 'RESTAURANT_OUTLET', label: 'Wrong Dish / Mistake', icon: '🍽️' },
-];
+interface ChatMessage {
+  id: string;
+  sender: 'user' | 'support';
+  senderType?: 'CUSTOMER' | 'RESTAURANT' | 'RIDER' | 'MYQURO_SUPPORT';
+  senderName?: string;
+  text: string;
+  timestamp: string;
+  actionCard?: 'SELECT_ITEMS' | 'ADD_PHOTOS' | 'COMPLAINT_CREATED';
+  actionCardData?: any;
+  imageUri?: string;
+}
 
-const PRESET_REASONS: Record<string, string[]> = {
-  FOOD_QUALITY: [
-    'Food was completely cold on arrival',
-    'Food was undercooked or raw',
-    'Food taste or freshness was substandard',
-    'Burnt items received',
-  ],
-  ORDER_PACKAGING: [
-    'Items missing from package',
-    'Curry/liquid gravy spilled or container broken',
-    'Package seal was broken upon delivery',
-    'Cutlery or condiments missing',
-  ],
-  OTHER: [
-    'Delivery was more than 30 mins delayed',
-    'Rider was unprofessional or rude',
-    'Marked delivered but did not receive yet',
-    'Rider asked for extra cash',
-  ],
-  RESTAURANT_OUTLET: [
-    'Received completely wrong dish',
-    'Non-veg item delivered instead of Veg',
-    'Special cooking instructions ignored',
-    'Portion size significantly smaller than described',
-  ],
-};
-
-const FAQS = [
+const CATEGORY_ITEMS = [
   {
-    q: 'How long does a complaint resolution take?',
-    a: 'Restaurant managers review and respond to complaints within 15–30 minutes. If a refund is approved, it is credited back to your original payment method instantly or within 24 hours.',
+    id: 'not_received',
+    title: 'I did not receive this order',
+    subtitle: "My order shows as delivered, but I haven't received it",
+    type: 'delivery',
+    botIntro:
+      "Sorry to hear that your order hasn't arrived. We will immediately check the live delivery logs with your delivery partner.",
+    needsItemSelection: false,
   },
   {
-    q: 'Can I cancel my order after placement?',
-    a: 'Orders can only be cancelled within 60 seconds of placement. After that, kitchens begin food preparation and ingredients are committed.',
+    id: 'portion_size',
+    title: 'Item(s) portion size is not adequate',
+    subtitle: 'The portion size is smaller than what I ordered',
+    type: 'quality',
+    botIntro: 'Sorry to hear that. We will do our best to assist you. You are our top priority today!',
+    itemPrompt: 'Let us know which items were of insufficient quantity',
+    needsItemSelection: true,
   },
   {
-    q: 'My payment was deducted, but order failed.',
-    a: 'In rare banking gateway drops, your bank holds the amount and automatically reverses it within 3-5 business days. You can also write to our team with your transaction reference.',
+    id: 'missing_items',
+    title: 'Few item(s) are missing in my order',
+    subtitle: 'Ex. Ordered 3 items, but received only 2',
+    type: 'missing',
+    botIntro: 'We sincerely apologize for the missing items. We will take care of this right away.',
+    itemPrompt: 'Let us know which items were missing from your order package',
+    needsItemSelection: true,
   },
   {
-    q: 'What is MyQURO membership benefits details?',
-    a: 'MyQURO is our VIP membership offering unlimited free delivery, fast-track kitchen preparation, and exclusive dining discounts at elite outlets.',
+    id: 'incorrect_items',
+    title: 'Item(s) delivered are incorrect or wrong',
+    subtitle: 'Received different dishes or incorrect variants than ordered',
+    type: 'wrong',
+    botIntro: 'We apologize for sending the wrong dish. Please let us know which items were incorrect.',
+    itemPrompt: 'Select the items that were delivered incorrectly',
+    needsItemSelection: true,
+  },
+  {
+    id: 'poor_quality',
+    title: 'Item(s) quality is poor',
+    subtitle: 'Food was cold, stale, undercooked or taste was substandard',
+    type: 'quality',
+    botIntro: 'We hold our culinary partner standards very high and apologize that this fell short.',
+    itemPrompt: 'Select the items that had quality issues',
+    needsItemSelection: true,
+  },
+  {
+    id: 'spillage',
+    title: 'Item(s) has spillage issue',
+    subtitle: 'Curry or beverage leaked or container packaging was broken',
+    type: 'spillage',
+    botIntro: 'Packaging integrity is very important to us. We will address this with the packaging station.',
+    itemPrompt: 'Select the spilled or damaged items',
+    needsItemSelection: true,
+  },
+  {
+    id: 'coupon_query',
+    title: 'I have coupon related query for this order',
+    subtitle: 'Coupon discount was not applied or cashback was not credited',
+    type: 'billing',
+    botIntro: 'Let us review the promotional terms and voucher code applied to your order invoice.',
+    needsItemSelection: false,
+  },
+  {
+    id: 'payment_billing',
+    title: 'Payment and billing related query',
+    subtitle: 'Double deducted, charged extra or invoice request',
+    type: 'billing',
+    botIntro: 'Our billing specialist is reviewing the payment gateway transaction logs for this order.',
+    needsItemSelection: false,
   },
 ];
 
@@ -109,699 +149,1092 @@ export const HelpSubView: React.FC<HelpSubViewProps> = ({
   initialOrder,
   pastOrders = [],
   customerProfile,
+  initialComplaint,
   onBack,
 }) => {
   const insets = useSafeAreaInsets();
-  const favQuroImg = require('../../assets/favorite_quro.png');
+  const chatScrollRef = useRef<any>(null);
 
-  const [activeTab, setActiveTab] = useState<TabType>(initialOrder ? 'complaints' : 'complaints');
-  const [selectedOrder, setSelectedOrder] = useState<any>(initialOrder || (pastOrders.length > 0 ? pastOrders[0] : null));
+  // Active view: 'CATEGORIES' vs 'CHAT'
+  const [viewMode, setViewMode] = useState<'CATEGORIES' | 'CHAT'>('CATEGORIES');
+  const [selectedOrder, setSelectedOrder] = useState<any>(
+    initialOrder || (pastOrders.length > 0 ? pastOrders[0] : null)
+  );
   const [showOrderPicker, setShowOrderPicker] = useState(false);
 
-  // Complaint Form State
-  const [category, setCategory] = useState<string>('FOOD_QUALITY');
-  const [reason, setReason] = useState<string>('');
-  const [description, setDescription] = useState<string>('');
-  const [relatedItem, setRelatedItem] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submissionSuccess, setSubmissionSuccess] = useState<string | null>(null);
+  // Accordion expansion state
+  const [expandedCategoryId, setExpandedCategoryId] = useState<string | null>(null);
 
-  // Customer's Existing Complaints
-  const [myComplaints, setMyComplaints] = useState<any[]>([]);
-  const [isLoadingComplaints, setIsLoadingComplaints] = useState(false);
-  const [expandedComplaintId, setExpandedComplaintId] = useState<string | null>(null);
-  const [replyTextMap, setReplyTextMap] = useState<Record<string, string>>({});
-  const [isSendingReply, setIsSendingReply] = useState(false);
+  // Active Chat & Real Backend Ticket State
+  const [activeCategory, setActiveCategory] = useState<any>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [activeComplaintId, setActiveComplaintId] = useState<string | null>(null);
+  const [activeComplaint, setActiveComplaint] = useState<any>(initialComplaint || null);
+  const [customerTickets, setCustomerTickets] = useState<any[]>([]);
+  const [isLoadingTickets, setIsLoadingTickets] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [isResolvingAction, setIsResolvingAction] = useState(false);
 
-  // FAQ State
-  const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  // Item Selection Modal State
+  const [showItemModal, setShowItemModal] = useState(false);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [confirmedSelectedItems, setConfirmedSelectedItems] = useState<OrderItemEntry[]>([]);
 
-  // Fetch complaints on mount
-  useEffect(() => {
-    fetchCustomerComplaints();
-  }, [customerProfile?.id]);
+  // Photo Options Bottom Sheet State
+  const [showPhotoOptionsModal, setShowPhotoOptionsModal] = useState(false);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
-  const fetchCustomerComplaints = async () => {
-    const custId = customerProfile?.id;
-    if (!custId) return;
-    setIsLoadingComplaints(true);
+  const formatTimestamp = (dateVal?: any) => {
+    const d = dateVal ? new Date(dateVal) : new Date();
+    const targetDate = isNaN(d.getTime()) ? new Date() : d;
+    let hours = targetDate.getHours();
+    const minutes = targetDate.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    const strMinutes = minutes < 10 ? `0${minutes}` : `${minutes}`;
+    const strHours = hours < 10 ? `0${hours}` : `${hours}`;
+    return `${strHours}:${strMinutes} ${ampm}`;
+  };
+
+  const formatSenderLabel = (senderType?: string, senderName?: string) => {
+    const t = String(senderType || '').toUpperCase();
+    if (t === 'RESTAURANT') return senderName ? `Restaurant · ${senderName}` : 'Restaurant Partner';
+    if (t === 'RIDER') return senderName ? `Delivery Partner · ${senderName}` : 'Delivery Partner';
+    if (t === 'MYQURO_SUPPORT') return senderName || 'MyQuro Support';
+    return senderName || 'Support';
+  };
+
+  const applyBackendComplaintToChat = (currentComp: any, catOverride?: any) => {
+    if (!currentComp) return;
+    setActiveComplaint(currentComp);
+    setActiveComplaintId(currentComp.id);
+
+    if (catOverride) {
+      setActiveCategory(catOverride);
+    } else if (!activeCategory) {
+      setActiveCategory({
+        id: currentComp.category || 'general',
+        title: currentComp.reason || currentComp.categoryLabel || 'Order Dispute',
+        botIntro: `Complaint #${currentComp.id} · ${currentComp.status}`,
+      });
+    }
+
+    const rawMsgs = Array.isArray(currentComp.messages)
+      ? currentComp.messages
+      : typeof currentComp.messages === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(currentComp.messages || '[]');
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+
+    const mapped: ChatMessage[] = rawMsgs.map((m: any, idx: number) => {
+      const normalizedType = String(m.senderType || '').toUpperCase();
+      const isUser =
+        normalizedType === 'CUSTOMER' ||
+        (Boolean(customerProfile?.id) && m.senderId === customerProfile?.id && !normalizedType);
+
+      return {
+        id: m.id || `db_msg_${idx}`,
+        sender: isUser ? 'user' : 'support',
+        senderType: (normalizedType || (isUser ? 'CUSTOMER' : 'MYQURO_SUPPORT')) as any,
+        senderName: m.senderName,
+        text: m.message || '',
+        timestamp: formatTimestamp(m.timestamp),
+        imageUri: m.attachmentUrl || undefined,
+      };
+    });
+
+    const evidenceList = Array.isArray(currentComp.evidence)
+      ? currentComp.evidence
+      : typeof currentComp.evidence === 'string'
+      ? (() => {
+          try {
+            return JSON.parse(currentComp.evidence || '[]');
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+
+    const msgImageUris = mapped.filter((x) => x.imageUri).map((x) => x.imageUri);
+    evidenceList.forEach((uri: string, i: number) => {
+      if (uri && !msgImageUris.includes(uri)) {
+        mapped.push({
+          id: `evid_${i}_${currentComp.id}`,
+          sender: 'user',
+          senderType: 'CUSTOMER',
+          senderName: currentComp.customerName || customerProfile?.name || 'Customer',
+          text: 'Uploaded photo evidence',
+          timestamp: formatTimestamp(currentComp.createdAt),
+          imageUri: uri,
+        });
+      }
+    });
+
+    if (mapped.length === 0) {
+      mapped.push({
+        id: `msg_db_init_${currentComp.id}`,
+        sender: 'user',
+        senderType: 'CUSTOMER',
+        text: currentComp.reason || currentComp.description || 'Support Ticket',
+        timestamp: formatTimestamp(currentComp.createdAt),
+      });
+    }
+
+    setChatMessages(mapped);
+  };
+
+  // Fetch customer's real tickets from PostgreSQL
+  const fetchCustomerTickets = async () => {
+    const cid = customerProfile?.id;
+    if (!cid) {
+      setCustomerTickets([]);
+      return;
+    }
     try {
-      const res = await fetch(`${BACKEND_URL}/api/complaints/customer/${custId}`);
+      setIsLoadingTickets(true);
+      const res = await fetch(`${BACKEND_URL}/api/complaints/customer/${encodeURIComponent(cid)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.complaints && Array.isArray(data.complaints)) {
-          setMyComplaints(data.complaints);
+        if (data.success && Array.isArray(data.complaints)) {
+          setCustomerTickets(data.complaints);
         }
       }
     } catch (err) {
-      console.warn('[HelpSubView] Error fetching customer complaints:', err);
+      console.warn('Could not load customer support tickets:', err);
     } finally {
-      setIsLoadingComplaints(false);
+      setIsLoadingTickets(false);
     }
   };
 
-  const handleSubmitComplaint = async () => {
-    if (!reason.trim()) {
-      Alert.alert('Reason Required', 'Please select or enter the primary issue reason.');
-      return;
+  useEffect(() => {
+    if (viewMode === 'CATEGORIES' && !initialComplaint) {
+      fetchCustomerTickets();
     }
-    if (!description.trim()) {
-      Alert.alert('Description Required', 'Please describe what went wrong so the kitchen can resolve it.');
-      return;
+  }, [viewMode, customerProfile?.id, initialComplaint?.id]);
+
+  // Load initial complaint from database when opened from Order Details
+  useEffect(() => {
+    if (initialComplaint) {
+      loadComplaintData(initialComplaint);
+    }
+  }, [initialComplaint?.id]);
+
+  const loadComplaintData = async (comp: any) => {
+    if (!comp) return;
+    setViewMode('CHAT');
+    applyBackendComplaintToChat(comp, {
+      id: comp.category || 'general',
+      title: comp.reason || comp.categoryLabel || 'Order Dispute',
+      botIntro: `Complaint #${comp.id} · ${comp.status}`,
+    });
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/complaints/${comp.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.complaint) {
+          applyBackendComplaintToChat(data.complaint, {
+            id: data.complaint.category || 'general',
+            title: data.complaint.reason || data.complaint.categoryLabel || 'Order Dispute',
+            botIntro: `Complaint #${data.complaint.id} · ${data.complaint.status}`,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch latest complaint details:', e);
+    }
+  };
+
+  // Real-time background polling for restaurant/rider/support updates when chat is open
+  useEffect(() => {
+    if (viewMode !== 'CHAT' || !activeComplaintId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/complaints/${activeComplaintId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.complaint) {
+            applyBackendComplaintToChat(data.complaint);
+          }
+        }
+      } catch {
+        // Silent background refresh; next tick retries cleanly
+      }
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [viewMode, activeComplaintId]);
+
+  // Parse real items from selected order (zero mock fallback)
+  const orderItems: OrderItemEntry[] = React.useMemo(() => {
+    if (!selectedOrder) return [];
+    let rawItems: any[] = [];
+    if (Array.isArray(selectedOrder.items)) {
+      rawItems = selectedOrder.items;
+    } else if (typeof selectedOrder.items === 'string') {
+      try {
+        const parsed = JSON.parse(selectedOrder.items);
+        if (Array.isArray(parsed)) rawItems = parsed;
+      } catch {}
     }
 
-    setIsSubmitting(true);
-    try {
-      const body = {
-        ticketType: 'order_complaint',
-        orderId: selectedOrder?.id || selectedOrder?.orderId || null,
-        orderNumber: selectedOrder?.orderNumber || (selectedOrder?.id ? `#${selectedOrder.id.slice(-5).toUpperCase()}` : null),
-        customerId: customerProfile?.id || 'CUST',
-        customerName: customerProfile?.name || 'Customer',
-        customerPhone: customerProfile?.phone || null,
-        customerAvatar: customerProfile?.avatar || null,
-        outletId: selectedOrder?.restaurantId || selectedOrder?.outletId || null,
-        outletName: selectedOrder?.restaurantName || selectedOrder?.outletName || 'MyQuro Outlet',
-        orderAmount: selectedOrder?.grandTotal || selectedOrder?.totalAmount || 0,
-        category,
-        categoryLabel: CATEGORIES.find((c) => c.key === category)?.label || category,
-        reason: reason.trim(),
-        description: description.trim(),
-        relatedItem: relatedItem.trim() || undefined,
-        initialMessage: description.trim(),
+    if (rawItems.length === 0) return [];
+
+    return rawItems.map((it: any, index: number) => {
+      const name = it.name || it.itemName || it.title || `Item ${index + 1}`;
+      const qty = Number(it.quantity || it.qty || 1);
+      const isVeg =
+        it.isVeg !== undefined
+          ? Boolean(it.isVeg)
+          : !name.toLowerCase().includes('chicken') &&
+            !name.toLowerCase().includes('mutton') &&
+            !name.toLowerCase().includes('egg') &&
+            !name.toLowerCase().includes('fish');
+      const variant = it.variantName || it.variant || (it.extras && it.extras.length > 0 ? '1 variant' : undefined);
+      return {
+        id: String(it.id || it.itemId || `it_${index}`),
+        name,
+        variant,
+        quantity: qty,
+        isVeg,
+        price: it.price || it.unitPrice,
       };
+    });
+  }, [selectedOrder]);
+
+  const toggleAccordion = (catId: string) => {
+    setExpandedCategoryId((prev) => (prev === catId ? null : catId));
+  };
+
+  // Register real ticket in PostgreSQL via /api/complaints
+  const registerBackendComplaint = async (cat: any, items: OrderItemEntry[] = []) => {
+    try {
+      const itemsText = items.map((it) => `${it.quantity} x ${it.name}`).join(', ');
+      const customerId = customerProfile?.id;
+      if (!customerId) {
+        Alert.alert('Sign In Required', 'Please sign in to submit and track support requests.');
+        return null;
+      }
 
       const res = await fetch(`${BACKEND_URL}/api/complaints`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          ticketType: 'order_complaint',
+          orderId: selectedOrder?.id || selectedOrder?.orderId || null,
+          orderNumber:
+            selectedOrder?.orderNumber ||
+            (selectedOrder?.id ? `#${String(selectedOrder.id).replace(/^order_/, '')}` : null),
+          customerId,
+          customerName: customerProfile?.name || 'Customer',
+          customerPhone: customerProfile?.phone || null,
+          customerAvatar: customerProfile?.avatar || null,
+          outletId: selectedOrder?.restaurantId || selectedOrder?.outletId || null,
+          outletName: selectedOrder?.restaurantName || selectedOrder?.outletName || null,
+          riderId: selectedOrder?.riderId || selectedOrder?.delivery?.riderId || null,
+          riderName: selectedOrder?.riderName || selectedOrder?.delivery?.riderName || null,
+          riderPhone: selectedOrder?.riderPhone || selectedOrder?.delivery?.riderPhone || null,
+          orderAmount: selectedOrder?.grandTotal || selectedOrder?.totalAmount || 0,
+          category:
+            cat?.type === 'quality'
+              ? 'FOOD_QUALITY'
+              : cat?.type === 'missing' || cat?.type === 'wrong' || cat?.type === 'spillage'
+              ? 'ORDER_PACKAGING'
+              : cat?.type === 'delivery'
+              ? 'DELIVERY_DELAY'
+              : 'OTHER',
+          categoryLabel: cat?.title || 'Order Issue',
+          reason: cat?.title || 'Order Support',
+          description: itemsText ? `${cat?.title}: ${itemsText}` : cat?.subtitle || cat?.title || 'Order Support Request',
+          relatedItem: itemsText || undefined,
+          initialMessage: itemsText ? `${cat?.title} — Affected items: ${itemsText}` : cat?.title || 'Order Support Request',
+          senderType: 'CUSTOMER',
+        }),
       });
 
       const data = await res.json();
-      if (res.ok && data.complaint) {
-        setSubmissionSuccess(data.complaint.id);
-        setDescription('');
-        setReason('');
-        setRelatedItem('');
-        fetchCustomerComplaints();
-      } else {
-        Alert.alert('Error', data.error || 'Failed to submit complaint. Please try again.');
+      if (!res.ok || !data?.success || !data?.complaint?.id) {
+        Alert.alert('Support Error', data?.error || 'Could not create your support ticket. Please try again.');
+        return null;
       }
-    } catch (err) {
-      console.error('[HelpSubView] Error creating complaint:', err);
-      Alert.alert('Connection Error', 'Could not reach support server. Please check your network.');
-    } finally {
-      setIsSubmitting(false);
+
+      applyBackendComplaintToChat(data.complaint, cat);
+      return data.complaint;
+    } catch (err: any) {
+      console.warn('Could not register complaint to backend:', err);
+      Alert.alert('Network Error', 'Could not reach support servers. Please check your connection and try again.');
+      return null;
     }
   };
 
-  const handleSendReply = async (complaintId: string) => {
-    const text = replyTextMap[complaintId]?.trim();
-    if (!text) return;
+  // Start chat with selected issue category
+  const handleStartChat = async (cat: any) => {
+    setActiveCategory(cat);
+    setActiveComplaint(null);
+    setActiveComplaintId(null);
+    setSelectedItemIds([]);
+    setConfirmedSelectedItems([]);
+    const timeStr = formatTimestamp();
 
-    setIsSendingReply(true);
+    const needsSelection = Boolean(cat.needsItemSelection && orderItems.length > 0);
+    if (needsSelection) {
+      setChatMessages([
+        {
+          id: `msg_user_${Date.now()}`,
+          sender: 'user',
+          senderType: 'CUSTOMER',
+          text: cat.title,
+          timestamp: timeStr,
+        },
+        {
+          id: `msg_bot_prompt_${Date.now()}`,
+          sender: 'support',
+          senderType: 'MYQURO_SUPPORT',
+          senderName: 'MyQuro Support',
+          text: cat.itemPrompt || 'Select the affected item(s) from your order below.',
+          timestamp: timeStr,
+          actionCard: 'SELECT_ITEMS',
+        },
+      ]);
+      setViewMode('CHAT');
+      return;
+    }
+
+    // Immediate real complaint creation for non-item or general queries
+    setViewMode('CHAT');
+    setChatMessages([
+      {
+        id: `msg_user_${Date.now()}`,
+        sender: 'user',
+        senderType: 'CUSTOMER',
+        text: cat.title,
+        timestamp: timeStr,
+      },
+    ]);
+    await registerBackendComplaint(cat, []);
+  };
+
+  // Submit selected items from modal & register real DB complaint
+  const handleConfirmItemSelection = async () => {
+    if (selectedItemIds.length === 0) return;
+    const selectedObjs = orderItems.filter((it) => selectedItemIds.includes(it.id));
+    setConfirmedSelectedItems(selectedObjs);
+    setShowItemModal(false);
+
+    const created = await registerBackendComplaint(activeCategory, selectedObjs);
+    if (created?.id) {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `msg_photo_prompt_${Date.now()}`,
+          sender: 'support',
+          senderType: 'MYQURO_SUPPORT',
+          senderName: 'MyQuro Support',
+          text: `Complaint #${created.id} is registered with the restaurant & delivery team. Upload a photo of the affected item(s) if available.`,
+          timestamp: formatTimestamp(),
+          actionCard: 'ADD_PHOTOS',
+        },
+      ]);
+    }
+  };
+
+  // Shared helper to upload selected photo as cross-device data URI to DB
+  const pickPhotoAndUpload = async (source: 'camera' | 'gallery') => {
+    setShowPhotoOptionsModal(false);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/complaints/${complaintId}/message`, {
+      setIsProcessingPhoto(true);
+      const perm =
+        source === 'camera'
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!perm.granted) {
+        setIsProcessingPhoto(false);
+        Alert.alert(
+          source === 'camera' ? 'Camera Access Required' : 'Photo Library Access Required',
+          `Please allow ${source === 'camera' ? 'camera' : 'photo library'} access in your device settings to attach photo proof.`,
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      const pickerOptions: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.45,
+        base64: true,
+      };
+      const result =
+        source === 'camera'
+          ? await ImagePicker.launchCameraAsync(pickerOptions)
+          : await ImagePicker.launchImageLibraryAsync(pickerOptions);
+
+      if (result.canceled || !result.assets?.length) {
+        setIsProcessingPhoto(false);
+        return;
+      }
+
+      const asset = result.assets[0];
+      const photoDataUri = asset.base64
+        ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`
+        : asset.uri;
+
+      let targetId = activeComplaintId;
+      if (!targetId) {
+        const created = await registerBackendComplaint(activeCategory, confirmedSelectedItems);
+        targetId = created?.id || null;
+      }
+
+      if (!targetId) {
+        setIsProcessingPhoto(false);
+        return;
+      }
+
+      const res = await fetch(`${BACKEND_URL}/api/complaints/${targetId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          senderId: customerProfile?.id || 'CUST',
+          senderId: customerProfile?.id,
           senderName: customerProfile?.name || 'Customer',
           senderType: 'CUSTOMER',
-          message: text,
+          message: 'Attached photo evidence',
+          attachmentUrl: photoDataUri,
         }),
       });
+      const data = await res.json();
+      setIsProcessingPhoto(false);
 
-      if (res.ok) {
-        setReplyTextMap((prev) => ({ ...prev, [complaintId]: '' }));
-        fetchCustomerComplaints();
-      } else {
-        Alert.alert('Error', 'Failed to send message.');
+      if (!res.ok || !data?.success || !data?.complaint) {
+        Alert.alert('Upload Failed', data?.error || 'Could not upload photo evidence to server.');
+        return;
       }
-    } catch (err) {
-      console.error('Error replying to complaint:', err);
-    } finally {
-      setIsSendingReply(false);
+
+      applyBackendComplaintToChat(data.complaint);
+    } catch (err: any) {
+      setIsProcessingPhoto(false);
+      console.warn(`Error capturing/picking photo (${source}):`, err);
+      Alert.alert(
+        source === 'camera' ? 'Camera Error' : 'Gallery Error',
+        `Unable to open ${source === 'camera' ? 'camera' : 'photo library'}.`
+      );
     }
   };
 
-  const handleAcceptResolution = async (complaintId: string) => {
+  // Send live message to backend DB
+  const handleSendMessage = async () => {
+    const userText = inputText.trim();
+    if (!userText || isSending) return;
+
+    setInputText('');
+    setIsSending(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/complaints/${complaintId}/accept-resolution`, {
+      let targetId = activeComplaintId;
+      if (!targetId) {
+        const created = await registerBackendComplaint(activeCategory, confirmedSelectedItems);
+        targetId = created?.id || null;
+      }
+
+      if (!targetId) {
+        setInputText(userText);
+        setIsSending(false);
+        return;
+      }
+
+      const res = await fetch(`${BACKEND_URL}/api/complaints/${targetId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          feedback: 'Customer accepted proposed resolution.',
-          user: customerProfile?.name || 'Customer',
+          senderId: customerProfile?.id,
+          senderName: customerProfile?.name || 'Customer',
+          senderType: 'CUSTOMER',
+          message: userText,
         }),
       });
-      if (res.ok) {
-        Alert.alert('Resolution Accepted 🎉', 'Thank you! The resolution has been applied to your account.');
-        fetchCustomerComplaints();
+      const data = await res.json();
+
+      if (!res.ok || !data?.success || !data?.complaint) {
+        setInputText(userText);
+        Alert.alert('Message Not Sent', data?.error || 'Could not send message. Please try again.');
+        setIsSending(false);
+        return;
       }
+
+      applyBackendComplaintToChat(data.complaint);
     } catch (err) {
-      Alert.alert('Error', 'Could not accept resolution.');
+      setInputText(userText);
+      Alert.alert('Network Error', 'Could not send message. Please check your connection.');
+    } finally {
+      setIsSending(false);
     }
   };
 
-  const handleRejectResolution = async (complaintId: string) => {
-    Alert.prompt
-      ? Alert.prompt(
-          'Request Review',
-          'Please state what further assistance you require:',
-          async (text) => {
-            if (text) {
-              await fetch(`${BACKEND_URL}/api/complaints/${complaintId}/reject-resolution`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  reason: text,
-                  user: customerProfile?.name || 'Customer',
-                }),
-              });
-              fetchCustomerComplaints();
-            }
-          }
-        )
-      : Alert.alert('Request Review', 'Would you like to escalate this complaint to Central Support?', [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Escalate',
-            onPress: async () => {
-              await fetch(`${BACKEND_URL}/api/complaints/${complaintId}/reject-resolution`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  reason: 'Customer requested senior review.',
-                  user: customerProfile?.name || 'Customer',
-                }),
-              });
-              fetchCustomerComplaints();
-            },
-          },
-        ]);
-  };
+  const handleResolutionDecision = async (decision: 'accept' | 'reject') => {
+    if (!activeComplaintId || isResolvingAction) return;
+    try {
+      setIsResolvingAction(true);
+      const endpoint = decision === 'accept' ? 'accept-resolution' : 'reject-resolution';
+      const payload =
+        decision === 'accept'
+          ? { feedback: 'Customer accepted resolution', user: customerProfile?.name || 'Customer' }
+          : { reason: 'Customer requested escalation for further review', user: customerProfile?.name || 'Customer' };
 
-  const makeCall = () => {
-    Linking.openURL('tel:+917061903429').catch(() => {
-      Alert.alert('Call Failed', 'Unable to initiate call.');
-    });
-  };
-
-  const sendEmail = () => {
-    Linking.openURL('mailto:info.myquro@gmail.com?subject=MyQuro%20Customer%20Support').catch(() => {
-      Alert.alert('Email Error', 'Support Email: info.myquro@gmail.com');
-    });
-  };
-
-  const filteredFAQs = FAQS.filter(
-    (faq) =>
-      faq.q.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      faq.a.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'OPEN':
-        return { label: 'Open', color: '#EF4444', bg: 'rgba(239, 68, 68, 0.15)' };
-      case 'IN_PROGRESS':
-        return { label: 'In Progress', color: '#38BDF8', bg: 'rgba(56, 189, 248, 0.15)' };
-      case 'AWAITING_CUSTOMER':
-        return { label: 'Resolution Ready', color: '#F2CA50', bg: 'rgba(242, 202, 80, 0.18)' };
-      case 'RESOLVED':
-        return { label: 'Resolved', color: '#10B981', bg: 'rgba(16, 185, 129, 0.15)' };
-      case 'ESCALATED':
-        return { label: 'Under Review', color: '#F97316', bg: 'rgba(249, 115, 22, 0.15)' };
-      default:
-        return { label: status, color: '#D4AF37', bg: 'rgba(212, 175, 55, 0.15)' };
+      const res = await fetch(`${BACKEND_URL}/api/complaints/${activeComplaintId}/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success || !data?.complaint) {
+        Alert.alert('Update Failed', data?.error || 'Could not update resolution response.');
+        return;
+      }
+      applyBackendComplaintToChat(data.complaint);
+    } catch {
+      Alert.alert('Network Error', 'Could not submit your response. Please try again.');
+    } finally {
+      setIsResolvingAction(false);
     }
+  };
+
+  const toggleItemCheckbox = (itemId: string) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
+    );
   };
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* ───────────────── TOP HEADER ───────────────── */}
       <View style={[styles.header, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
-        <TouchableOpacity onPress={onBack} style={styles.headerBackBtn} activeOpacity={0.8}>
-          <ArrowLeft size={22} color="#EAE1D4" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Help & Complaints</Text>
-        <TouchableOpacity onPress={fetchCustomerComplaints} style={styles.headerBackBtn} activeOpacity={0.8}>
-          <RotateCcw size={18} color="#F2CA50" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Tabs */}
-      <View style={styles.tabBar}>
         <TouchableOpacity
-          style={[styles.tabItem, activeTab === 'complaints' && styles.tabItemActive]}
-          onPress={() => setActiveTab('complaints')}
+          onPress={() => {
+            if (viewMode === 'CHAT' && !initialComplaint) {
+              setViewMode('CATEGORIES');
+            } else {
+              onBack();
+            }
+          }}
+          style={styles.backBtn}
           activeOpacity={0.8}
         >
-          <Text style={[styles.tabText, activeTab === 'complaints' && styles.tabTextActive]}>
-            Order Complaints {myComplaints.length > 0 ? `(${myComplaints.length})` : ''}
-          </Text>
+          <ArrowLeft size={22} color="#F2CA50" />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabItem, activeTab === 'faq' && styles.tabItemActive]}
-          onPress={() => setActiveTab('faq')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.tabText, activeTab === 'faq' && styles.tabTextActive]}>
-            FAQs & Helpdesk
-          </Text>
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>
+          {viewMode === 'CHAT' ? 'Support Chat' : 'Help & Support'}
+        </Text>
+        <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: getSafeBottomPadding(insets.bottom, 40) }}
-      >
-        {activeTab === 'complaints' ? (
-          <View style={styles.contentWrap}>
-            {/* SUCCESS BANNER */}
-            {submissionSuccess && (
-              <View style={styles.successBanner}>
-                <CheckCircle2 size={22} color="#10B981" />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.successTitle}>Complaint Registered #{submissionSuccess}</Text>
-                  <Text style={styles.successSubtitle}>
-                    The restaurant manager has been notified and will resolve your issue within 15–30 mins.
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={() => setSubmissionSuccess(null)}>
-                  <X size={18} color="#8A8A8A" />
-                </TouchableOpacity>
-              </View>
-            )}
+      {/* ───────────────── CATEGORIES & REAL TICKETS LIST ───────────────── */}
+      {viewMode === 'CATEGORIES' ? (
+        <ScrollView
+          style={styles.scrollArea}
+          contentContainerStyle={{ paddingBottom: getSafeBottomPadding(insets.bottom, 40) }}
+          showsVerticalScrollIndicator={false}
+        >
 
-            {/* MY ACTIVE COMPLAINTS SECTION */}
-            {myComplaints.length > 0 && (
-              <View style={styles.sectionBlock}>
-                <Text style={styles.sectionTitle}>MY RAISED TICKETS</Text>
-                {isLoadingComplaints ? (
-                  <ActivityIndicator size="small" color="#F2CA50" style={{ marginVertical: 12 }} />
-                ) : (
-                  myComplaints.map((item) => {
-                    const badge = getStatusBadge(item.status);
-                    const isExpanded = expandedComplaintId === item.id;
-                    const messages = Array.isArray(item.messages) ? item.messages : [];
-                    const resolution = item.resolution;
+          {/* MAIN ISSUE ACCORDION CARD */}
+          <View style={styles.accordionContainerCard}>
+            {CATEGORY_ITEMS.map((item, index) => {
+              const isExpanded = expandedCategoryId === item.id;
+              const isLast = index === CATEGORY_ITEMS.length - 1;
 
-                    return (
-                      <View key={item.id} style={styles.complaintCard}>
-                        {/* Header Row */}
-                        <TouchableOpacity
-                          style={styles.complaintCardHeader}
-                          activeOpacity={0.85}
-                          onPress={() => setExpandedComplaintId(isExpanded ? null : item.id)}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <View style={styles.ticketIdRow}>
-                              <Text style={styles.ticketIdText}>{item.id}</Text>
-                              <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-                                <Text style={[styles.statusBadgeText, { color: badge.color }]}>
-                                  {badge.label}
-                                </Text>
-                              </View>
-                            </View>
-                            <Text style={styles.ticketOutletText}>
-                              {item.outletName || 'Restaurant Partner'} · {item.orderNumber || (item.orderId ? `#${item.orderId.slice(-5).toUpperCase()}` : `#${item.id}`)}
-                            </Text>
-                            <Text style={styles.ticketReasonText}>{item.reason}</Text>
-                          </View>
-                          <ChevronRight
-                            size={18}
-                            color="#F2CA50"
-                            style={{ transform: [{ rotate: isExpanded ? '90deg' : '0deg' }] }}
-                          />
-                        </TouchableOpacity>
-
-                        {/* Expandable Section */}
-                        {isExpanded && (
-                          <View style={styles.complaintCardBody}>
-                            <View style={styles.complaintDivider} />
-                            <Text style={styles.detailLabel}>Details</Text>
-                            <Text style={styles.detailDesc}>{item.description}</Text>
-                            {item.relatedItem && (
-                              <Text style={styles.detailItemText}>Item: {item.relatedItem}</Text>
-                            )}
-
-                            {/* PROPOSED RESOLUTION CARD */}
-                            {resolution && (
-                              <View style={styles.resolutionBox}>
-                                <View style={styles.resolutionHeader}>
-                                  <ShieldAlert size={18} color="#F2CA50" />
-                                  <Text style={styles.resolutionTitle}>Proposed Resolution</Text>
-                                </View>
-                                <Text style={styles.resolutionTypeBadge}>
-                                  Type: {resolution.resolutionType}
-                                  {resolution.refundAmount ? ` (₹${resolution.refundAmount})` : ''}
-                                </Text>
-                                <Text style={styles.resolutionActionText}>{resolution.actionTaken}</Text>
-                                {resolution.note ? (
-                                  <Text style={styles.resolutionNoteText}>Note: {resolution.note}</Text>
-                                ) : null}
-
-                                {item.status === 'AWAITING_CUSTOMER' && (
-                                  <View style={styles.resolutionActionsRow}>
-                                    <TouchableOpacity
-                                      style={styles.acceptBtn}
-                                      onPress={() => handleAcceptResolution(item.id)}
-                                      activeOpacity={0.85}
-                                    >
-                                      <CheckCircle2 size={16} color="#000000" style={{ marginRight: 6 }} />
-                                      <Text style={styles.acceptBtnText}>Accept</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                      style={styles.rejectBtn}
-                                      onPress={() => handleRejectResolution(item.id)}
-                                      activeOpacity={0.85}
-                                    >
-                                      <Text style={styles.rejectBtnText}>Need More Help</Text>
-                                    </TouchableOpacity>
-                                  </View>
-                                )}
-                              </View>
-                            )}
-
-                            {/* MESSAGES THREAD */}
-                            {messages.length > 0 && (
-                              <View style={styles.chatThread}>
-                                <Text style={styles.detailLabel}>Activity & Messages</Text>
-                                {messages.map((m: any, mIdx: number) => {
-                                  const isCustomer = m.senderType === 'CUSTOMER';
-                                  return (
-                                    <View
-                                      key={m.id || mIdx}
-                                      style={[
-                                        styles.chatBubble,
-                                        isCustomer ? styles.chatBubbleCustomer : styles.chatBubbleStaff,
-                                      ]}
-                                    >
-                                      <Text style={styles.chatSenderName}>
-                                        {m.senderName || (isCustomer ? 'You' : 'Restaurant Support')}
-                                      </Text>
-                                      <Text style={styles.chatMessageText}>{m.message}</Text>
-                                    </View>
-                                  );
-                                })}
-                              </View>
-                            )}
-
-                            {/* REPLY INPUT */}
-                            {item.status !== 'RESOLVED' && (
-                              <View style={styles.replyRow}>
-                                <TextInput
-                                  placeholder="Send a reply to restaurant..."
-                                  placeholderTextColor="#666"
-                                  value={replyTextMap[item.id] || ''}
-                                  onChangeText={(txt) => setReplyTextMap((prev) => ({ ...prev, [item.id]: txt }))}
-                                  style={styles.replyInput}
-                                />
-                                <TouchableOpacity
-                                  style={styles.sendReplyBtn}
-                                  onPress={() => handleSendReply(item.id)}
-                                  disabled={isSendingReply}
-                                  activeOpacity={0.85}
-                                >
-                                  {isSendingReply ? (
-                                    <ActivityIndicator size="small" color="#000" />
-                                  ) : (
-                                    <Send size={16} color="#000000" />
-                                  )}
-                                </TouchableOpacity>
-                              </View>
-                            )}
-                          </View>
-                        )}
-                      </View>
-                    );
-                  })
-                )}
-              </View>
-            )}
-
-            {/* REPORT NEW ISSUE CARD */}
-            <View style={styles.sectionBlock}>
-              <Text style={styles.sectionTitle}>REPORT AN ISSUE WITH AN ORDER</Text>
-
-              {/* Selected Order Box */}
-              <View style={styles.selectedOrderCard}>
-                {selectedOrder ? (
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.orderCardLabel}>SELECTED ORDER</Text>
-                    <Text style={styles.orderCardRestaurant}>
-                      {selectedOrder.restaurantName || selectedOrder.outletName || 'Restaurant Order'}
-                    </Text>
-                    <Text style={styles.orderCardMeta}>
-                      {selectedOrder.orderNumber || `#${selectedOrder.id ? selectedOrder.id.slice(-5).toUpperCase() : 'ORDER'}`}
-                      {selectedOrder.grandTotal || selectedOrder.totalAmount ? ` · ₹${selectedOrder.grandTotal || selectedOrder.totalAmount}` : ''}
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.orderCardLabel}>ORDER NOT SELECTED</Text>
-                    <Text style={styles.orderCardRestaurant}>General Support Request</Text>
-                    <Text style={styles.orderCardMeta}>
-                      {pastOrders.length > 0 ? 'Select an order from your history' : 'No past orders on this account'}
-                    </Text>
-                  </View>
-                )}
-                {pastOrders.length > 0 && (
+              return (
+                <View key={item.id} style={styles.accordionItemWrapper}>
                   <TouchableOpacity
-                    style={styles.changeOrderBtn}
-                    onPress={() => setShowOrderPicker(true)}
-                    activeOpacity={0.8}
+                    style={styles.accordionHeaderRow}
+                    onPress={() => toggleAccordion(item.id)}
+                    activeOpacity={0.85}
                   >
-                    <Text style={styles.changeOrderText}>{selectedOrder ? 'Change' : 'Select Order'}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* Category Picker */}
-              <Text style={styles.formLabel}>ISSUE CATEGORY</Text>
-              <View style={styles.categoryGrid}>
-                {CATEGORIES.map((cat) => {
-                  const isSelected = category === cat.key;
-                  return (
-                    <TouchableOpacity
-                      key={cat.key}
-                      style={[styles.categoryChip, isSelected && styles.categoryChipActive]}
-                      onPress={() => {
-                        setCategory(cat.key);
-                        setReason('');
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.categoryIcon}>{cat.icon}</Text>
-                      <Text style={[styles.categoryChipText, isSelected && styles.categoryChipTextActive]}>
-                        {cat.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {/* Preset Reason Quick Buttons */}
-              <Text style={styles.formLabel}>QUICK SELECT REASON</Text>
-              <View style={styles.presetReasonsContainer}>
-                {(PRESET_REASONS[category] || []).map((preset, pIdx) => {
-                  const isSelected = reason === preset;
-                  return (
-                    <TouchableOpacity
-                      key={pIdx}
-                      style={[styles.presetReasonChip, isSelected && styles.presetReasonChipActive]}
-                      onPress={() => setReason(preset)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[styles.presetReasonText, isSelected && styles.presetReasonTextActive]}>
-                        {preset}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {/* Affected Item (Optional) */}
-              <Text style={styles.formLabel}>AFFECTED ITEM (OPTIONAL)</Text>
-              <TextInput
-                placeholder="e.g. Butter Naan, Paneer Butter Masala"
-                placeholderTextColor="#666"
-                value={relatedItem}
-                onChangeText={setRelatedItem}
-                style={styles.textInputBox}
-              />
-
-              {/* Detailed Description */}
-              <Text style={styles.formLabel}>DESCRIBE THE ISSUE</Text>
-              <TextInput
-                placeholder="Please describe what happened in detail..."
-                placeholderTextColor="#666"
-                value={description}
-                onChangeText={setDescription}
-                multiline
-                numberOfLines={3}
-                style={[styles.textInputBox, styles.textAreaBox]}
-              />
-
-              {/* Submit Button */}
-              <TouchableOpacity
-                style={styles.submitComplaintBtn}
-                onPress={handleSubmitComplaint}
-                disabled={isSubmitting}
-                activeOpacity={0.85}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator size="small" color="#000000" />
-                ) : (
-                  <>
-                    <FileText size={18} color="#000000" style={{ marginRight: 8 }} />
-                    <Text style={styles.submitComplaintBtnText}>Submit Complaint</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          /* FAQS & HELPDESK TAB */
-          <View style={styles.contentWrap}>
-            {/* Branding Row */}
-            <View style={styles.favLogoRow}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={styles.favLogoMy}>My</Text>
-                <View style={styles.favQuroCropContainer}>
-                  <Image source={favQuroImg} style={styles.favQuroCropImage} resizeMode="stretch" />
-                </View>
-              </View>
-            </View>
-
-            {/* Sparkle Tagline */}
-            <View style={styles.sparkleRow}>
-              <Svg width={24} height={24} viewBox="0 0 12.8333 12.8333" fill="none">
-                <Path
-                  d="M10.5 4.66667L9.77083 3.0625L8.16667 2.33333L9.77083 1.60417L10.5 0L11.2292 1.60417L12.8333 2.33333L11.2292 3.0625L10.5 4.66667V4.66667M10.5 12.8333L9.77083 11.2292L8.16667 10.5L9.77083 9.77083L10.5 8.16667L11.2292 9.77083L12.8333 10.5L11.2292 11.2292L10.5 12.8333V12.8333M4.66667 11.0833L3.20833 7.875L0 6.41667L3.20833 4.95833L4.66667 1.75L6.125 4.95833L9.33333 6.41667L6.125 7.875L4.66667 11.0833V11.0833M4.66667 8.25417L5.25 7L6.50417 6.41667L5.25 5.83333L4.66667 4.57917L4.08333 5.83333L2.82917 6.41667L4.08333 7L4.66667 8.25417V8.25417M4.66667 6.41667V6.41667V6.41667V6.41667V6.41667V6.41667V6.41667V6.41667V6.41667V6.41667"
-                  fill="#D4AF37"
-                  fillOpacity={0.8}
-                />
-              </Svg>
-              <Text style={styles.sparkleTagline}>How can we assist you today?</Text>
-            </View>
-
-            {/* Search FAQ Input Bar */}
-            <View style={styles.searchBarContainer}>
-              <View style={styles.searchInputBox}>
-                <Search size={18} color="#deb853" style={{ marginRight: 10 }} />
-                <TextInput
-                  placeholder="Search help topics or FAQs..."
-                  placeholderTextColor="#9d9d9d"
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  style={styles.searchInputField}
-                />
-                {searchQuery.length > 0 && (
-                  <TouchableOpacity onPress={() => setSearchQuery('')}>
-                    <X size={16} color="#eae1d4" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {/* Quick Connect Cards */}
-            <Text style={styles.sectionHeading}>DIRECT HELPDESK</Text>
-            <View style={styles.supportCardsRow}>
-              <TouchableOpacity style={styles.supportCardBtn} onPress={makeCall} activeOpacity={0.85}>
-                <View style={styles.supportCardIconCircle}>
-                  <Phone size={20} color="#f2ca50" />
-                </View>
-                <Text style={styles.supportCardTitle}>Call Helpdesk</Text>
-                <Text style={styles.supportCardDesc}>Speak to our support representatives</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.supportCardBtn, styles.supportCardBtnDark]} onPress={sendEmail} activeOpacity={0.85}>
-                <View style={[styles.supportCardIconCircle, styles.supportCardIconCircleDark]}>
-                  <Mail size={20} color="#eae1d4" />
-                </View>
-                <Text style={[styles.supportCardTitle, styles.textWhite]}>Write Email</Text>
-                <Text style={styles.supportCardDesc}>Get responses directly to your inbox</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* FAQs List */}
-            <Text style={styles.sectionHeading}>FREQUENTLY ASKED QUESTIONS</Text>
-            <View style={styles.faqCardsContainer}>
-              {filteredFAQs.map((faq, index) => {
-                const isOpen = expandedFaq === index;
-                return (
-                  <View key={index} style={styles.faqPremiumCard}>
-                    <TouchableOpacity
-                      style={styles.faqQuestionRow}
-                      onPress={() => setExpandedFaq(isOpen ? null : index)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.faqQuestion}>{faq.q}</Text>
-                      <ChevronRight
-                        size={18}
-                        color="#deb853"
-                        style={{ transform: [{ rotate: isOpen ? '90deg' : '0deg' }] }}
-                      />
-                    </TouchableOpacity>
-                    {isOpen && (
-                      <View style={styles.faqAnswerContainer}>
-                        <View style={styles.faqAnswerDivider} />
-                        <Text style={styles.faqAnswer}>{faq.a}</Text>
-                      </View>
+                    <Text style={styles.accordionTitleText}>{item.title}</Text>
+                    {item.id === 'payment_billing' ? (
+                      <ChevronRight size={20} color="#F2CA50" />
+                    ) : isExpanded ? (
+                      <ChevronUp size={20} color="#F2CA50" />
+                    ) : (
+                      <ChevronDown size={20} color="#8A8A8A" />
                     )}
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        )}
+                  </TouchableOpacity>
 
-        {/* ORDER SELECTOR MODAL */}
-        <Modal
-          visible={showOrderPicker}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setShowOrderPicker(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.orderPickerSheet}>
-              <View style={styles.orderPickerHeader}>
-                <Text style={styles.orderPickerTitle}>Select Order</Text>
-                <TouchableOpacity onPress={() => setShowOrderPicker(false)}>
-                  <X size={20} color="#EAE1D4" />
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={{ maxHeight: 350 }}>
-                {pastOrders.map((ord, idx) => (
+                  {isExpanded && (
+                    <View style={styles.accordionExpandedBox}>
+                      <Text style={styles.accordionSubtitleText}>{item.subtitle}</Text>
+
+                      <TouchableOpacity
+                        style={styles.chatWithUsBtn}
+                        onPress={() => handleStartChat(item)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.chatWithUsBtnText}>CHAT WITH US</Text>
+                      </TouchableOpacity>
+
+                      <View style={styles.waitTimeBox}>
+                        <Text style={styles.waitTimeLabel}>Live Dispatch</Text>
+                        <Text style={styles.waitTimeGold}>Connected directly to restaurant &amp; delivery partner</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {!isLast && <View style={styles.accordionDivider} />}
+                </View>
+              );
+            })}
+          </View>
+
+          {/* REAL DATABASE SUPPORT TICKETS HISTORY */}
+          {(isLoadingTickets || customerTickets.length > 0) && (
+            <View style={styles.ticketListSection}>
+              <Text style={styles.ticketSectionHeading}>YOUR CONVERSATIONS</Text>
+              {isLoadingTickets && customerTickets.length === 0 ? (
+                <ActivityIndicator size="small" color="#F2CA50" style={{ marginVertical: 16 }} />
+              ) : (
+                customerTickets.map((t) => (
                   <TouchableOpacity
-                    key={ord.id || ord.orderId || idx}
-                    style={styles.orderPickerItem}
-                    onPress={() => {
-                      setSelectedOrder(ord);
-                      setShowOrderPicker(false);
-                    }}
-                    activeOpacity={0.8}
+                    key={t.id}
+                    style={styles.ticketRowCard}
+                    onPress={() => loadComplaintData(t)}
+                    activeOpacity={0.85}
                   >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.pickerItemRestName}>
-                        {ord.restaurantName || ord.outletName || 'Restaurant'}
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                      <Text style={styles.ticketRowTitle} numberOfLines={1}>
+                        {t.reason || t.categoryLabel || 'Support Ticket'}
                       </Text>
-                      <Text style={styles.pickerItemMeta}>
-                        {ord.orderNumber || (ord.id ? `#${ord.id.slice(-5).toUpperCase()}` : `Order #${idx + 1}`)} · ₹{ord.grandTotal || ord.totalAmount || 0}
+                      <Text style={styles.ticketRowMeta} numberOfLines={1}>
+                        {t.outletName ? `${t.outletName} · ` : ''}
+                        {t.orderNumber || `#${t.id}`}
                       </Text>
                     </View>
-                    <ChevronRight size={16} color="#F2CA50" />
+                    <View style={styles.statusPillBadge}>
+                      <Text style={styles.statusPillText}>{String(t.status || 'OPEN').replace(/_/g, ' ')}</Text>
+                    </View>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
+                ))
+              )}
             </View>
+          )}
+        </ScrollView>
+      ) : (
+        /* ───────────────── LIVE CONNECTED CHAT VIEW ───────────────── */
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          {/* Ticket Status & Photo Shortcut Bar */}
+          {activeComplaint && (
+            <View style={styles.ticketContextBanner}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={styles.ticketBannerTitle} numberOfLines={1}>
+                  #{activeComplaint.id}
+                  {activeComplaint.outletName ? ` · ${activeComplaint.outletName}` : ''}
+                </Text>
+                <Text style={styles.ticketBannerSub} numberOfLines={1}>
+                  Status: {String(activeComplaint.status || 'OPEN').replace(/_/g, ' ')}
+                </Text>
+              </View>
+              {!['RESOLVED', 'CLOSED'].includes(String(activeComplaint.status || '').toUpperCase()) && (
+                <TouchableOpacity
+                  style={styles.bannerPhotoBtn}
+                  onPress={() => setShowPhotoOptionsModal(true)}
+                  activeOpacity={0.8}
+                >
+                  <Camera size={14} color="#F2CA50" style={{ marginRight: 5 }} />
+                  <Text style={styles.bannerPhotoBtnText}>Photo</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          <ScrollView
+            ref={chatScrollRef}
+            style={styles.chatScrollView}
+            contentContainerStyle={styles.chatScrollContent}
+            showsVerticalScrollIndicator={false}
+            onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
+          >
+            {chatMessages.map((msg) => {
+              const isUser = msg.sender === 'user';
+
+              return (
+                <View
+                  key={msg.id}
+                  style={[
+                    styles.chatMessageRow,
+                    isUser ? styles.chatMessageRowUser : styles.chatMessageRowSupport,
+                  ]}
+                >
+                  {!isUser && (
+                    <View style={styles.supportAvatarCircle}>
+                      <Image
+                        source={require('../../assets/favorite_quro.png')}
+                        style={styles.supportAvatarImg}
+                        resizeMode="contain"
+                      />
+                    </View>
+                  )}
+
+                  <View
+                    style={[
+                      styles.chatBubbleContainer,
+                      isUser ? styles.chatBubbleUser : styles.chatBubbleSupport,
+                    ]}
+                  >
+                    {!isUser && (
+                      <Text style={styles.senderTagText}>
+                        {formatSenderLabel(msg.senderType, msg.senderName)}
+                      </Text>
+                    )}
+
+                    <Text style={[styles.chatBubbleText, isUser ? styles.chatTextUser : styles.chatTextSupport]}>
+                      {msg.text}
+                    </Text>
+
+                    {msg.imageUri && (
+                      <View style={styles.chatImageWrapper}>
+                        <Image
+                          source={{ uri: msg.imageUri }}
+                          style={styles.chatImagePreview}
+                          resizeMode="cover"
+                        />
+                      </View>
+                    )}
+
+                    {msg.actionCard === 'SELECT_ITEMS' && (
+                      <View style={styles.actionCardBox}>
+                        <TouchableOpacity
+                          style={styles.selectItemsBtn}
+                          onPress={() => setShowItemModal(true)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.selectItemsBtnText}>SELECT ITEMS</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+
+                    {msg.actionCard === 'ADD_PHOTOS' && (
+                      <View style={styles.actionCardBox}>
+                        <TouchableOpacity
+                          style={styles.addPhotosBtn}
+                          onPress={() => setShowPhotoOptionsModal(true)}
+                          activeOpacity={0.85}
+                        >
+                          <Camera size={16} color="#F2CA50" style={{ marginRight: 8 }} />
+                          <Text style={styles.addPhotosBtnText}>Add photos</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+
+                    <View style={styles.msgFooterRow}>
+                      <Text style={styles.msgTimestampText}>{msg.timestamp}</Text>
+                      {isUser && <Text style={styles.msgCheckmarks}> ✓✓</Text>}
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+
+            {/* Proposed / Final Resolution Card Synced from Restaurant & Support */}
+            {activeComplaint?.resolution && (
+              <View style={styles.resolutionCard}>
+                <Text style={styles.resolutionHeading}>
+                  {activeComplaint.status === 'AWAITING_CUSTOMER'
+                    ? 'PROPOSED RESOLUTION'
+                    : activeComplaint.status === 'RESOLVED'
+                    ? 'RESOLUTION COMPLETED'
+                    : 'RESOLUTION UPDATE'}
+                </Text>
+                <Text style={styles.resolutionSummary}>
+                  {activeComplaint.resolution.actionTaken || activeComplaint.resolution.resolutionType}
+                </Text>
+                {activeComplaint.resolution.refundAmount ? (
+                  <Text style={styles.resolutionHighlight}>
+                    Refund Amount: ₹{activeComplaint.resolution.refundAmount}
+                  </Text>
+                ) : null}
+                {activeComplaint.resolution.replacementItem ? (
+                  <Text style={styles.resolutionHighlight}>
+                    Replacement: {activeComplaint.resolution.replacementItem}
+                  </Text>
+                ) : null}
+                {activeComplaint.resolution.compensationCode ? (
+                  <Text style={styles.resolutionHighlight}>
+                    Voucher Code: {activeComplaint.resolution.compensationCode}
+                  </Text>
+                ) : null}
+                {activeComplaint.resolution.note ? (
+                  <Text style={styles.resolutionNoteText}>{activeComplaint.resolution.note}</Text>
+                ) : null}
+
+                {activeComplaint.status === 'AWAITING_CUSTOMER' && (
+                  <View style={styles.resolutionActionsRow}>
+                    <TouchableOpacity
+                      style={[styles.resolutionAcceptBtn, isResolvingAction && { opacity: 0.6 }]}
+                      onPress={() => handleResolutionDecision('accept')}
+                      disabled={isResolvingAction}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.resolutionAcceptBtnText}>Accept Resolution</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.resolutionRejectBtn, isResolvingAction && { opacity: 0.6 }]}
+                      onPress={() => handleResolutionDecision('reject')}
+                      disabled={isResolvingAction}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.resolutionRejectBtnText}>Escalate</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+          </ScrollView>
+
+          {/* BOTTOM MESSAGE INPUT BAR */}
+          <View style={[styles.inputBarContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <TouchableOpacity
+              style={styles.chatAttachBtn}
+              onPress={() => setShowPhotoOptionsModal(true)}
+              disabled={isProcessingPhoto}
+              activeOpacity={0.8}
+            >
+              {isProcessingPhoto ? (
+                <ActivityIndicator size="small" color="#F2CA50" />
+              ) : (
+                <Camera size={20} color="#F2CA50" />
+              )}
+            </TouchableOpacity>
+            <TextInput
+              placeholder="Type your message..."
+              placeholderTextColor="#777777"
+              value={inputText}
+              onChangeText={setInputText}
+              style={styles.chatInputField}
+            />
+            <TouchableOpacity
+              style={[styles.chatSendBtn, (!inputText.trim() || isSending) && styles.chatSendBtnDisabled]}
+              onPress={handleSendMessage}
+              disabled={!inputText.trim() || isSending}
+              activeOpacity={0.85}
+            >
+              {isSending ? (
+                <ActivityIndicator size="small" color="#000000" />
+              ) : (
+                <Send size={18} color="#000000" />
+              )}
+            </TouchableOpacity>
           </View>
-        </Modal>
-      </ScrollView>
+        </KeyboardAvoidingView>
+      )}
+
+      {/* ───────────────── SCREENSHOT 4: SELECT ITEMS MODAL SHEET ───────────────── */}
+      <Modal
+        visible={showItemModal}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setShowItemModal(false)}
+      >
+        <View style={[styles.itemModalContainer, { paddingTop: getSafeTopPadding(insets.top, 8) }]}>
+          {/* Modal Header */}
+          <View style={styles.itemModalHeader}>
+            <TouchableOpacity
+              onPress={() => setShowItemModal(false)}
+              style={styles.itemModalCloseBtn}
+              activeOpacity={0.8}
+            >
+              <X size={22} color="#EAE1D4" />
+            </TouchableOpacity>
+            <Text style={styles.itemModalTitle}>SELECT ITEMS</Text>
+            <View style={{ width: 36 }} />
+          </View>
+
+          {/* Items List (Screenshot 4) */}
+          <ScrollView style={styles.itemsScrollView} showsVerticalScrollIndicator={false}>
+            {orderItems.map((item) => {
+              const isChecked = selectedItemIds.includes(item.id);
+
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.itemRowCard}
+                  onPress={() => toggleItemCheckbox(item.id)}
+                  activeOpacity={0.85}
+                >
+                  {/* Veg / Non-Veg Icon */}
+                  <View style={[styles.foodTypeBadge, item.isVeg ? styles.vegBadge : styles.nonVegBadge]}>
+                    <View style={[styles.foodTypeDot, item.isVeg ? styles.vegDot : styles.nonVegDot]} />
+                  </View>
+
+                  {/* Item Title & Variant */}
+                  <View style={styles.itemInfoCol}>
+                    <Text style={styles.itemTitleText}>
+                      {item.name} x {item.quantity}
+                    </Text>
+                    {item.variant && <Text style={styles.itemVariantText}>{item.variant}</Text>}
+                  </View>
+
+                  {/* Square Checkbox (Screenshot 4) */}
+                  <View style={[styles.checkboxSquare, isChecked && styles.checkboxSquareChecked]}>
+                    {isChecked && <Check size={14} color="#000000" strokeWidth={3} />}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Modal Fixed Bottom Bar & SUBMIT Button (Screenshot 4) */}
+          <View style={[styles.itemModalBottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <TouchableOpacity
+              style={[
+                styles.itemModalSubmitBtn,
+                selectedItemIds.length === 0 && styles.itemModalSubmitBtnDisabled,
+              ]}
+              onPress={handleConfirmItemSelection}
+              disabled={selectedItemIds.length === 0}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[
+                  styles.itemModalSubmitBtnText,
+                  selectedItemIds.length === 0 && styles.itemModalSubmitBtnTextDisabled,
+                ]}
+              >
+                SUBMIT
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ───────────────── CHANGE ORDER MODAL ───────────────── */}
+      <Modal
+        visible={showOrderPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowOrderPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.orderPickerSheet}>
+            <View style={styles.orderPickerHeader}>
+              <Text style={styles.orderPickerTitle}>Select Order</Text>
+              <TouchableOpacity onPress={() => setShowOrderPicker(false)}>
+                <X size={20} color="#EAE1D4" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 350 }}>
+              {pastOrders.map((ord, idx) => (
+                <TouchableOpacity
+                  key={ord.id || ord.orderId || idx}
+                  style={styles.orderPickerItem}
+                  onPress={() => {
+                    setSelectedOrder(ord);
+                    setShowOrderPicker(false);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pickerItemRestName}>
+                      {ord.restaurantName || ord.outletName || 'Restaurant'}
+                    </Text>
+                    <Text style={styles.pickerItemMeta}>
+                      {ord.orderNumber || (ord.id ? `#${ord.id.slice(-5).toUpperCase()}` : `Order #${idx + 1}`)} · ₹
+                      {ord.grandTotal || ord.totalAmount || 0}
+                    </Text>
+                  </View>
+                  <ChevronRight size={16} color="#F2CA50" />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ───────────────── PHOTO OPTIONS BOTTOM SHEET MODAL ───────────────── */}
+      <Modal
+        visible={showPhotoOptionsModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPhotoOptionsModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowPhotoOptionsModal(false)}
+        >
+          <View
+            style={[styles.photoPickerSheet, { paddingBottom: Math.max(insets.bottom, 24) }]}
+            onStartShouldSetResponder={() => true}
+          >
+            {/* Grabber handle */}
+            <View style={styles.photoSheetGrabber} />
+
+            {/* Header */}
+            <View style={styles.photoSheetHeader}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={styles.photoSheetTitle}>Add Photo Evidence</Text>
+                <Text style={styles.photoSheetSubtitle}>
+                  Provide visual proof of the issue to speed up refund or replacement
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowPhotoOptionsModal(false)}
+                style={styles.photoCloseBtn}
+                activeOpacity={0.8}
+              >
+                <X size={20} color="#8A8A8A" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Option 1: Live Camera */}
+            <TouchableOpacity
+              style={styles.photoOptionCard}
+              onPress={() => pickPhotoAndUpload('camera')}
+              activeOpacity={0.85}
+            >
+              <View style={styles.photoIconBadge}>
+                <Camera size={22} color="#000000" />
+              </View>
+              <View style={styles.photoOptionContent}>
+                <Text style={styles.photoOptionTitle}>Take Live Photo</Text>
+                <Text style={styles.photoOptionDesc}>
+                  Use device camera to photograph the dish or package
+                </Text>
+              </View>
+              <ChevronRight size={18} color="#F2CA50" />
+            </TouchableOpacity>
+
+            {/* Option 2: Gallery Picker */}
+            <TouchableOpacity
+              style={styles.photoOptionCard}
+              onPress={() => pickPhotoAndUpload('gallery')}
+              activeOpacity={0.85}
+            >
+              <View style={[styles.photoIconBadge, styles.photoGalleryBadge]}>
+                <ImageIcon size={22} color="#F2CA50" />
+              </View>
+              <View style={styles.photoOptionContent}>
+                <Text style={styles.photoOptionTitle}>Choose from Gallery</Text>
+                <Text style={styles.photoOptionDesc}>
+                  Select existing photo from your device library
+                </Text>
+              </View>
+              <ChevronRight size={18} color="#F2CA50" />
+            </TouchableOpacity>
+
+            {/* Cancel Button */}
+            <TouchableOpacity
+              style={styles.photoCancelBtn}
+              onPress={() => setShowPhotoOptionsModal(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.photoCancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -815,581 +1248,422 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: '#000000',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
-  headerBackBtn: {
-    padding: 6,
+  backBtn: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
   },
   headerTitle: {
     fontSize: 18,
-    color: '#EAE1D4',
-    fontFamily: 'Urbanist-SemiBold',
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Bold',
     fontWeight: '700',
   },
-  tabBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#0A0A0A',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(242, 202, 80, 0.12)',
-  },
-  tabItem: {
+  scrollArea: {
     flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 12,
-  },
-  tabItemActive: {
-    backgroundColor: 'rgba(242, 202, 80, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(242, 202, 80, 0.3)',
-  },
-  tabText: {
-    fontSize: 13,
-    color: '#8A8A8A',
-    fontFamily: 'Urbanist-SemiBold',
-    fontWeight: '600',
-  },
-  tabTextActive: {
-    color: '#F2CA50',
-    fontWeight: '700',
-  },
-  contentWrap: {
+    paddingHorizontal: 16,
     paddingTop: 16,
   },
-  successBanner: {
-    marginHorizontal: 16,
+  orderContextCard: {
+    backgroundColor: '#121212',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.25)',
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 16,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-    flexDirection: 'row',
-    alignItems: 'center',
   },
-  successTitle: {
-    fontSize: 14,
-    color: '#10B981',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  successSubtitle: {
-    fontSize: 12,
-    color: '#A7F3D0',
-    fontFamily: 'Urbanist-Regular',
-    marginTop: 2,
-  },
-  sectionBlock: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 11,
-    color: '#8A8A8A',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '800',
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
-  complaintCard: {
-    backgroundColor: '#0F0F0F',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(242, 202, 80, 0.25)',
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  complaintCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-  },
-  ticketIdRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  ticketIdText: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  ticketOutletText: {
-    fontSize: 12,
-    color: '#A99260',
-    fontFamily: 'Urbanist-Medium',
-  },
-  ticketReasonText: {
-    fontSize: 13,
-    color: '#EAE1D4',
-    fontFamily: 'Urbanist-Regular',
-    marginTop: 4,
-  },
-  complaintCardBody: {
-    padding: 14,
-    paddingTop: 0,
-  },
-  complaintDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    marginBottom: 10,
-  },
-  detailLabel: {
-    fontSize: 11,
-    color: '#8A8A8A',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  detailDesc: {
-    fontSize: 13,
-    color: '#D4AF37',
-    fontFamily: 'Urbanist-Regular',
-    lineHeight: 18,
-    marginBottom: 8,
-  },
-  detailItemText: {
-    fontSize: 12,
-    color: '#F2CA50',
-    fontFamily: 'Urbanist-Medium',
-    marginBottom: 8,
-  },
-  resolutionBox: {
-    backgroundColor: 'rgba(242, 202, 80, 0.08)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(242, 202, 80, 0.3)',
-    padding: 12,
-    marginVertical: 10,
-  },
-  resolutionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-  },
-  resolutionTitle: {
-    fontSize: 13,
-    color: '#F2CA50',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  resolutionTypeBadge: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontFamily: 'Urbanist-SemiBold',
-    marginBottom: 4,
-  },
-  resolutionActionText: {
-    fontSize: 12,
-    color: '#EAE1D4',
-    fontFamily: 'Urbanist-Regular',
-  },
-  resolutionNoteText: {
-    fontSize: 11,
-    color: '#A99260',
-    fontFamily: 'Urbanist-Regular',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  resolutionActionsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
-  },
-  acceptBtn: {
-    flex: 1,
-    backgroundColor: '#F2CA50',
-    borderRadius: 10,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  acceptBtnText: {
-    fontSize: 12,
-    color: '#000000',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  rejectBtn: {
-    flex: 1,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-    borderRadius: 10,
-    paddingVertical: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rejectBtnText: {
-    fontSize: 12,
-    color: '#EF4444',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  chatThread: {
-    marginTop: 10,
-    gap: 6,
-  },
-  chatBubble: {
-    padding: 10,
-    borderRadius: 10,
-    maxWidth: '85%',
-  },
-  chatBubbleCustomer: {
-    backgroundColor: 'rgba(242, 202, 80, 0.12)',
-    alignSelf: 'flex-end',
-    borderBottomRightRadius: 2,
-  },
-  chatBubbleStaff: {
-    backgroundColor: '#1C1C1C',
-    alignSelf: 'flex-start',
-    borderBottomLeftRadius: 2,
-  },
-  chatSenderName: {
+  orderContextLabel: {
     fontSize: 10,
     color: '#A99260',
     fontFamily: 'Urbanist-Bold',
-    marginBottom: 2,
+    letterSpacing: 0.6,
   },
-  chatMessageText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontFamily: 'Urbanist-Regular',
-  },
-  replyRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-  },
-  replyInput: {
-    flex: 1,
-    backgroundColor: '#161616',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    color: '#FFFFFF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 12,
-    fontFamily: 'Urbanist-Regular',
-  },
-  sendReplyBtn: {
-    backgroundColor: '#F2CA50',
-    borderRadius: 10,
-    width: 38,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  selectedOrderCard: {
-    backgroundColor: '#111111',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(242, 202, 80, 0.25)',
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  orderCardLabel: {
-    fontSize: 10,
-    color: '#A99260',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  orderCardRestaurant: {
+  orderContextRestName: {
     fontSize: 15,
     color: '#FFFFFF',
     fontFamily: 'Urbanist-Bold',
     fontWeight: '700',
     marginTop: 2,
   },
-  orderCardMeta: {
+  orderContextMeta: {
     fontSize: 12,
     color: '#8A8A8A',
     fontFamily: 'Urbanist-Regular',
     marginTop: 2,
   },
-  changeOrderBtn: {
+  changeOrderPill: {
     backgroundColor: 'rgba(242, 202, 80, 0.15)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
   },
-  changeOrderText: {
+  changeOrderPillText: {
     fontSize: 12,
     color: '#F2CA50',
     fontFamily: 'Urbanist-Bold',
     fontWeight: '700',
   },
-  formLabel: {
-    fontSize: 11,
-    color: '#A99260',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    marginTop: 10,
-    marginBottom: 6,
-  },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 10,
-  },
-  categoryChip: {
-    backgroundColor: '#111111',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  categoryChipActive: {
-    backgroundColor: 'rgba(242, 202, 80, 0.15)',
-    borderColor: '#F2CA50',
-  },
-  categoryIcon: {
-    fontSize: 14,
-  },
-  categoryChipText: {
-    fontSize: 12,
-    color: '#8A8A8A',
-    fontFamily: 'Urbanist-Medium',
-  },
-  categoryChipTextActive: {
-    color: '#F2CA50',
-    fontWeight: '700',
-  },
-  presetReasonsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 10,
-  },
-  presetReasonChip: {
-    backgroundColor: '#141414',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  presetReasonChipActive: {
-    backgroundColor: 'rgba(242, 202, 80, 0.2)',
-    borderColor: '#F2CA50',
-  },
-  presetReasonText: {
-    fontSize: 11,
-    color: '#8A8A8A',
-    fontFamily: 'Urbanist-Regular',
-  },
-  presetReasonTextActive: {
-    color: '#F2CA50',
-    fontWeight: '600',
-  },
-  textInputBox: {
-    backgroundColor: '#111111',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    color: '#FFFFFF',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 13,
-    fontFamily: 'Urbanist-Regular',
-    marginBottom: 10,
-  },
-  textAreaBox: {
-    height: 80,
-    textAlignVertical: 'top',
-  },
-  submitComplaintBtn: {
-    backgroundColor: '#F2CA50',
-    borderRadius: 14,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  submitComplaintBtnText: {
-    fontSize: 14,
-    color: '#000000',
-    fontFamily: 'Urbanist-Bold',
-    fontWeight: '700',
-  },
-  favLogoRow: {
-    alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 4,
-  },
-  favLogoMy: {
-    fontSize: 50,
-    color: '#deb853',
-    fontFamily: 'Fasthand-Regular',
-    letterSpacing: -1.5,
-    height: 60,
-    lineHeight: 70,
-  },
-  favQuroCropContainer: {
-    width: 107,
-    height: 60,
-    overflow: 'hidden',
-  },
-  favQuroCropImage: {
-    width: 167,
-    height: 90,
-    marginLeft: -65,
-    bottom: 20,
-  },
-  sparkleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginVertical: 10,
-  },
-  sparkleTagline: {
-    fontSize: 14 * scale,
-    color: '#d0c5af',
-    fontFamily: 'Urbanist-Medium',
-  },
-  searchBarContainer: {
-    paddingHorizontal: 16,
-    marginVertical: 12,
-  },
-  searchInputBox: {
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: 'rgba(242, 202, 80, 0.4)',
-    borderRadius: 20,
-    height: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-  },
-  searchInputField: {
-    flex: 1,
-    fontSize: 14,
-    color: '#ffffff',
-    fontFamily: 'Urbanist-Regular',
-  },
-  sectionHeading: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#8a8a8a',
-    letterSpacing: 1.2,
-    marginBottom: 10,
-    marginLeft: 16,
-    marginTop: 16,
-  },
-  supportCardsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 12,
-    marginBottom: 8,
-  },
-  supportCardBtn: {
-    flex: 1,
-    backgroundColor: 'rgba(242, 202, 80, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(242, 202, 80, 0.3)',
-    borderRadius: 16,
-    padding: 14,
-    alignItems: 'flex-start',
-  },
-  supportCardBtnDark: {
-    backgroundColor: '#111',
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  supportCardIconCircle: {
-    width: 36,
-    height: 36,
+  // ─── ACCORDION CONTAINER (Screenshots 1 & 2) ───
+  accordionContainerCard: {
+    backgroundColor: '#0F0F0F',
     borderRadius: 18,
-    backgroundColor: 'rgba(242, 202, 80, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  supportCardIconCircleDark: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  supportCardTitle: {
-    fontSize: 14 * scale,
-    fontFamily: 'Urbanist-Bold',
-    color: '#f2ca50',
-    marginBottom: 3,
-  },
-  supportCardDesc: {
-    fontSize: 11 * scale,
-    fontFamily: 'Urbanist-Regular',
-    color: '#8a8a8a',
-    lineHeight: 14,
-  },
-  faqCardsContainer: {
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  faqPremiumCard: {
-    backgroundColor: '#111',
     borderWidth: 1,
-    borderColor: 'rgba(242, 202, 80, 0.25)',
-    borderRadius: 14,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     overflow: 'hidden',
   },
-  faqQuestionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 14,
+  accordionItemWrapper: {
+    overflow: 'hidden',
   },
-  faqQuestion: {
-    fontSize: 14,
-    fontFamily: 'Urbanist-Bold',
-    color: '#ffffff',
+  accordionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+  },
+  accordionTitleText: {
+    fontSize: 14.5,
+    color: '#EAE1D4',
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
     flex: 1,
     marginRight: 10,
   },
-  faqAnswerContainer: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-  },
-  faqAnswerDivider: {
+  accordionDivider: {
     height: 1,
-    backgroundColor: 'rgba(242, 202, 80, 0.1)',
-    marginBottom: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    marginHorizontal: 18,
   },
-  faqAnswer: {
+  accordionExpandedBox: {
+    paddingHorizontal: 18,
+    paddingBottom: 20,
+    paddingTop: 2,
+  },
+  accordionSubtitleText: {
     fontSize: 13,
-    color: '#d0c5af',
+    color: '#999999',
     fontFamily: 'Urbanist-Regular',
     lineHeight: 18,
+    marginBottom: 16,
   },
+  chatWithUsBtn: {
+    backgroundColor: '#F2CA50',
+    borderRadius: 24,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  chatWithUsBtnText: {
+    fontSize: 13,
+    color: '#000000',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  waitTimeBox: {
+    marginTop: 2,
+  },
+  waitTimeLabel: {
+    fontSize: 11,
+    color: '#888888',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  waitTimeGold: {
+    fontSize: 12,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+    marginBottom: 1,
+  },
+  waitTimeOthers: {
+    fontSize: 11,
+    color: '#777777',
+    fontFamily: 'Urbanist-Regular',
+  },
+  // ─── CHAT VIEW (Screenshots 3 & 5) ───
+  chatScrollView: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  chatScrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
+  },
+  chatMessageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginVertical: 4,
+  },
+  chatMessageRowUser: {
+    justifyContent: 'flex-end',
+  },
+  chatMessageRowSupport: {
+    justifyContent: 'flex-start',
+  },
+  supportAvatarCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F2CA50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    marginTop: 2,
+    overflow: 'hidden',
+  },
+  supportAvatarImg: {
+    width: 24,
+    height: 24,
+  },
+  chatBubbleContainer: {
+    maxWidth: '82%',
+    borderRadius: 16,
+    padding: 14,
+  },
+  chatBubbleUser: {
+    backgroundColor: '#2A2214',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.4)',
+    borderBottomRightRadius: 4,
+  },
+  chatBubbleSupport: {
+    backgroundColor: '#141414',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomLeftRadius: 4,
+  },
+  chatBubbleText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: 'Urbanist-Regular',
+  },
+  chatTextUser: {
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Medium',
+  },
+  chatTextSupport: {
+    color: '#EAE1D4',
+  },
+  actionCardBox: {
+    marginTop: 12,
+  },
+  selectItemsBtn: {
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectItemsBtnText: {
+    fontSize: 13,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  addPhotosBtn: {
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.4)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addPhotosBtnText: {
+    fontSize: 13,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  msgFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  msgTimestampText: {
+    fontSize: 10,
+    color: '#8A8A8A',
+    fontFamily: 'Urbanist-Regular',
+  },
+  msgCheckmarks: {
+    fontSize: 10,
+    color: '#F2CA50',
+    fontWeight: '700',
+  },
+  inputBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    backgroundColor: '#0F0F0F',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  chatInputField: {
+    flex: 1,
+    height: 44,
+    backgroundColor: '#181818',
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Urbanist-Regular',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  chatSendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F2CA50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  chatSendBtnDisabled: {
+    opacity: 0.4,
+  },
+  // ─── SELECT ITEMS MODAL (Screenshot 4) ───
+  itemModalContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  itemModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  itemModalCloseBtn: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  itemModalTitle: {
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  itemsScrollView: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  itemRowCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  foodTypeBadge: {
+    width: 16,
+    height: 16,
+    borderRadius: 3,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  vegBadge: {
+    borderColor: '#10B981',
+  },
+  nonVegBadge: {
+    borderColor: '#EF4444',
+  },
+  foodTypeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  vegDot: {
+    backgroundColor: '#10B981',
+  },
+  nonVegDot: {
+    backgroundColor: '#EF4444',
+  },
+  itemInfoCol: {
+    flex: 1,
+    marginRight: 12,
+  },
+  itemTitleText: {
+    fontSize: 14.5,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+  },
+  itemVariantText: {
+    fontSize: 12,
+    color: '#8A8A8A',
+    fontFamily: 'Urbanist-Regular',
+    marginTop: 2,
+  },
+  checkboxSquare: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#555555',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxSquareChecked: {
+    backgroundColor: '#F2CA50',
+    borderColor: '#F2CA50',
+  },
+  itemModalBottomBar: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: '#0F0F0F',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  itemModalSubmitBtn: {
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#F2CA50',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemModalSubmitBtnDisabled: {
+    backgroundColor: '#222222',
+  },
+  itemModalSubmitBtnText: {
+    fontSize: 14,
+    color: '#000000',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  itemModalSubmitBtnTextDisabled: {
+    color: '#666666',
+  },
+  // ─── CHANGE ORDER MODAL ───
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
@@ -1433,7 +1707,294 @@ const styles = StyleSheet.create({
     fontFamily: 'Urbanist-Regular',
     marginTop: 2,
   },
-  textWhite: {
-    color: '#ffffff',
+  // ─── PHOTO ATTACHMENT & PREVIEW ───
+  chatAttachBtn: {
+    width: 40,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
+  chatImageWrapper: {
+    marginTop: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.4)',
+    backgroundColor: '#000000',
+  },
+  chatImagePreview: {
+    width: 220,
+    height: 160,
+    borderRadius: 11,
+  },
+  // ─── PHOTO OPTIONS BOTTOM SHEET MODAL ───
+  photoPickerSheet: {
+    backgroundColor: '#111111',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderTopWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.3)',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  photoSheetGrabber: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#333333',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  photoSheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  photoSheetTitle: {
+    fontSize: 17,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  photoSheetSubtitle: {
+    fontSize: 12.5,
+    color: '#8A8A8A',
+    fontFamily: 'Urbanist-Regular',
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  photoCloseBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1C1C1C',
+    borderRadius: 16,
+  },
+  photoOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#181818',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 14,
+    marginBottom: 12,
+  },
+  photoIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F2CA50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  photoGalleryBadge: {
+    backgroundColor: 'rgba(242, 202, 80, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.3)',
+  },
+  photoOptionContent: {
+    flex: 1,
+    marginRight: 10,
+  },
+  photoOptionTitle: {
+    fontSize: 14.5,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  photoOptionDesc: {
+    fontSize: 12,
+    color: '#8A8A8A',
+    fontFamily: 'Urbanist-Regular',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  photoCancelBtn: {
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#161616',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  photoCancelBtnText: {
+    fontSize: 13,
+    color: '#999999',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  // ─── CONNECTED SUPPORT TICKETS & RESOLUTION UI ───
+  ticketListSection: {
+    marginTop: 22,
+  },
+  ticketSectionHeading: {
+    fontSize: 11.5,
+    color: '#A99260',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  ticketRowCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#111111',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.22)',
+    padding: 14,
+    marginBottom: 10,
+  },
+  ticketRowTitle: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+  },
+  ticketRowMeta: {
+    fontSize: 12,
+    color: '#8A8A8A',
+    fontFamily: 'Urbanist-Regular',
+    marginTop: 3,
+  },
+  statusPillBadge: {
+    backgroundColor: 'rgba(242, 202, 80, 0.16)',
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.35)',
+  },
+  statusPillText: {
+    fontSize: 10,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  ticketContextBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#121212',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(242, 202, 80, 0.18)',
+  },
+  ticketBannerTitle: {
+    fontSize: 13,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  ticketBannerSub: {
+    fontSize: 11.5,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-Medium',
+    marginTop: 1,
+  },
+  bannerPhotoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(242, 202, 80, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.4)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  bannerPhotoBtnText: {
+    fontSize: 12,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+  },
+  senderTagText: {
+    fontSize: 11,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  resolutionCard: {
+    marginTop: 10,
+    marginBottom: 16,
+    backgroundColor: '#15120A',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.5)',
+    padding: 16,
+  },
+  resolutionHeading: {
+    fontSize: 11,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
+  resolutionSummary: {
+    fontSize: 14.5,
+    color: '#FFFFFF',
+    fontFamily: 'Urbanist-SemiBold',
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  resolutionHighlight: {
+    fontSize: 13.5,
+    color: '#F2CA50',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  resolutionNoteText: {
+    fontSize: 12.5,
+    color: '#B8B0A0',
+    fontFamily: 'Urbanist-Regular',
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  resolutionActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  resolutionAcceptBtn: {
+    flex: 1,
+    backgroundColor: '#F2CA50',
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resolutionAcceptBtnText: {
+    fontSize: 13,
+    color: '#000000',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '800',
+  },
+  resolutionRejectBtn: {
+    flex: 1,
+    backgroundColor: '#1D1D1D',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resolutionRejectBtnText: {
+    fontSize: 13,
+    color: '#EAE1D4',
+    fontFamily: 'Urbanist-Bold',
+    fontWeight: '700',
   },
 });

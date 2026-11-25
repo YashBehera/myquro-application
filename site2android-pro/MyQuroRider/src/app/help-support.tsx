@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
+import { sendRiderTicketMessage } from '../utils/supportTicketApi';
 
 export default function HelpSupportScreen() {
   const router = useRouter();
@@ -37,8 +38,8 @@ export default function HelpSupportScreen() {
     }
   };
 
-  const fetchTickets = async () => {
-    setIsLoadingTickets(true);
+  const fetchTickets = async (silent = false) => {
+    if (!silent) setIsLoadingTickets(true);
     try {
       if (sessionToken) {
         const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-tickets`, {
@@ -67,15 +68,21 @@ export default function HelpSupportScreen() {
         }
       }
     } catch (err) {
-      console.warn('Error fetching rider support tickets:', err);
+      if (!silent) console.warn('Error fetching rider support tickets:', err);
     } finally {
-      setIsLoadingTickets(false);
+      if (!silent) setIsLoadingTickets(false);
     }
   };
 
   useEffect(() => {
-    fetchTickets();
+    fetchTickets(false);
   }, [sessionToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'my_tickets') return;
+    const interval = setInterval(() => fetchTickets(true), 5000);
+    return () => clearInterval(interval);
+  }, [activeTab, sessionToken]);
 
   const handleSendTicketReply = async (ticketId: string) => {
     const text = replyTextMap[ticketId]?.trim();
@@ -83,28 +90,23 @@ export default function HelpSupportScreen() {
 
     setIsSendingReply(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/complaints/${ticketId}/message`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-        },
-        body: JSON.stringify({
-          senderId: driverProfile?.id || driverProfile?.deId || 'RIDER',
-          senderName: driverProfile?.name || 'Rider',
-          senderType: 'CUSTOMER',
-          message: text,
-        }),
+      const result = await sendRiderTicketMessage({
+        sessionToken,
+        ticketId,
+        senderId: driverProfile?.id || driverProfile?.deId || 'RIDER',
+        senderName: driverProfile?.name || 'Delivery Partner',
+        message: text,
       });
 
-      if (res.ok) {
+      if (result.success) {
         setReplyTextMap((prev) => ({ ...prev, [ticketId]: '' }));
-        fetchTickets();
+        await fetchTickets(true);
       } else {
-        Alert.alert('Error', 'Failed to send message.');
+        Alert.alert('Error', result.error || 'Failed to send message.');
       }
     } catch (err) {
       console.error('Error replying to ticket:', err);
+      Alert.alert('Error', 'Could not send reply. Please check your connection.');
     } finally {
       setIsSendingReply(false);
     }
@@ -155,7 +157,7 @@ export default function HelpSupportScreen() {
           <Ionicons name="arrow-back" size={24} color="#F2CA50" />
         </TouchableOpacity>
         <Text style={styles.topBarTitle}>Help & Support</Text>
-        <TouchableOpacity onPress={fetchTickets} style={styles.backBtn} activeOpacity={0.8}>
+        <TouchableOpacity onPress={() => fetchTickets(false)} style={styles.backBtn} activeOpacity={0.8}>
           <Ionicons name="refresh" size={20} color="#F2CA50" />
         </TouchableOpacity>
       </View>
@@ -173,7 +175,10 @@ export default function HelpSupportScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tabButton, activeTab === 'my_tickets' && styles.tabButtonActive]}
-          onPress={() => setActiveTab('my_tickets')}
+          onPress={() => {
+            setActiveTab('my_tickets');
+            fetchTickets(false);
+          }}
           activeOpacity={0.8}
         >
           <Text style={[styles.tabButtonText, activeTab === 'my_tickets' && styles.tabButtonTextActive]}>
@@ -216,7 +221,7 @@ export default function HelpSupportScreen() {
         {activeTab === 'my_tickets' ? (
           /* MY TICKETS VIEW */
           <View>
-            <Text style={styles.sectionHeaderTitle}>Your Raised Support Tickets</Text>
+            <Text style={styles.sectionHeaderTitle}>Your Raised Support &amp; Delivery Tickets</Text>
             {isLoadingTickets ? (
               <ActivityIndicator size="small" color="#F2CA50" style={{ marginVertical: 20 }} />
             ) : tickets.length === 0 ? (
@@ -239,6 +244,18 @@ export default function HelpSupportScreen() {
                 const badge = getStatusBadge(t.status);
                 const isExpanded = expandedTicketId === t.id;
                 const messages = Array.isArray(t.messages) ? t.messages : [];
+                const evidence = Array.isArray(t.evidence) ? t.evidence : [];
+                const isOrderDispute = t.ticketType === 'order_complaint';
+
+                const getMsgSenderDisplay = (m: any) => {
+                  const st = String(m.senderType || '').toUpperCase();
+                  if (st === 'RIDER' || (Boolean(driverProfile?.id) && m.senderId === driverProfile?.id)) {
+                    return 'You';
+                  }
+                  if (st === 'CUSTOMER') return m.senderName ? `${m.senderName} (Customer)` : 'Customer';
+                  if (st === 'RESTAURANT') return m.senderName ? `${m.senderName} (Restaurant)` : 'Restaurant Partner';
+                  return m.senderName || 'MyQuro Partner Support';
+                };
 
                 return (
                   <View key={t.id} style={styles.ticketCard}>
@@ -253,9 +270,31 @@ export default function HelpSupportScreen() {
                           <View style={[styles.badgePill, { backgroundColor: badge.bg }]}>
                             <Text style={[styles.badgeText, { color: badge.color }]}>{badge.label}</Text>
                           </View>
+                          <View
+                            style={[
+                              styles.badgePill,
+                              {
+                                backgroundColor: isOrderDispute
+                                  ? 'rgba(56, 189, 248, 0.14)'
+                                  : 'rgba(242, 202, 80, 0.1)',
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.badgeText,
+                                { color: isOrderDispute ? '#38BDF8' : '#F2CA50' },
+                              ]}
+                            >
+                              {isOrderDispute ? 'Delivery Dispute' : 'Partner Ticket'}
+                            </Text>
+                          </View>
                         </View>
                         <Text style={styles.ticketSubjectText}>{t.reason || t.subject || 'Support Ticket'}</Text>
-                        <Text style={styles.ticketCategoryText}>Category: {t.category || 'General'}</Text>
+                        <Text style={styles.ticketCategoryText}>
+                          {t.orderNumber ? `Order ${t.orderNumber}` : `Category: ${t.category || 'General'}`}
+                          {t.outletName ? ` · ${t.outletName}` : ''}
+                        </Text>
                       </View>
                       <Ionicons
                         name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -270,12 +309,31 @@ export default function HelpSupportScreen() {
                         <Text style={styles.bodyLabel}>Description</Text>
                         <Text style={styles.bodyDesc}>{t.description || 'No description provided.'}</Text>
 
+                        {evidence.length > 0 && (
+                          <View style={{ marginBottom: 12 }}>
+                            <Text style={styles.bodyLabel}>Attached Evidence</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                              {evidence.map((uri: string, idx: number) => (
+                                <Image
+                                  key={idx}
+                                  source={{ uri }}
+                                  style={{ width: 76, height: 76, borderRadius: 8, marginRight: 8, backgroundColor: '#111' }}
+                                  resizeMode="cover"
+                                />
+                              ))}
+                            </ScrollView>
+                          </View>
+                        )}
+
                         {/* MESSAGES THREAD */}
                         {messages.length > 0 && (
                           <View style={styles.chatThreadWrap}>
                             <Text style={styles.bodyLabel}>Conversation</Text>
                             {messages.map((m: any, mIdx: number) => {
-                              const isRider = m.senderType === 'CUSTOMER' || m.senderId === driverProfile?.id;
+                              const st = String(m.senderType || '').toUpperCase();
+                              const isRider =
+                                st === 'RIDER' ||
+                                (Boolean(driverProfile?.id) && m.senderId === driverProfile?.id);
                               return (
                                 <View
                                   key={m.id || mIdx}
@@ -284,13 +342,39 @@ export default function HelpSupportScreen() {
                                     isRider ? styles.chatMsgBubbleRider : styles.chatMsgBubbleSupport,
                                   ]}
                                 >
-                                  <Text style={styles.chatMsgSender}>
-                                    {isRider ? 'You' : 'MyQuro Partner Support'}
-                                  </Text>
+                                  <Text style={styles.chatMsgSender}>{getMsgSenderDisplay(m)}</Text>
                                   <Text style={styles.chatMsgText}>{m.message}</Text>
+                                  {m.attachmentUrl && (
+                                    <Image
+                                      source={{ uri: m.attachmentUrl }}
+                                      style={{ width: 150, height: 105, borderRadius: 8, marginTop: 6 }}
+                                      resizeMode="cover"
+                                    />
+                                  )}
                                 </View>
                               );
                             })}
+                          </View>
+                        )}
+
+                        {t.resolution && (
+                          <View
+                            style={{
+                              backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                              borderWidth: 1,
+                              borderColor: 'rgba(16, 185, 129, 0.35)',
+                              borderRadius: 10,
+                              padding: 10,
+                              marginBottom: 12,
+                            }}
+                          >
+                            <Text style={{ color: '#10B981', fontSize: 11, fontWeight: '700', marginBottom: 4 }}>
+                              RESOLUTION UPDATE
+                            </Text>
+                            <Text style={{ color: '#FFFFFF', fontSize: 12.5 }}>
+                              {t.resolution.actionTaken || t.resolution.resolutionType}
+                              {t.resolution.note ? ` — ${t.resolution.note}` : ''}
+                            </Text>
                           </View>
                         )}
 

@@ -71,6 +71,7 @@ import {
   Navigation,
 } from 'lucide-react-native';
 import { DeliveredOrderView } from './DeliveredOrderView';
+import { HelpSubView } from './profile/HelpSubView';
 import { RatingService } from '../services/RatingService';
 import Svg, {
   Rect,
@@ -1339,6 +1340,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
   // UI Interactive States
   const [isFullScreenMap, setIsFullScreenMap] = useState(false);
+  const [showSupportView, setShowSupportView] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
 
@@ -2680,71 +2682,66 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   // Do NOT trigger on kitchenStatus==='served' for delivery — that fires when the rider picks up the food.
   const isDelivered = riderStatus === 'delivered' || (isDineIn && (kitchenStatus === 'served' || kitchenStatus === 'delivered'));
 
+  if (showSupportView) {
+    return (
+      <HelpSubView
+        isDarkMode={true}
+        initialOrder={{
+          ...(orderDetail || {}),
+          id: orderId,
+          orderId,
+          restaurantName,
+          restaurantId: currentRestaurant?.id || (orderDetail as any)?.restaurantId,
+          riderName: riderDisplayName || riderInfo?.name || riderInfo?.fullName,
+          riderId: riderInfo?.id || (trackingData as any)?.riderId,
+          riderPhone: riderInfo?.phone || (trackingData as any)?.riderPhone,
+          items: orderItemsList,
+        }}
+        pastOrders={userOrders}
+        customerProfile={{
+          id: authState.type === 'Authenticated' ? (authState.userId || (authState as any).user?.id || (authState as any).id || '') : '',
+          name: authState.type === 'Authenticated' ? (authState.username || (authState as any).user?.name || 'Customer') : 'Customer',
+          phone: authState.type === 'Authenticated' ? ((authState as any).phone || (authState as any).user?.phone || '') : '',
+          avatar: authState.type === 'Authenticated' ? ((authState as any).user?.image || '') : '',
+        }}
+        onBack={() => setShowSupportView(false)}
+      />
+    );
+  }
+
   if (isDelivered) {
     return (
       <DeliveredOrderView
         orderId={orderId || undefined}
         restaurantName={restaurantName}
-        riderName={riderDisplayName || riderInfo?.name || riderInfo?.fullName || 'HARAPRASAD S'}
+        riderName={riderDisplayName || riderInfo?.name || riderInfo?.fullName || 'Delivery Partner'}
         riderPhone={riderInfo?.phone}
         itemsCount={itemsCount}
         deliveredTime={trackingData?.updatedAt || orderDetail?.updatedAt}
+        order={{
+          ...(orderDetail || {}),
+          id: orderId,
+          orderId,
+          restaurantName,
+          restaurantId: currentRestaurant?.id || (orderDetail as any)?.restaurantId,
+          riderName: riderDisplayName || riderInfo?.name || riderInfo?.fullName,
+          riderId: riderInfo?.id || (trackingData as any)?.riderId,
+          items: orderItemsList,
+        }}
+        items={orderItemsList}
         onBack={onBack}
         onRateDelivery={(rating) => {
           console.log('Rated delivery:', rating);
-          const targetRestaurantId = currentRestaurant?.id || (orderDetail as any)?.restaurantId;
-          const targetRiderId = riderInfo?.id || (trackingData as any)?.riderId;
-          RatingService.submitRating({
-            orderId: orderId || undefined,
-            restaurantId: targetRestaurantId,
-            deliveryRating: rating,
-            riderId: targetRiderId,
-            userId: (authState as any)?.userId || (authState as any)?.id || undefined,
-          }).catch(console.warn);
-        }}
-        onRateItems={() => {
-          const targetRestaurantId = currentRestaurant?.id || (orderDetail as any)?.restaurantId;
-          const targetRiderId = riderInfo?.id || (trackingData as any)?.riderId;
-          const submitStars = async (stars: number) => {
-            try {
-              await RatingService.submitRating({
-                orderId: orderId || undefined,
-                restaurantId: targetRestaurantId,
-                foodRating: stars,
-                items: orderItemsList,
-                riderId: targetRiderId,
-                userId: (authState as any)?.userId || (authState as any)?.id || undefined,
-              });
-              if (Platform.OS === 'android') {
-                ToastAndroid.show(`🎉 Rated food & items ${stars} stars!`, ToastAndroid.SHORT);
-              } else {
-                Alert.alert('Thank You!', `Rated food & items ${stars} stars.`);
-              }
-            } catch (err) {
-              console.warn('Error submitting food rating:', err);
-            }
-          };
-
-          Alert.alert(
-            'Rate Food & Items',
-            `How was your meal from ${restaurantName}?`,
-            [
-              { text: '5 Stars ★★★★★', onPress: () => submitStars(5) },
-              { text: '4 Stars ★★★★☆', onPress: () => submitStars(4) },
-              { text: '3 Stars ★★★☆☆', onPress: () => submitStars(3) },
-              { text: 'Cancel', style: 'cancel' },
-            ]
-          );
         }}
         onContactSupport={() => {
           const supportOptions: any[] = [
-            { text: 'Call Helpdesk (+91 70619 03429)', onPress: () => Linking.openURL('tel:+917061903429') },
+            { text: 'Open Order Help & Support', onPress: () => setShowSupportView(true) },
           ];
           if (riderInfo?.phone) {
             supportOptions.unshift({ text: `Call Delivery Partner (${riderInfo.name || 'Rider'})`, onPress: () => Linking.openURL(`tel:${riderInfo.phone}`) });
           }
           supportOptions.push({ text: 'Dismiss', style: 'cancel' });
-          Alert.alert('Delivery Support', 'How would you like to connect regarding this order?', supportOptions);
+          Alert.alert('Order Support', 'How would you like to connect regarding this order?', supportOptions);
         }}
         onExploreOffers={() => {
           Alert.alert('My Quro Pay', 'Explore exclusive 5% cashback offers on every order with My Quro Pay!');

@@ -23,8 +23,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRider } from '@/context/RiderContext';
-import { BACKEND_URL } from '@/config';
 import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
+import { submitRiderSupportTicket, formatPreviousWeekDateRange } from '../utils/supportTicketApi';
 
 export default function PetrolFormScreen() {
   const router = useRouter();
@@ -33,7 +33,7 @@ export default function PetrolFormScreen() {
   const { sessionToken } = useRider();
   
   const weekTitle = (params.weekTitle as string) || 'Last Week';
-  const dateRange = (params.dateRange as string) || '10 August to 16 August';
+  const dateRange = (params.dateRange as string) || formatPreviousWeekDateRange();
   
   const [description, setDescription] = useState('');
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
@@ -101,11 +101,15 @@ export default function PetrolFormScreen() {
           const result = await ImagePicker.launchCameraAsync({
             mediaTypes: ['images'],
             allowsEditing: true,
-            quality: 0.85,
+            quality: 0.45,
+            base64: true,
           });
           if (!result.canceled && result.assets?.[0]?.uri) {
-            const uri = result.assets[0].uri;
-            const name = uri.split('/').pop() || `Camera_Screenshot_${Date.now().toString().slice(-4)}.jpg`;
+            const asset = result.assets[0];
+            const uri = asset.base64
+              ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`
+              : asset.uri;
+            const name = asset.uri.split('/').pop() || `Camera_Receipt_${Date.now().toString().slice(-4)}.jpg`;
             if (slot === 1) {
               setSlot1File(name);
               setSlot1Uri(uri);
@@ -137,11 +141,15 @@ export default function PetrolFormScreen() {
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
             allowsEditing: true,
-            quality: 0.85,
+            quality: 0.45,
+            base64: true,
           });
           if (!result.canceled && result.assets?.[0]?.uri) {
-            const uri = result.assets[0].uri;
-            const name = result.assets[0].fileName || uri.split('/').pop() || `Gallery_Screenshot_${Date.now().toString().slice(-4)}.png`;
+            const asset = result.assets[0];
+            const uri = asset.base64
+              ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`
+              : asset.uri;
+            const name = asset.fileName || asset.uri.split('/').pop() || `Gallery_Receipt_${Date.now().toString().slice(-4)}.png`;
             if (slot === 1) {
               setSlot1File(name);
               setSlot1Uri(uri);
@@ -220,38 +228,31 @@ export default function PetrolFormScreen() {
     }
 
     setIsSubmitting(true);
-    let ticketId = `PT-${Date.now().toString().slice(-5)}`;
+    const result = await submitRiderSupportTicket({
+      sessionToken,
+      category: 'petrol_incentive',
+      subject: `Petrol Incentive Claim for ${weekTitle} (${dateRange})`,
+      description: description.trim(),
+      attachments: [slot1Uri, slot2Uri].filter(Boolean) as string[],
+      metadata: { weekTitle, dateRange, slot1File, slot2File },
+    });
+    setIsSubmitting(false);
 
-    if (sessionToken) {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-ticket`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`,
-            'Origin': 'http://localhost:3000',
-          },
-          body: JSON.stringify({
-            category: 'petrol_incentive',
-            subject: `Petrol Incentive Claim for ${weekTitle} (${dateRange})`,
-            description,
-            metadata: { weekTitle, dateRange, slot1File, slot2File },
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ticket?.id) ticketId = data.ticket.id;
-        }
-      } catch (err) {
-        console.error('Petrol claim ticket error:', err);
-      }
+    if (!result.success || !result.ticket?.id) {
+      showAlertModal({
+        type: 'warning',
+        title: 'Submission Failed',
+        subtitle: result.error || 'Could not submit petrol incentive claim to server.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
+      return;
     }
 
-    setIsSubmitting(false);
     showAlertModal({
       type: 'success_online',
       title: 'Claim Submitted 🎉',
-      subtitle: `Your petrol incentive claim (Ticket #${ticketId}) and attached receipts have been submitted successfully. Our team will verify and credit the amount.`,
+      subtitle: `Your petrol incentive claim (Ticket #${result.ticket.id}) and attached receipts have been submitted to support.`,
       primaryButtonText: 'Done',
       onPrimaryPress: () => {
         hideAlertModal();

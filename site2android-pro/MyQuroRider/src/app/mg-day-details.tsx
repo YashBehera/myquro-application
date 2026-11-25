@@ -23,8 +23,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRider } from '@/context/RiderContext';
-import { BACKEND_URL } from '@/config';
 import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
+import { submitRiderSupportTicket, formatDynamicFullDate } from '../utils/supportTicketApi';
 
 export default function MGDayFormScreen() {
   const router = useRouter();
@@ -32,7 +32,7 @@ export default function MGDayFormScreen() {
   const insets = useSafeAreaInsets();
   const { sessionToken } = useRider();
   
-  const dateStr = (params.date as string) || 'Tuesday, 18 August';
+  const dateStr = (params.date as string) || formatDynamicFullDate();
   
   const [description, setDescription] = useState('');
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
@@ -99,11 +99,15 @@ export default function MGDayFormScreen() {
           const result = await ImagePicker.launchCameraAsync({
             mediaTypes: ['images'],
             allowsEditing: true,
-            quality: 0.85,
+            quality: 0.45,
+            base64: true,
           });
           if (!result.canceled && result.assets?.[0]?.uri) {
-            const uri = result.assets[0].uri;
-            const name = uri.split('/').pop() || `MG_Photo_${Date.now().toString().slice(-4)}.jpg`;
+            const asset = result.assets[0];
+            const uri = asset.base64
+              ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`
+              : asset.uri;
+            const name = asset.uri.split('/').pop() || `MG_Photo_${Date.now().toString().slice(-4)}.jpg`;
             if (slot === 1) {
               setSlot1File(name);
               setSlot1Uri(uri);
@@ -135,11 +139,15 @@ export default function MGDayFormScreen() {
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
             allowsEditing: true,
-            quality: 0.85,
+            quality: 0.45,
+            base64: true,
           });
           if (!result.canceled && result.assets?.[0]?.uri) {
-            const uri = result.assets[0].uri;
-            const name = result.assets[0].fileName || uri.split('/').pop() || `MG_Screenshot_${Date.now().toString().slice(-4)}.png`;
+            const asset = result.assets[0];
+            const uri = asset.base64
+              ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`
+              : asset.uri;
+            const name = asset.fileName || asset.uri.split('/').pop() || `MG_Screenshot_${Date.now().toString().slice(-4)}.png`;
             if (slot === 1) {
               setSlot1File(name);
               setSlot1Uri(uri);
@@ -218,38 +226,31 @@ export default function MGDayFormScreen() {
     }
 
     setIsSubmitting(true);
-    let ticketId = `MG-${Date.now().toString().slice(-5)}`;
+    const result = await submitRiderSupportTicket({
+      sessionToken,
+      category: 'minimum_guarantee',
+      subject: `Minimum Guarantee Dispute on ${dateStr}`,
+      description: description.trim(),
+      attachments: [slot1Uri, slot2Uri].filter(Boolean) as string[],
+      metadata: { dateStr, slot1File, slot2File },
+    });
+    setIsSubmitting(false);
 
-    if (sessionToken) {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-ticket`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`,
-            'Origin': 'http://localhost:3000',
-          },
-          body: JSON.stringify({
-            category: 'minimum_guarantee',
-            subject: `Minimum Guarantee Dispute on ${dateStr}`,
-            description,
-            metadata: { dateStr, slot1File, slot2File },
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ticket?.id) ticketId = data.ticket.id;
-        }
-      } catch (err) {
-        console.error('MG dispute ticket error:', err);
-      }
+    if (!result.success || !result.ticket?.id) {
+      showAlertModal({
+        type: 'warning',
+        title: 'Submission Failed',
+        subtitle: result.error || 'Could not submit minimum guarantee dispute to server.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
+      return;
     }
 
-    setIsSubmitting(false);
     showAlertModal({
       type: 'success_online',
       title: 'Dispute Submitted 🎉',
-      subtitle: `Your minimum guarantee dispute (Ticket #${ticketId}) for ${dateStr} has been submitted successfully. Our operations team will review your login hours and order acceptances.`,
+      subtitle: `Your minimum guarantee dispute (Ticket #${result.ticket.id}) for ${dateStr} has been registered with support.`,
       primaryButtonText: 'Done',
       onPrimaryPress: () => {
         hideAlertModal();

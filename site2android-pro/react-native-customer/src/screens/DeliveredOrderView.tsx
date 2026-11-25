@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { RatingService } from '../services/RatingService';
+import { OrderRatingModal } from '../components/OrderRatingModal';
 import {
   SCALE,
   scale,
@@ -32,6 +34,8 @@ interface DeliveredOrderViewProps {
   riderPhone?: string;
   itemsCount?: number;
   deliveredTime?: string;
+  order?: any;
+  items?: any[];
   onBack?: () => void;
   onRateDelivery?: (rating: number) => void;
   onRateItems?: () => void;
@@ -46,6 +50,8 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
   riderPhone,
   itemsCount = 1,
   deliveredTime,
+  order,
+  items,
   onBack,
   onRateDelivery,
   onRateItems,
@@ -54,6 +60,45 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const [selectedRating, setSelectedRating] = useState<number>(0);
+  const [isDeliveryLocked, setIsDeliveryLocked] = useState<boolean>(false);
+  const [isFoodLocked, setIsFoodLocked] = useState<boolean>(false);
+  const [foodRating, setFoodRating] = useState<number>(0);
+  const [ratingModalVisible, setRatingModalVisible] = useState<boolean>(false);
+  const [modalInitialType, setModalInitialType] = useState<'food' | 'delivery'>('delivery');
+  const [modalInitialRating, setModalInitialRating] = useState<number>(5);
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkExistingRating = async () => {
+      if (!orderId) return;
+      const cached = await RatingService.getOrderRating(orderId);
+      if (cached && isMounted) {
+        if (cached.deliveryLocked || (cached.delivery && cached.delivery > 0)) {
+          setSelectedRating(cached.delivery || 5);
+          setIsDeliveryLocked(true);
+        }
+        if (cached.foodLocked || (cached.food && cached.food > 0)) {
+          setFoodRating(cached.food || 5);
+          setIsFoodLocked(true);
+        }
+      } else if (order?.foodRating || order?.deliveryRating || order?.rating) {
+        if (isMounted) {
+          const delVal = Number(order.deliveryRating || 0);
+          const foodVal = Number(order.foodRating || order.rating || 0);
+          if (delVal > 0) {
+            setSelectedRating(delVal);
+            setIsDeliveryLocked(true);
+          }
+          if (foodVal > 0) {
+            setFoodRating(foodVal);
+            setIsFoodLocked(true);
+          }
+        }
+      }
+    };
+    checkExistingRating();
+    return () => { isMounted = false; };
+  }, [orderId, order]);
 
   const restaurantName = (rawRestaurantName && typeof rawRestaurantName === 'string' && rawRestaurantName.trim())
     ? rawRestaurantName.trim()
@@ -79,11 +124,73 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
   };
 
   const handleStarPress = (rating: number) => {
-    setSelectedRating(rating);
-    if (onRateDelivery) {
-      onRateDelivery(rating);
+    if (isDeliveryLocked) {
+      Alert.alert('Delivery Rated', 'You have already submitted rating for this delivery.');
+      return;
     }
-    Alert.alert('Thank You!', `You rated ${riderName} ${rating} star${rating > 1 ? 's' : ''}.`);
+    setModalInitialType('delivery');
+    setModalInitialRating(rating);
+    setRatingModalVisible(true);
+  };
+
+  const handleRateItemsPress = () => {
+    if (isFoodLocked) {
+      Alert.alert('Food Rated', 'You have already submitted review for food items in this order.');
+      return;
+    }
+    if (onRateItems) {
+      onRateItems();
+      return;
+    }
+    setModalInitialType('food');
+    setModalInitialRating(5);
+    setRatingModalVisible(true);
+  };
+
+  const handleModalSubmit = async (result: {
+    foodRating?: number;
+    deliveryRating?: number;
+    dishesRating: Record<string, 'up' | 'down'>;
+    reviewText: string;
+    compliments: string[];
+    items: Array<{ id?: string; menuItemId?: string; name?: string; rating?: number }>;
+  }) => {
+    if (result.deliveryRating !== undefined) {
+      setSelectedRating(result.deliveryRating);
+      setIsDeliveryLocked(true);
+      if (onRateDelivery) {
+        onRateDelivery(result.deliveryRating);
+      }
+    }
+
+    if (result.foodRating !== undefined) {
+      setFoodRating(result.foodRating);
+      setIsFoodLocked(true);
+    }
+
+    setRatingModalVisible(false);
+
+    try {
+      await RatingService.submitRating({
+        orderId,
+        restaurantId: order?.restaurantId || order?.restaurant_id,
+        foodRating: result.foodRating,
+        deliveryRating: result.deliveryRating,
+        riderId: order?.riderId || order?.rider_id,
+        reviewText: result.reviewText,
+        compliments: result.compliments,
+        items: result.items,
+      });
+    } catch (e) {
+      console.warn('Error submitting rating in DeliveredOrderView:', e);
+    }
+
+    Alert.alert(
+      'Thank You!',
+      result.deliveryRating !== undefined
+        ? 'Your delivery partner rating has been submitted.'
+        : 'Your meal & dish review has been submitted.'
+    );
   };
 
   const handleCallRiderOrSupport = () => {
@@ -182,14 +289,17 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
           </View>
 
           {/* Question */}
-          <Text style={styles.ratingQuestionText}>How would you rate the delivery?</Text>
+          <Text style={styles.ratingQuestionText}>
+            {isDeliveryLocked ? `Delivery Rated ★ ${selectedRating}` : 'How would you rate the delivery?'}
+          </Text>
 
           {/* 5 Stars Rating Row */}
           <View style={styles.starsContainer}>
             {[1, 2, 3, 4, 5].map((star) => (
               <TouchableOpacity
                 key={star}
-                activeOpacity={0.7}
+                activeOpacity={isDeliveryLocked ? 1 : 0.7}
+                disabled={isDeliveryLocked}
                 onPress={() => handleStarPress(star)}
                 style={styles.starTouchable}
               >
@@ -206,9 +316,10 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
 
           {/* Row 1: Rate items in this order */}
           <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={onRateItems}
-            style={styles.cardActionRow}
+            activeOpacity={isFoodLocked ? 1 : 0.8}
+            disabled={isFoodLocked}
+            onPress={handleRateItemsPress}
+            style={[styles.cardActionRow, isFoodLocked && { opacity: 0.8 }]}
           >
             <View style={styles.actionRowLeft}>
               <View style={styles.actionIconCircle}>
@@ -218,11 +329,19 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
                   resizeMode="contain"
                 />
               </View>
-              <Text style={styles.actionRowTitle}>Rate items in this order</Text>
+              <Text style={styles.actionRowTitle}>
+                {isFoodLocked ? 'Food & Items Rated' : 'Rate items in this order'}
+              </Text>
             </View>
 
             <View style={styles.actionRowRight}>
-              <Ionicons name="chevron-forward" size={16} color="#666666" style={{ marginRight: 8 }} />
+              {isFoodLocked ? (
+                <View style={styles.lockedBadgePill}>
+                  <Text style={styles.lockedBadgePillText}>Rated</Text>
+                </View>
+              ) : (
+                <Ionicons name="chevron-forward" size={16} color="#666666" style={{ marginRight: 8 }} />
+              )}
               <Image
                 source={require('../../assets/images/delivered-food-thumb.png')}
                 style={styles.foodThumbImage}
@@ -307,6 +426,20 @@ export const DeliveredOrderView: React.FC<DeliveredOrderViewProps> = ({
           </ImageBackground>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Order Rating Modal (Locks independently) */}
+      <OrderRatingModal
+        visible={ratingModalVisible}
+        order={order || { id: orderId, orderId, restaurantName, riderName, items: items || [] }}
+        initialType={modalInitialType}
+        initialRating={modalInitialRating}
+        existingFoodRating={foodRating}
+        existingDeliveryRating={selectedRating}
+        isFoodLocked={isFoodLocked}
+        isDeliveryLocked={isDeliveryLocked}
+        onClose={() => setRatingModalVisible(false)}
+        onSubmit={handleModalSubmit}
+      />
     </View>
   );
 };
@@ -495,6 +628,21 @@ const styles = StyleSheet.create({
   actionRowRight: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  lockedBadgePill: {
+    backgroundColor: 'rgba(242, 202, 80, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(242, 202, 80, 0.35)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginRight: 8,
+  },
+  lockedBadgePillText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11,
+    color: '#F2CA50',
+    fontWeight: '700',
   },
   foodThumbImage: {
     width: 36,

@@ -305,8 +305,8 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
         }}
         onHelp={() => {
           Alert.alert(
-            'Customer Support',
-            'Contact us at support@myquro.com or call 1800-123-4567 for reservation assistance.'
+            'Reservation Support',
+            'Need help with this reservation? Visit Profile → Help & Support in the app to message our team directly.'
           );
         }}
       />

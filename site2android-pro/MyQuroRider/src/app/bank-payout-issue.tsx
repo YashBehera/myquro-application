@@ -22,8 +22,8 @@ import {
   Platform,
 } from 'react-native';
 import { useRider } from '@/context/RiderContext';
-import { BACKEND_URL } from '@/config';
 import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
+import { submitRiderSupportTicket } from '../utils/supportTicketApi';
 
 export default function BankPayoutIssueScreen() {
   const router = useRouter();
@@ -139,44 +139,35 @@ export default function BankPayoutIssueScreen() {
     }
 
     setIsSubmitting(true);
-    let ticketId = `BNK-${Date.now().toString().slice(-5)}`;
+    const result = await submitRiderSupportTicket({
+      sessionToken,
+      category: 'bank_payout',
+      subject: `Bank Payout Discrepancy for ${selectedWeek?.title} (${selectedWeek?.dateRange})`,
+      description: disputeReason.trim(),
+      metadata: {
+        week: selectedWeek,
+        bankName: driverProfile?.bankName || 'Not provided',
+        accountNumber: driverProfile?.bankAccount || 'Not provided',
+      },
+    });
+    setIsSubmitting(false);
 
-    if (sessionToken) {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-ticket`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`,
-            'Origin': 'http://localhost:3000',
-          },
-          body: JSON.stringify({
-            category: 'bank_payout',
-            subject: `Bank Payout Discrepancy for ${selectedWeek?.title} (${selectedWeek?.dateRange})`,
-            description: disputeReason,
-            metadata: {
-              week: selectedWeek,
-              bankName: driverProfile?.bankName || 'Direct Transfer',
-              accountNumber: driverProfile?.bankAccount || 'N/A',
-            },
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ticket?.id) ticketId = data.ticket.id;
-        }
-      } catch (err) {
-        console.error('Bank dispute error:', err);
-      }
+    if (!result.success || !result.ticket?.id) {
+      showAlertModal({
+        type: 'warning',
+        title: 'Submission Failed',
+        subtitle: result.error || 'Could not raise bank payout inquiry on server.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
+      return;
     }
 
-    setIsSubmitting(false);
     setDisputeModalVisible(false);
-
     showAlertModal({
       type: 'success_online',
       title: 'Inquiry Submitted 🎉',
-      subtitle: `Your bank payout inquiry (#${ticketId}) for ${selectedWeek?.title} has been submitted successfully. Our finance team will verify the transfer status within 2-4 hours.`,
+      subtitle: `Your bank payout inquiry (#${result.ticket.id}) for ${selectedWeek?.title} has been registered with support.`,
       primaryButtonText: 'Got It',
       onPrimaryPress: () => {
         hideAlertModal();
@@ -271,7 +262,7 @@ export default function BankPayoutIssueScreen() {
 
             <View style={styles.bankCardWrapper}>
               <View style={styles.bankCard}>
-                <Text style={styles.bankCardTitle}>{driverProfile?.bankName || 'MyQuro Bank'}</Text>
+                <Text style={styles.bankCardTitle}>{driverProfile?.bankName || 'Bank Account'}</Text>
                 <Ionicons name="business" size={32} color="#FFFFFF" style={styles.bankCardIcon} />
                 <Text style={styles.bankCardName}>{driverProfile?.bankHolderName || driverProfile?.name || 'Rider'}</Text>
               </View>

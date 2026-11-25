@@ -36,14 +36,23 @@ export default function ComplaintDetailsScreen() {
 
   const {
     complaints,
+    loadComplaintById,
     sendMessage,
     proposeResolution,
-    acceptResolution,
-    rejectResolution,
     escalateComplaint,
   } = useComplaintStore();
 
   const complaint = complaints.find((c) => c.id === params.id);
+
+  // Live background sync for customer / rider / support updates
+  useEffect(() => {
+    if (!params.id) return;
+    loadComplaintById(params.id);
+    const interval = setInterval(() => {
+      loadComplaintById(params.id!);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [params.id]);
 
   // Chat message input
   const [replyText, setReplyText] = useState('');
@@ -53,7 +62,7 @@ export default function ComplaintDetailsScreen() {
   const [isResolutionModalVisible, setIsResolutionModalVisible] = useState(false);
   const [resolutionType, setResolutionType] = useState<ResolutionType>('REFUND');
   const [refundAmount, setRefundAmount] = useState('');
-  const [compensationCode, setCompensationCode] = useState('MYQURO100OFF');
+  const [compensationCode, setCompensationCode] = useState('');
   const [resolutionNote, setResolutionNote] = useState('');
   const [directResolve, setDirectResolve] = useState(false);
   const [resolutionError, setResolutionError] = useState('');
@@ -91,13 +100,13 @@ export default function ComplaintDetailsScreen() {
       await sendMessage(
         complaint.id,
         'RESTAURANT',
-        complaint.outletName ? `${complaint.outletName} Support` : 'Restaurant Support',
+        complaint.outletName || 'Restaurant Partner',
         replyText.trim()
       );
       setReplyText('');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      Alert.alert('Error', 'Failed to send message.');
+      Alert.alert('Message Failed', e?.message || 'Could not send reply to server.');
     } finally {
       setIsSending(false);
     }
@@ -231,8 +240,14 @@ export default function ComplaintDetailsScreen() {
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={styles.customerNameLarge}>{complaint.customerName}</Text>
                   <Text style={styles.customerMetaText}>
-                    {complaint.customerPhone || '+91 98XXX XXXXX'} • {complaint.customerPastOrdersCount || 12} Orders placed
+                    {complaint.customerPhone || 'No phone on file'} • {complaint.customerPastOrdersCount ?? 0} Orders placed
                   </Text>
+                  {complaint.metadata?.riderName ? (
+                    <Text style={[styles.customerMetaText, { color: '#38BDF8', marginTop: 2 }]}>
+                      Delivery Partner: {String(complaint.metadata.riderName)}
+                      {complaint.metadata?.riderPhone ? ` (${complaint.metadata.riderPhone})` : ''}
+                    </Text>
+                  ) : null}
                 </View>
                 <View style={styles.orderAmountBox}>
                   <Text style={styles.orderAmountValue}>₹{complaint.orderAmount}</Text>
@@ -337,14 +352,23 @@ export default function ComplaintDetailsScreen() {
               <View style={styles.chatMessagesList}>
                 {complaint.messages.map((msg) => {
                   const isCustomer = msg.senderType === 'CUSTOMER';
+                  const isRider = msg.senderType === 'RIDER';
                   const isSupport = msg.senderType === 'MYQURO_SUPPORT';
+                  const isRestaurant = !isCustomer && !isRider && !isSupport;
 
                   if (isSupport) {
                     return (
                       <View key={msg.id} style={styles.supportMessageBubble}>
                         <Ionicons name="shield-checkmark" size={16} color="#38BDF8" />
-                        <Text style={styles.supportMessageText}>{msg.message}</Text>
-                        <Text style={styles.messageTimeText}>{formatTimestamp(msg.timestamp)}</Text>
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                          <Text style={[styles.supportMessageText, { marginLeft: 0 }]}>{msg.message}</Text>
+                          {msg.attachmentUrl && (
+                            <TouchableOpacity onPress={() => setZoomedImageUri(msg.attachmentUrl!)} activeOpacity={0.8}>
+                              <Image source={{ uri: msg.attachmentUrl }} style={{ width: 160, height: 110, borderRadius: 8, marginTop: 6 }} resizeMode="cover" />
+                            </TouchableOpacity>
+                          )}
+                          <Text style={styles.messageTimeText}>{formatTimestamp(msg.timestamp)}</Text>
+                        </View>
                       </View>
                     );
                   }
@@ -354,25 +378,44 @@ export default function ComplaintDetailsScreen() {
                       key={msg.id}
                       style={[
                         styles.chatBubbleRow,
-                        isCustomer ? styles.chatBubbleRowLeft : styles.chatBubbleRowRight,
+                        isRestaurant ? styles.chatBubbleRowRight : styles.chatBubbleRowLeft,
                       ]}
                     >
                       <View
                         style={[
                           styles.chatBubble,
-                          isCustomer ? styles.customerBubble : styles.restaurantBubble,
+                          isRestaurant
+                            ? styles.restaurantBubble
+                            : isRider
+                            ? { backgroundColor: '#13202E', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.4)', borderTopLeftRadius: 2 }
+                            : styles.customerBubble,
                         ]}
                       >
-                        <Text style={[styles.senderNameLabel, !isCustomer && { color: '#0B0B0B' }]}>
-                          {msg.senderName}
+                        <Text
+                          style={[
+                            styles.senderNameLabel,
+                            isRestaurant && { color: '#0B0B0B' },
+                            isRider && { color: '#38BDF8' },
+                          ]}
+                        >
+                          {isRider ? `${msg.senderName || 'Delivery Partner'} · Rider` : msg.senderName}
                         </Text>
-                        <Text style={[styles.chatBubbleText, !isCustomer && styles.chatBubbleTextDark]}>
+                        <Text style={[styles.chatBubbleText, isRestaurant && styles.chatBubbleTextDark]}>
                           {msg.message}
                         </Text>
+                        {msg.attachmentUrl && (
+                          <TouchableOpacity onPress={() => setZoomedImageUri(msg.attachmentUrl!)} activeOpacity={0.8}>
+                            <Image
+                              source={{ uri: msg.attachmentUrl }}
+                              style={{ width: 170, height: 120, borderRadius: 8, marginTop: 6 }}
+                              resizeMode="cover"
+                            />
+                          </TouchableOpacity>
+                        )}
                         <Text
                           style={[
                             styles.messageTimeText,
-                            !isCustomer && { color: 'rgba(0,0,0,0.5)', alignSelf: 'flex-end' },
+                            isRestaurant && { color: 'rgba(0,0,0,0.5)', alignSelf: 'flex-end' },
                           ]}
                         >
                           {formatTimestamp(msg.timestamp)}
@@ -459,43 +502,6 @@ export default function ComplaintDetailsScreen() {
                 </View>
               </View>
             )}
-
-            {/* 6. Interactive Customer Simulation Section (Swiggy-level interactive test) */}
-            <View style={styles.simulationCard}>
-              <View style={styles.simulationHeader}>
-                <Ionicons name="flask-outline" size={16} color="#38BDF8" />
-                <Text style={styles.simulationTitle}>Interactive Testing: Simulate Customer Action</Text>
-              </View>
-              <Text style={styles.simulationSubtitle}>
-                Test how the platform handles customer acceptance or dispute requests:
-              </Text>
-              <View style={styles.simulationButtonsRow}>
-                <TouchableOpacity
-                  style={styles.simBtnAccept}
-                  onPress={async () => {
-                    await acceptResolution(complaint.id, 'Great service, happy with the quick response!');
-                    Alert.alert('Customer Accepted', 'Simulated customer acceptance. Ticket moved to RESOLVED.');
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.simBtnAcceptText}>Simulate: Customer Accepts (Resolve)</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.simBtnReject}
-                  onPress={async () => {
-                    await rejectResolution(
-                      complaint.id,
-                      'The proposed refund does not cover the food waste.'
-                    );
-                    Alert.alert('Customer Disputed', 'Simulated customer dispute. Ticket moved to REOPENED.');
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.simBtnRejectText}>Simulate: Customer Reopens Ticket</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
 
             {/* 7. Collapsible Audit Log Timeline */}
             <View style={styles.auditSection}>

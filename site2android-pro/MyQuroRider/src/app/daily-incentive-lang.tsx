@@ -11,13 +11,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { formatDynamicFullDate } from '../utils/supportTicketApi';
 
 export default function DailyIncentiveLangScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   
-  const dateStr = (params.date as string) || 'Sunday, 16 August';
+  const dateStr = (params.date as string) || formatDynamicFullDate();
 
   const handleBack = () => {
     if (router.canGoBack()) {

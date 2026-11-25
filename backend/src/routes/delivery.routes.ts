@@ -1815,33 +1815,76 @@ function getWeekNumber(d: Date) {
 router.post("/rider/support-ticket", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
-    const { category, subject, description, metadata, attachments } = req.body;
+    const {
+      category,
+      subject,
+      description,
+      metadata,
+      attachments,
+      orderId,
+      outletId: rawOutletId,
+      relatedItem,
+    } = req.body;
+
+    if (!subject && !description) {
+      return res.status(400).json({ message: "Subject or description is required" });
+    }
 
     const ticketId = `TKT-${nanoid(7).toUpperCase()}`;
     const now = new Date();
     const nowIso = now.toISOString();
 
+    let outletId: string | null = rawOutletId || null;
+    let outletName: string | null = null;
+    let orderNumber: string | null = orderId ? `#${String(orderId).slice(-5).toUpperCase()}` : null;
+
+    if (orderId) {
+      try {
+        const [orderRow] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+        if (orderRow) {
+          outletId = outletId || orderRow.restaurantId;
+          orderNumber = `#MQ-${orderRow.id.slice(-5).toUpperCase()}`;
+          if (outletId) {
+            const [rest] = await db.select().from(restaurants).where(eq(restaurants.id, outletId)).limit(1);
+            if (rest?.restaurantName) outletName = rest.restaurantName;
+          }
+        }
+      } catch (e) {
+        console.warn("⚠️ Could not enrich order for rider ticket:", e);
+      }
+    }
+
+    const evidenceList = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+    const firstAttachment = evidenceList.length > 0 ? evidenceList[0] : undefined;
+
     const newTicket = {
       id: ticketId,
       ticketType: "rider_issue",
+      orderId: orderId || null,
+      orderNumber,
+      outletId,
+      outletName,
       riderId: user.id,
+      customerName: user.name || "Rider",
       category: category || "general",
       categoryLabel: subject || category || "Rider Support Request",
       reason: subject || "Support Request",
       description: description || "",
+      relatedItem: relatedItem || null,
       priority: "MEDIUM",
       status: "OPEN",
       metadata: metadata || {},
-      evidence: attachments || [],
+      evidence: evidenceList,
       messages: [
         {
           id: `msg-${nanoid(6)}`,
           complaintId: ticketId,
           senderId: user.id,
           senderName: user.name || "Rider",
-          senderType: "CUSTOMER",
+          senderType: "RIDER",
           message: description || subject || "Support Request",
           timestamp: nowIso,
+          ...(firstAttachment ? { attachmentUrl: firstAttachment } : {}),
         },
       ],
       auditLogs: [
@@ -1860,6 +1903,12 @@ router.post("/rider/support-ticket", requireAuth, async (req: any, res) => {
     };
 
     await db.insert(complaints).values(newTicket as any);
+
+    if (outletId) {
+      try {
+        emitToRestaurant(outletId, "complaint-created", newTicket);
+      } catch {}
+    }
 
     return res.status(200).json({
       success: true,
@@ -1880,10 +1929,11 @@ router.post("/rider/support-ticket", requireAuth, async (req: any, res) => {
 router.get("/rider/support-tickets", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
+    // Fetch both rider's own support tickets AND customer delivery complaints assigned to this rider
     const userTickets = await db
       .select()
       .from(complaints)
-      .where(and(eq(complaints.riderId, user.id), eq(complaints.ticketType, "rider_issue")))
+      .where(eq(complaints.riderId, user.id))
       .orderBy(desc(complaints.createdAt));
 
     return res.status(200).json({

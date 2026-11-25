@@ -19,8 +19,8 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useRider } from '@/context/RiderContext';
-import { BACKEND_URL } from '@/config';
 import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
+import { submitRiderSupportTicket } from '../utils/supportTicketApi';
 
 export default function ReferralIssueScreen() {
   const router = useRouter();
@@ -81,37 +81,29 @@ export default function ReferralIssueScreen() {
     }
 
     setIsSubmitting(true);
-    let ticketId = `REF-${Date.now().toString().slice(-5)}`;
+    const result = await submitRiderSupportTicket({
+      sessionToken,
+      category: 'referral_bonus',
+      subject: 'Referral Bonus Dispute',
+      description: description.trim(),
+    });
+    setIsSubmitting(false);
 
-    if (sessionToken) {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-ticket`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`,
-            'Origin': 'http://localhost:3000',
-          },
-          body: JSON.stringify({
-            category: 'referral_bonus',
-            subject: 'Referral Bonus Dispute',
-            description,
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ticket?.id) ticketId = data.ticket.id;
-        }
-      } catch (err) {
-        console.error('Referral claim error:', err);
-      }
+    if (!result.success || !result.ticket?.id) {
+      showAlertModal({
+        type: 'warning',
+        title: 'Submission Failed',
+        subtitle: result.error || 'Could not raise referral bonus ticket on server.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
+      return;
     }
 
-    setIsSubmitting(false);
     showAlertModal({
       type: 'success_online',
       title: 'Ticket Raised 🎉',
-      subtitle: `Your referral bonus ticket (#${ticketId}) has been submitted successfully. Our team will verify and resolve it within 2-4 hours.`,
+      subtitle: `Your referral bonus ticket (#${result.ticket.id}) has been submitted to support.`,
       primaryButtonText: 'Done',
       onPrimaryPress: () => {
         hideAlertModal();

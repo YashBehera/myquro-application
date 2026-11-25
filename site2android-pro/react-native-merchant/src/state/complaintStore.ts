@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Complaint,
   ComplaintStatus,
@@ -14,28 +13,17 @@ import {
 } from '../types/complaint';
 import apiClient from '../services/apiClient';
 
-const STORAGE_KEY = '@myquro_restaurant_complaints_v1';
-const RESTAURANT_CACHE_KEY = '@myquro_active_restaurant_id';
-
-// Helper to resolve active restaurantId
+// Helper to resolve active restaurantId directly from authenticated backend session
 async function resolveRestaurantId(explicitId?: string): Promise<string | null> {
-  if (explicitId) {
-    await AsyncStorage.setItem(RESTAURANT_CACHE_KEY, explicitId);
-    return explicitId;
-  }
+  if (explicitId) return explicitId;
 
   try {
     const res = await apiClient.get('/restaurants/my-restaurant');
-    const id = res.data?.restaurant?.id || res.data?.id;
-    if (id) {
-      await AsyncStorage.setItem(RESTAURANT_CACHE_KEY, id);
-      return id;
-    }
+    return res.data?.restaurant?.id || res.data?.id || null;
   } catch (err) {
     console.warn('Could not resolve restaurant ID from API:', err);
+    return null;
   }
-
-  return await AsyncStorage.getItem(RESTAURANT_CACHE_KEY);
 }
 
 // Helper to normalize backend records to Complaint interface
@@ -55,23 +43,26 @@ function normalizeComplaint(c: any): Complaint {
 
   return {
     id: c.id,
+    ticketType: c.ticketType || 'order_complaint',
     orderId: c.orderId || '',
-    orderNumber: c.orderNumber || (c.orderId ? `#${c.orderId.slice(-5).toUpperCase()}` : '#MQ-ORDER'),
-    customerId: c.customerId || 'CUST',
+    orderNumber: c.orderNumber || (c.orderId ? `#${String(c.orderId).slice(-5).toUpperCase()}` : '#ORDER'),
+    customerId: c.customerId || '',
     customerName: c.customerName || 'Customer',
     customerPhone: c.customerPhone || undefined,
     customerAvatar: c.customerAvatar || undefined,
-    customerPastOrdersCount: Number(c.customerPastOrdersCount || 0),
-    customerPastComplaintsCount: Number(c.customerPastComplaintsCount || 0),
+    customerPastOrdersCount: c.customerPastOrdersCount !== undefined ? Number(c.customerPastOrdersCount) : 0,
+    customerPastComplaintsCount: c.customerPastComplaintsCount !== undefined ? Number(c.customerPastComplaintsCount) : 0,
     outletId: c.outletId || '',
     outletName: c.outletName || 'Restaurant Outlet',
+    riderId: c.riderId || undefined,
+    metadata: parseJsonField(c.metadata, undefined),
     orderDate: c.orderDate ? new Date(c.orderDate).toISOString() : (c.createdAt ? new Date(c.createdAt).toISOString() : new Date().toISOString()),
     createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : new Date().toISOString(),
     updatedAt: c.updatedAt ? new Date(c.updatedAt).toISOString() : new Date().toISOString(),
     firstResponseAt: c.firstResponseAt ? new Date(c.firstResponseAt).toISOString() : undefined,
     resolvedAt: c.resolvedAt ? new Date(c.resolvedAt).toISOString() : undefined,
     category: (c.category || 'FOOD_QUALITY') as ComplaintCategory,
-    categoryLabel: c.categoryLabel || (c.category ? c.category.replace(/_/g, ' ') : 'Food Quality'),
+    categoryLabel: c.categoryLabel || (c.category ? String(c.category).replace(/_/g, ' ') : 'Food Quality'),
     reason: c.reason || 'Order Issue',
     description: c.description || '',
     relatedItem: c.relatedItem || undefined,
@@ -97,11 +88,12 @@ export interface ComplaintStoreState {
   selectedDateFilter: 'ALL' | 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH';
 
   // Core Actions
-  loadComplaints: (forceRestaurantId?: string) => Promise<void>;
+  loadComplaints: (forceRestaurantId?: string, silent?: boolean) => Promise<void>;
+  loadComplaintById: (complaintId: string) => Promise<Complaint | null>;
   createComplaint: (complaintData: Omit<Complaint, 'id' | 'createdAt' | 'updatedAt' | 'auditLogs' | 'messages'>) => Promise<Complaint>;
   sendMessage: (
     complaintId: string,
-    senderType: 'CUSTOMER' | 'RESTAURANT' | 'MYQURO_SUPPORT',
+    senderType: 'CUSTOMER' | 'RESTAURANT' | 'RIDER' | 'MYQURO_SUPPORT',
     senderName: string,
     messageText: string,
     attachmentUrl?: string
@@ -153,216 +145,114 @@ export const useComplaintStore = create<ComplaintStoreState>((set, get) => ({
   selectedCategoryFilter: 'ALL',
   selectedDateFilter: 'ALL',
 
-  loadComplaints: async (forceRestaurantId) => {
-    set({ isLoading: true });
+  loadComplaints: async (forceRestaurantId, silent = false) => {
+    if (!silent) set({ isLoading: true });
     try {
       const restId = await resolveRestaurantId(forceRestaurantId);
-      if (restId) {
-        try {
-          const res = await apiClient.get(`/complaints/merchant/${restId}`);
-          if (res.data?.success && Array.isArray(res.data?.complaints)) {
-            const normalized = res.data.complaints.map(normalizeComplaint);
-            set({ complaints: normalized, isLoading: false });
-            await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-            return;
-          }
-        } catch (apiErr) {
-          console.warn('Backend /complaints/merchant error, falling back to cache:', apiErr);
-        }
+      if (!restId) {
+        if (!silent) set({ complaints: [], isLoading: false });
+        return;
       }
 
-      // Fallback to cached data if offline or network unavailable
-      const cached = await AsyncStorage.getItem(STORAGE_KEY);
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) {
-            set({ complaints: parsed.map(normalizeComplaint), isLoading: false });
-            return;
-          }
-        } catch {
-          // ignore parsing error
-        }
+      const res = await apiClient.get(`/complaints/merchant/${restId}?ticketType=order_complaint`);
+      if (res.data?.success && Array.isArray(res.data?.complaints)) {
+        const normalized = res.data.complaints.map(normalizeComplaint);
+        set({ complaints: normalized, isLoading: false });
+        return;
       }
-
-      set({ complaints: [], isLoading: false });
+      if (!silent) set({ isLoading: false });
     } catch (e) {
       console.error('Error in loadComplaints:', e);
-      set({ complaints: [], isLoading: false });
+      if (!silent) set({ isLoading: false });
+    }
+  },
+
+  loadComplaintById: async (complaintId) => {
+    try {
+      const res = await apiClient.get(`/complaints/${complaintId}`);
+      if (res.data?.success && res.data?.complaint) {
+        const normalized = normalizeComplaint(res.data.complaint);
+        const existingList = get().complaints;
+        const exists = existingList.some((c) => c.id === normalized.id);
+        const updated = exists
+          ? existingList.map((c) => (c.id === normalized.id ? { ...c, ...normalized, customerPastOrdersCount: normalized.customerPastOrdersCount || c.customerPastOrdersCount } : c))
+          : [normalized, ...existingList];
+        set({ complaints: updated });
+        return normalized;
+      }
+      return null;
+    } catch (err) {
+      console.warn('Error fetching single complaint:', err);
+      return null;
     }
   },
 
   createComplaint: async (complaintData) => {
-    const nowStr = new Date().toISOString();
-    let createdComplaint: Complaint;
-
-    try {
-      const res = await apiClient.post('/complaints', complaintData);
-      if (res.data?.success && res.data?.complaint) {
-        createdComplaint = normalizeComplaint(res.data.complaint);
-      } else {
-        throw new Error('Invalid backend response');
-      }
-    } catch (err) {
-      console.warn('API error creating complaint, creating locally:', err);
-      createdComplaint = {
-        ...complaintData,
-        id: `CMP-${Math.floor(10000 + Math.random() * 90000)}`,
-        createdAt: nowStr,
-        updatedAt: nowStr,
-        messages: [],
-        auditLogs: [
-          {
-            id: `aud-${Date.now()}`,
-            complaintId: '',
-            user: `Customer (${complaintData.customerName})`,
-            action: 'Complaint Created',
-            timestamp: nowStr,
-            newStatus: 'OPEN',
-            notes: complaintData.reason,
-          },
-        ],
-      };
-      createdComplaint.auditLogs[0].complaintId = createdComplaint.id;
+    const res = await apiClient.post('/complaints', complaintData);
+    if (!res.data?.success || !res.data?.complaint) {
+      throw new Error(res.data?.error || 'Failed to register complaint on server');
     }
-
-    const updated = [createdComplaint, ...get().complaints];
-    set({ complaints: updated });
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    const createdComplaint = normalizeComplaint(res.data.complaint);
+    set({ complaints: [createdComplaint, ...get().complaints] });
     return createdComplaint;
   },
 
   sendMessage: async (complaintId, senderType, senderName, messageText, attachmentUrl) => {
-    const nowStr = new Date().toISOString();
-    const complaints = get().complaints;
-    const target = complaints.find((c) => c.id === complaintId);
-    if (!target) return;
-
+    const target = get().complaints.find((c) => c.id === complaintId);
     const resolvedSenderId =
       senderType === 'RESTAURANT'
-        ? target.outletId || 'RESTAURANT'
+        ? target?.outletId || 'RESTAURANT'
         : senderType === 'CUSTOMER'
-        ? target.customerId
+        ? target?.customerId || 'CUSTOMER'
+        : senderType === 'RIDER'
+        ? target?.riderId || 'RIDER'
         : 'MYQURO_SUPPORT';
 
-    // Call backend API
-    try {
-      await apiClient.post(`/complaints/${complaintId}/message`, {
-        senderId: resolvedSenderId,
-        senderName,
-        senderType,
-        message: messageText,
-        attachmentUrl,
-      });
-    } catch (apiErr) {
-      console.warn('API error in sendMessage, applying optimistic local state:', apiErr);
-    }
-
-    const newMessage: Message = {
-      id: `msg-${Date.now()}`,
-      complaintId,
+    const res = await apiClient.post(`/complaints/${complaintId}/message`, {
       senderId: resolvedSenderId,
       senderName,
       senderType,
       message: messageText,
-      timestamp: nowStr,
       attachmentUrl,
-    };
-
-    let nextStatus: ComplaintStatus = target.status;
-    let firstResponse = target.firstResponseAt;
-
-    if (senderType === 'RESTAURANT') {
-      if (!firstResponse) {
-        firstResponse = nowStr;
-      }
-      if (target.status === 'OPEN' || target.status === 'REOPENED') {
-        nextStatus = 'IN_PROGRESS';
-      }
-    } else if (senderType === 'CUSTOMER') {
-      if (target.status === 'AWAITING_CUSTOMER') {
-        nextStatus = 'IN_PROGRESS';
-      }
-    }
-
-    const newAuditLog: AuditLog = {
-      id: `aud-${Date.now()}`,
-      complaintId,
-      user: senderName,
-      action: `${senderType === 'RESTAURANT' ? 'Restaurant' : senderType === 'CUSTOMER' ? 'Customer' : 'Support'} Message Sent`,
-      timestamp: nowStr,
-      previousStatus: target.status,
-      newStatus: nextStatus,
-    };
-
-    const updated = complaints.map((c) => {
-      if (c.id === complaintId) {
-        return {
-          ...c,
-          status: nextStatus,
-          firstResponseAt: firstResponse,
-          updatedAt: nowStr,
-          messages: [...c.messages, newMessage],
-          auditLogs: [...c.auditLogs, newAuditLog],
-        };
-      }
-      return c;
     });
 
-    set({ complaints: updated });
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    if (!res.data?.success || !res.data?.complaint) {
+      throw new Error(res.data?.error || 'Failed to send complaint message');
+    }
+
+    const updatedRecord = normalizeComplaint(res.data.complaint);
+    set({
+      complaints: get().complaints.map((c) =>
+        c.id === complaintId
+          ? { ...updatedRecord, customerPastOrdersCount: c.customerPastOrdersCount }
+          : c
+      ),
+    });
   },
 
   updateStatus: async (complaintId, newStatus, user, notes) => {
-    const nowStr = new Date().toISOString();
-    const complaints = get().complaints;
-    const target = complaints.find((c) => c.id === complaintId);
-    if (!target) return;
-
-    try {
-      await apiClient.patch(`/complaints/${complaintId}/status`, {
-        newStatus,
-        user,
-        notes,
-      });
-    } catch (apiErr) {
-      console.warn('API error in updateStatus, applying optimistic local state:', apiErr);
-    }
-
-    const newAuditLog: AuditLog = {
-      id: `aud-${Date.now()}`,
-      complaintId,
-      user,
-      action: `Status Changed to ${newStatus}`,
-      timestamp: nowStr,
-      previousStatus: target.status,
+    const res = await apiClient.patch(`/complaints/${complaintId}/status`, {
       newStatus,
+      user,
       notes,
-    };
-
-    const updated = complaints.map((c) => {
-      if (c.id === complaintId) {
-        return {
-          ...c,
-          status: newStatus,
-          updatedAt: nowStr,
-          resolvedAt: newStatus === 'RESOLVED' ? nowStr : c.resolvedAt,
-          auditLogs: [...c.auditLogs, newAuditLog],
-        };
-      }
-      return c;
     });
-
-    set({ complaints: updated });
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    if (!res.data?.success || !res.data?.complaint) {
+      throw new Error(res.data?.error || 'Failed to update complaint status');
+    }
+    const updatedRecord = normalizeComplaint(res.data.complaint);
+    set({
+      complaints: get().complaints.map((c) =>
+        c.id === complaintId
+          ? { ...updatedRecord, customerPastOrdersCount: c.customerPastOrdersCount }
+          : c
+      ),
+    });
   },
 
   proposeResolution: async (complaintId, resolutionData, directResolve = false) => {
-    const complaints = get().complaints;
-    const target = complaints.find((c) => c.id === complaintId);
+    const target = get().complaints.find((c) => c.id === complaintId);
     if (!target) return { success: false, error: 'Complaint not found' };
 
-    // 🛡️ Refund Safety Cap: Backend validation ensuring refund <= order amount
     if (resolutionData.resolutionType === 'REFUND') {
       const refundAmt = resolutionData.refundAmount || 0;
       if (refundAmt <= 0) {
@@ -377,231 +267,77 @@ export const useComplaintStore = create<ComplaintStoreState>((set, get) => ({
     }
 
     try {
-      await apiClient.post(`/complaints/${complaintId}/resolve`, {
+      const res = await apiClient.post(`/complaints/${complaintId}/resolve`, {
         ...resolutionData,
         directResolve,
       });
-    } catch (apiErr) {
-      console.warn('API error in proposeResolution, applying local resolution:', apiErr);
-    }
-
-    const nowStr = new Date().toISOString();
-    const newStatus: ComplaintStatus = directResolve ? 'RESOLVED' : 'AWAITING_CUSTOMER';
-
-    const resolutionRecord: ResolutionRecord = {
-      id: `res-${Date.now()}`,
-      ...resolutionData,
-      resolvedAt: nowStr,
-      customerAccepted: directResolve ? true : undefined,
-    };
-
-    const systemMessage: Message = {
-      id: `msg-sys-${Date.now()}`,
-      complaintId,
-      senderId: target.outletId || 'RESTAURANT',
-      senderName: resolutionData.resolvedBy || 'Restaurant Manager',
-      senderType: 'RESTAURANT',
-      message: `Resolution Proposed: ${resolutionData.actionTaken}. Note: ${resolutionData.note}${
-        resolutionData.refundAmount ? ` (Refund: ₹${resolutionData.refundAmount})` : ''
-      }`,
-      timestamp: nowStr,
-    };
-
-    const newAuditLog: AuditLog = {
-      id: `aud-${Date.now()}`,
-      complaintId,
-      user: resolutionData.resolvedBy,
-      action: directResolve ? 'Complaint Resolved' : 'Resolution Proposed to Customer',
-      timestamp: nowStr,
-      previousStatus: target.status,
-      newStatus,
-      notes: `${resolutionData.actionTaken}: ${resolutionData.note}`,
-    };
-
-    const updated = complaints.map((c) => {
-      if (c.id === complaintId) {
-        return {
-          ...c,
-          status: newStatus,
-          resolution: resolutionRecord,
-          refundStatus:
-            resolutionData.resolutionType === 'REFUND'
-              ? directResolve
-                ? ('COMPLETED' as const)
-                : ('REQUESTED' as const)
-              : c.refundStatus,
-          resolvedAt: directResolve ? nowStr : c.resolvedAt,
-          updatedAt: nowStr,
-          messages: [...c.messages, systemMessage],
-          auditLogs: [...c.auditLogs, newAuditLog],
-        };
+      if (!res.data?.success || !res.data?.complaint) {
+        return { success: false, error: res.data?.error || 'Failed to submit resolution' };
       }
-      return c;
-    });
-
-    set({ complaints: updated });
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    return { success: true };
+      const updatedRecord = normalizeComplaint(res.data.complaint);
+      set({
+        complaints: get().complaints.map((c) =>
+          c.id === complaintId
+            ? { ...updatedRecord, customerPastOrdersCount: c.customerPastOrdersCount }
+            : c
+        ),
+      });
+      return { success: true };
+    } catch (apiErr: any) {
+      return {
+        success: false,
+        error: apiErr?.response?.data?.error || apiErr?.message || 'Failed to reach backend server',
+      };
+    }
   },
 
   acceptResolution: async (complaintId, feedback) => {
-    const nowStr = new Date().toISOString();
-    const complaints = get().complaints;
-    const target = complaints.find((c) => c.id === complaintId);
-    if (!target) return;
-
-    try {
-      await apiClient.post(`/complaints/${complaintId}/accept-resolution`, { feedback });
-    } catch (apiErr) {
-      console.warn('API error in acceptResolution:', apiErr);
+    const res = await apiClient.post(`/complaints/${complaintId}/accept-resolution`, { feedback });
+    if (!res.data?.success || !res.data?.complaint) {
+      throw new Error(res.data?.error || 'Failed to accept resolution');
     }
-
-    const newAuditLog: AuditLog = {
-      id: `aud-${Date.now()}`,
-      complaintId,
-      user: `Customer (${target.customerName})`,
-      action: 'Customer Accepted Resolution',
-      timestamp: nowStr,
-      previousStatus: target.status,
-      newStatus: 'RESOLVED',
-      notes: feedback || 'Customer marked resolution as accepted',
-    };
-
-    const customerMsg: Message = {
-      id: `msg-acc-${Date.now()}`,
-      complaintId,
-      senderId: target.customerId,
-      senderName: target.customerName,
-      senderType: 'CUSTOMER',
-      message: `I have accepted the resolution. ${feedback ? `Feedback: "${feedback}"` : 'Thank you for resolving this.'}`,
-      timestamp: nowStr,
-    };
-
-    const updated = complaints.map((c) => {
-      if (c.id === complaintId) {
-        return {
-          ...c,
-          status: 'RESOLVED' as const,
-          resolvedAt: nowStr,
-          updatedAt: nowStr,
-          refundStatus: c.refundStatus === 'REQUESTED' ? ('COMPLETED' as const) : c.refundStatus,
-          resolution: c.resolution
-            ? { ...c.resolution, customerAccepted: true, customerFeedback: feedback }
-            : undefined,
-          messages: [...c.messages, customerMsg],
-          auditLogs: [...c.auditLogs, newAuditLog],
-        };
-      }
-      return c;
+    const updatedRecord = normalizeComplaint(res.data.complaint);
+    set({
+      complaints: get().complaints.map((c) =>
+        c.id === complaintId
+          ? { ...updatedRecord, customerPastOrdersCount: c.customerPastOrdersCount }
+          : c
+      ),
     });
-
-    set({ complaints: updated });
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   },
 
   rejectResolution: async (complaintId, reason) => {
-    const nowStr = new Date().toISOString();
-    const complaints = get().complaints;
-    const target = complaints.find((c) => c.id === complaintId);
-    if (!target) return;
-
-    try {
-      await apiClient.post(`/complaints/${complaintId}/reject-resolution`, { reason });
-    } catch (apiErr) {
-      console.warn('API error in rejectResolution:', apiErr);
+    const res = await apiClient.post(`/complaints/${complaintId}/reject-resolution`, { reason });
+    if (!res.data?.success || !res.data?.complaint) {
+      throw new Error(res.data?.error || 'Failed to reject resolution');
     }
-
-    const newAuditLog: AuditLog = {
-      id: `aud-${Date.now()}`,
-      complaintId,
-      user: `Customer (${target.customerName})`,
-      action: 'Customer Reopened Complaint',
-      timestamp: nowStr,
-      previousStatus: target.status,
-      newStatus: 'REOPENED',
-      notes: reason,
-    };
-
-    const customerMsg: Message = {
-      id: `msg-rej-${Date.now()}`,
-      complaintId,
-      senderId: target.customerId,
-      senderName: target.customerName,
-      senderType: 'CUSTOMER',
-      message: `I request further assistance: "${reason}"`,
-      timestamp: nowStr,
-    };
-
-    const updated = complaints.map((c) => {
-      if (c.id === complaintId) {
-        return {
-          ...c,
-          status: 'REOPENED' as const,
-          updatedAt: nowStr,
-          resolution: c.resolution ? { ...c.resolution, customerAccepted: false } : undefined,
-          messages: [...c.messages, customerMsg],
-          auditLogs: [...c.auditLogs, newAuditLog],
-        };
-      }
-      return c;
+    const updatedRecord = normalizeComplaint(res.data.complaint);
+    set({
+      complaints: get().complaints.map((c) =>
+        c.id === complaintId
+          ? { ...updatedRecord, customerPastOrdersCount: c.customerPastOrdersCount }
+          : c
+      ),
     });
-
-    set({ complaints: updated });
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   },
 
   escalateComplaint: async (complaintId, reason, user) => {
-    const nowStr = new Date().toISOString();
-    const complaints = get().complaints;
-    const target = complaints.find((c) => c.id === complaintId);
-    if (!target) return;
-
-    try {
-      await apiClient.patch(`/complaints/${complaintId}/status`, {
-        newStatus: 'ESCALATED',
-        user,
-        notes: reason,
-      });
-    } catch (apiErr) {
-      console.warn('API error in escalateComplaint:', apiErr);
-    }
-
-    const newAuditLog: AuditLog = {
-      id: `aud-${Date.now()}`,
-      complaintId,
-      user,
-      action: 'Complaint Escalated to MyQuro Central Support',
-      timestamp: nowStr,
-      previousStatus: target.status,
+    const res = await apiClient.patch(`/complaints/${complaintId}/status`, {
       newStatus: 'ESCALATED',
+      user,
       notes: reason,
-    };
-
-    const escalationMsg: Message = {
-      id: `msg-esc-${Date.now()}`,
-      complaintId,
-      senderId: 'MYQURO_SUPPORT',
-      senderName: 'MyQuro Central Support',
-      senderType: 'MYQURO_SUPPORT',
-      message: `Ticket escalated to Central Escalations Team. Reason: "${reason}". Senior manager assigned.`,
-      timestamp: nowStr,
-    };
-
-    const updated = complaints.map((c) => {
-      if (c.id === complaintId) {
-        return {
-          ...c,
-          status: 'ESCALATED' as const,
-          updatedAt: nowStr,
-          messages: [...c.messages, escalationMsg],
-          auditLogs: [...c.auditLogs, newAuditLog],
-        };
-      }
-      return c;
     });
-
-    set({ complaints: updated });
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    if (!res.data?.success || !res.data?.complaint) {
+      throw new Error(res.data?.error || 'Failed to escalate complaint');
+    }
+    const updatedRecord = normalizeComplaint(res.data.complaint);
+    set({
+      complaints: get().complaints.map((c) =>
+        c.id === complaintId
+          ? { ...updatedRecord, customerPastOrdersCount: c.customerPastOrdersCount }
+          : c
+      ),
+    });
   },
 
   // ---------------- Selection & Filters ----------------
@@ -752,7 +488,6 @@ export const useComplaintStore = create<ComplaintStoreState>((set, get) => ({
   },
 
   resetToDefaultComplaints: async () => {
-    await AsyncStorage.removeItem(STORAGE_KEY);
     await get().loadComplaints();
   },
 }));

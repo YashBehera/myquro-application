@@ -119,6 +119,7 @@ export default function RestaurantDashboard() {
 
     const pollInterval = setInterval(() => {
       loadOrders();
+      loadComplaints(undefined, true);
     }, 4000);
 
     return () => clearInterval(pollInterval);

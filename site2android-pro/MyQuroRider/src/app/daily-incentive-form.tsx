@@ -25,10 +25,16 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
 import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
+import {
+  submitRiderSupportTicket,
+  sendRiderTicketMessage,
+  formatDynamicFullDate,
+} from '../utils/supportTicketApi';
 
 interface Message {
   id: string;
-  sender: 'ai' | 'user';
+  sender: 'support' | 'user';
+  senderLabel?: string;
   text: string;
   timestamp: string;
   imageAttached?: string;
@@ -38,15 +44,16 @@ export default function DailyIncentiveFormScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
-  const { sessionToken } = useRider();
+  const { sessionToken, driverProfile } = useRider();
   const scrollViewRef = useRef<ScrollViewInstance>(null);
-  
-  const dateStr = (params.date as string) || 'Tuesday, 18 August';
+
+  const dateStr = (params.date as string) || formatDynamicFullDate();
   const language = (params.language as string) || 'English';
-  
+
+  const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [customAlert, setCustomAlert] = useState<{
     visible: boolean;
@@ -77,48 +84,73 @@ export default function DailyIncentiveFormScreen() {
   const hideAlertModal = () => {
     setCustomAlert((prev) => ({ ...prev, visible: false }));
   };
-  const [ticketStatus, setTicketStatus] = useState<'chatting' | 'submitted'>('chatting');
 
-  // Load initial AI messages based on language selection
+  const mapBackendMessages = (complaint: any) => {
+    const rawMsgs = Array.isArray(complaint?.messages) ? complaint.messages : [];
+    const mapped: Message[] = rawMsgs.map((m: any, i: number) => {
+      const st = String(m.senderType || '').toUpperCase();
+      const isRider = st === 'RIDER' || (Boolean(driverProfile?.id) && m.senderId === driverProfile?.id);
+      let ts = '';
+      if (m.timestamp) {
+        try {
+          ts = new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch {}
+      }
+      return {
+        id: m.id || `msg_${i}`,
+        sender: isRider ? 'user' : 'support',
+        senderLabel: isRider ? 'You' : m.senderName || 'MyQuro Partner Support',
+        text: m.message || '',
+        timestamp: ts || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        imageAttached: m.attachmentUrl || undefined,
+      };
+    });
+    if (mapped.length > 0) setMessages(mapped);
+  };
+
+  // Initial prompt before user creates the real backend ticket
   useEffect(() => {
-    setIsTyping(true);
-    const timer = setTimeout(() => {
-      const isHinglish = language.toLowerCase() === 'hinglish' || language.toLowerCase() === 'hindi';
-      
-      const welcomeText = isHinglish
-        ? `Namaste! Main aapka AI Support Assistant hoon. Mujhe dikh raha hai ki aapko ${dateStr} ke daily incentive me issue aayi hai.`
-        : `Hello! I am your AI Support Assistant. I see you faced an issue with your daily incentive for ${dateStr}.`;
+    if (activeTicketId) return;
+    const isHinglish = language.toLowerCase() === 'hinglish' || language.toLowerCase() === 'hindi';
+    const promptText = isHinglish
+      ? `Namaste! ${dateStr} ke daily incentive issue ke liye apna message likhein ya '+' button se incentive screenshot attach karein. Submit karte hi yeh sidha MyQuro Partner Support ko jayega.`
+      : `Please describe your daily incentive issue for ${dateStr} or tap '+' to attach your incentive screenshot. Your message will create a tracked support ticket directly.`;
 
-      const instructionText = isHinglish
-        ? `Kya aap mujhe describe kar sakte hain ki kya problem hui? Aur agar aapke paas incentives screen ka screenshot hai, toh niche '+' button click karke attach karein.`
-        : `Could you please describe what went wrong? If you have a screenshot of your incentives page, please click the '+' button below to attach it.`;
+    setMessages([
+      {
+        id: 'prompt_1',
+        sender: 'support',
+        senderLabel: 'MyQuro Partner Support',
+        text: promptText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+  }, [language, dateStr, activeTicketId]);
 
-      setMessages([
-        {
-          id: '1',
-          sender: 'ai',
-          text: welcomeText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-        {
-          id: '2',
-          sender: 'ai',
-          text: instructionText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-      setIsTyping(false);
-    }, 800);
+  // Live poll backend once ticket exists
+  useEffect(() => {
+    if (!activeTicketId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/complaints/${activeTicketId}`, {
+          headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : undefined,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.success && data?.complaint) {
+            mapBackendMessages(data.complaint);
+          }
+        }
+      } catch {}
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [activeTicketId, sessionToken]);
 
-    return () => clearTimeout(timer);
-  }, [language, dateStr]);
-
-  // Scroll to bottom whenever messages list or typing state changes
   useEffect(() => {
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 100);
-  }, [messages, isTyping]);
+  }, [messages, isSending]);
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -129,79 +161,64 @@ export default function DailyIncentiveFormScreen() {
   };
 
   const handleSendMessage = async (textToSend?: string, attachedImg?: string) => {
-    const text = textToSend || inputText;
-    if (!text.trim() && !attachedImg) return;
+    const text = (textToSend ?? inputText).trim();
+    if ((!text && !attachedImg) || isSending) return;
 
-    // Add user message
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      sender: 'user',
-      text: text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      imageAttached: attachedImg,
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
+    const msgBody = text || 'Attached incentive screenshot';
     setInputText('');
+    setIsSending(true);
 
-    // Trigger AI response
-    setIsTyping(true);
+    if (!activeTicketId) {
+      const result = await submitRiderSupportTicket({
+        sessionToken,
+        category: 'daily_incentive',
+        subject: `Daily Incentive Issue on ${dateStr}`,
+        description: msgBody,
+        attachments: attachedImg ? [attachedImg] : [],
+        metadata: { date: dateStr, language },
+      });
+      setIsSending(false);
 
-    // Call backend support ticket endpoint
-    let serverTicketId = `DI-${Date.now().toString().slice(-5)}`;
-    if (sessionToken) {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-ticket`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`,
-            'Origin': 'http://localhost:3000',
-          },
-          body: JSON.stringify({
-            category: 'daily_incentive',
-            subject: `Daily Incentive Issue on ${dateStr}`,
-            description: text,
-            metadata: { date: dateStr, language, attachedImg: attachedImg || null },
-          }),
+      if (!result.success || !result.ticket?.id) {
+        if (!textToSend) setInputText(text);
+        showAlertModal({
+          type: 'warning',
+          title: 'Ticket Failed',
+          subtitle: result.error || 'Could not register your daily incentive ticket.',
+          primaryButtonText: 'Okay',
+          onPrimaryPress: hideAlertModal,
         });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ticket?.id) {
-            serverTicketId = data.ticket.id;
-          }
-        }
-      } catch (err) {
-        console.error('Support ticket error:', err);
+        return;
       }
+
+      setActiveTicketId(result.ticket.id);
+      mapBackendMessages(result.ticket);
+      return;
     }
 
-    setTimeout(() => {
-      const isHinglish = language.toLowerCase() === 'hinglish' || language.toLowerCase() === 'hindi';
-      let aiResponseText = '';
+    const replyRes = await sendRiderTicketMessage({
+      sessionToken,
+      ticketId: activeTicketId,
+      senderId: driverProfile?.id || driverProfile?.deId || 'RIDER',
+      senderName: driverProfile?.name || 'Delivery Partner',
+      message: msgBody,
+      attachmentUrl: attachedImg || null,
+    });
+    setIsSending(false);
 
-      if (attachedImg || messages.length >= 2) {
-        aiResponseText = isHinglish
-          ? `Dhanyawad screenshot aur details ke liye! Main dekh sakta hoon ki aapne target complete kiya hai. Maine aapki issue ticket support team ko adjust karne ke liye bhej di hai. Ticket ID: #${serverTicketId}. 2 ghante ke andar incentive update ho jayega.`
-          : `Thank you for attaching the details. I have verified your submission and raised ticket #${serverTicketId} with our payout team. The incentive adjustment will be completed within 2 hours.`;
-        setTicketStatus('submitted');
-      } else {
-        aiResponseText = isHinglish
-          ? `Samajh gaya. Please confirm karein agar aapne incentive screenshot capture kiya hai, taaki hum use jald se jald verify kar sakein. Aap '+' icon se upload kar sakte hain.`
-          : `Understood. Please attach the incentive details screenshot so that we can verify your target completion. You can upload it using the '+' icon.`;
-      }
+    if (!replyRes.success || !replyRes.complaint) {
+      if (!textToSend) setInputText(text);
+      showAlertModal({
+        type: 'warning',
+        title: 'Message Failed',
+        subtitle: replyRes.error || 'Could not send message to support server.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
+      return;
+    }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          sender: 'ai',
-          text: aiResponseText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-      setIsTyping(false);
-    }, 1200);
+    mapBackendMessages(replyRes.complaint);
   };
 
   const openUploadMenu = () => {
@@ -210,7 +227,7 @@ export default function DailyIncentiveFormScreen() {
 
   const handleSelectOption = async (optionType: 'camera' | 'local' | 'drive') => {
     setUploadModalVisible(false);
-    
+
     try {
       if (optionType === 'camera') {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -218,10 +235,15 @@ export default function DailyIncentiveFormScreen() {
           const result = await ImagePicker.launchCameraAsync({
             mediaTypes: ['images'],
             allowsEditing: true,
-            quality: 0.8,
+            quality: 0.45,
+            base64: true,
           });
           if (!result.canceled && result.assets?.[0]?.uri) {
-            handleSendMessage('Attached incentive screenshot photo', result.assets[0].uri);
+            const asset = result.assets[0];
+            const uri = asset.base64
+              ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`
+              : asset.uri;
+            await handleSendMessage('Attached incentive screenshot photo', uri);
             return;
           }
         } else {
@@ -239,10 +261,15 @@ export default function DailyIncentiveFormScreen() {
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
             allowsEditing: true,
-            quality: 0.8,
+            quality: 0.45,
+            base64: true,
           });
           if (!result.canceled && result.assets?.[0]?.uri) {
-            handleSendMessage('Attached incentive screenshot from gallery', result.assets[0].uri);
+            const asset = result.assets[0];
+            const uri = asset.base64
+              ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`
+              : asset.uri;
+            await handleSendMessage('Attached incentive screenshot from gallery', uri);
             return;
           }
         } else {
@@ -261,7 +288,7 @@ export default function DailyIncentiveFormScreen() {
         });
         if (!docResult.canceled && docResult.assets?.[0]) {
           const asset = docResult.assets[0];
-          handleSendMessage(`Attached document: ${asset.name}`, asset.uri);
+          await handleSendMessage(`Attached document: ${asset.name}`, asset.uri);
           return;
         }
       }
@@ -283,12 +310,14 @@ export default function DailyIncentiveFormScreen() {
         <TouchableOpacity onPress={handleBack} style={styles.backBtn} activeOpacity={0.8}>
           <Ionicons name="arrow-back" size={24} color="#F2CA50" />
         </TouchableOpacity>
-        
+
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>AI Support Assistant</Text>
+          <Text style={styles.headerTitle}>
+            {activeTicketId ? `Ticket #${activeTicketId}` : 'Daily Incentive Support'}
+          </Text>
           <View style={styles.onlineStatusRow}>
             <View style={styles.greenDot} />
-            <Text style={styles.onlineText}>Online</Text>
+            <Text style={styles.onlineText}>{activeTicketId ? 'Connected to Support' : 'Ready'}</Text>
           </View>
         </View>
       </View>
@@ -320,10 +349,10 @@ export default function DailyIncentiveFormScreen() {
             >
               {!isUser && (
                 <View style={styles.aiAvatar}>
-                  <Ionicons name="sparkles" size={14} color="#000000" />
+                  <Ionicons name="headset" size={14} color="#000000" />
                 </View>
               )}
-              
+
               <View
                 style={[
                   styles.msgBubble,
@@ -332,17 +361,17 @@ export default function DailyIncentiveFormScreen() {
               >
                 {item.imageAttached && (
                   <View style={styles.imageBadge}>
-                    {item.imageAttached.startsWith('file://') || item.imageAttached.startsWith('http') || item.imageAttached.startsWith('content://') ? (
+                    {item.imageAttached.startsWith('data:image/') ||
+                    item.imageAttached.startsWith('file://') ||
+                    item.imageAttached.startsWith('http') ||
+                    item.imageAttached.startsWith('content://') ? (
                       <Image source={{ uri: item.imageAttached }} style={styles.chatAttachedImage} resizeMode="cover" />
                     ) : (
                       <Ionicons name="image-outline" size={20} color="#F2CA50" />
                     )}
-                    <Text style={styles.imageBadgeText} numberOfLines={1}>
-                      {item.imageAttached.split('/').pop() || item.imageAttached}
-                    </Text>
                   </View>
                 )}
-                
+
                 <Text style={styles.msgText}>{item.text}</Text>
                 <Text style={styles.msgTime}>{item.timestamp}</Text>
               </View>
@@ -350,59 +379,48 @@ export default function DailyIncentiveFormScreen() {
           );
         })}
 
-        {/* Typing Indicator */}
-        {isTyping && (
+        {isSending && (
           <View style={[styles.messageRow, styles.aiRow]}>
             <View style={styles.aiAvatar}>
-              <Ionicons name="sparkles" size={14} color="#000000" />
+              <Ionicons name="sync" size={14} color="#000000" />
             </View>
             <View style={[styles.msgBubble, styles.aiBubble, styles.typingBubble]}>
               <ActivityIndicator size="small" color="#F2CA50" style={styles.loader} />
-              <Text style={styles.typingText}>AI is scanning...</Text>
+              <Text style={styles.typingText}>Syncing with support...</Text>
             </View>
           </View>
         )}
       </ScrollView>
 
-      {/* INPUT FIELD BAR OR CLOSE TICKET BAR */}
-      {ticketStatus === 'submitted' ? (
-        <View style={[styles.footerActionContainer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <TouchableOpacity
-            onPress={() => router.replace('/daily-incentive')}
-            activeOpacity={0.8}
-            style={styles.closeTicketBtn}
-          >
-            <Text style={styles.closeTicketText}>BACK TO DAILY INCENTIVES</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={[styles.bottomInputContainer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <TouchableOpacity
-            onPress={openUploadMenu}
-            style={styles.attachBtn}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="add-circle" size={32} color="#F2CA50" />
-          </TouchableOpacity>
+      {/* INPUT FIELD BAR */}
+      <View style={[styles.bottomInputContainer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <TouchableOpacity
+          onPress={openUploadMenu}
+          style={styles.attachBtn}
+          activeOpacity={0.7}
+          disabled={isSending}
+        >
+          <Ionicons name="add-circle" size={32} color="#F2CA50" />
+        </TouchableOpacity>
 
-          <TextInput
-            style={styles.chatInput}
-            placeholder="Type your message..."
-            placeholderTextColor="#787878"
-            value={inputText}
-            onChangeText={setInputText}
-            onSubmitEditing={() => handleSendMessage()}
-          />
+        <TextInput
+          style={styles.chatInput}
+          placeholder="Type your message..."
+          placeholderTextColor="#787878"
+          value={inputText}
+          onChangeText={setInputText}
+          onSubmitEditing={() => handleSendMessage()}
+        />
 
-          <TouchableOpacity
-            onPress={() => handleSendMessage()}
-            style={styles.sendBtn}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="send" size={20} color="#000000" />
-          </TouchableOpacity>
-        </View>
-      )}
+        <TouchableOpacity
+          onPress={() => handleSendMessage()}
+          style={[styles.sendBtn, isSending && { opacity: 0.6 }]}
+          disabled={isSending}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="send" size={20} color="#000000" />
+        </TouchableOpacity>
+      </View>
 
       {/* UPLOAD SELECTION MODAL */}
       <Modal

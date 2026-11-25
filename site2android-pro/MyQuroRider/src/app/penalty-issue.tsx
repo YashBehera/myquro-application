@@ -21,8 +21,8 @@ import {
   Platform,
 } from 'react-native';
 import { useRider } from '@/context/RiderContext';
-import { BACKEND_URL } from '@/config';
 import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
+import { submitRiderSupportTicket } from '../utils/supportTicketApi';
 
 export default function PenaltyIssueScreen() {
   const router = useRouter();
@@ -115,38 +115,30 @@ export default function PenaltyIssueScreen() {
       return;
     }
 
-    setDisputeModalVisible(false);
-    let ticketId = `PEN-${Date.now().toString().slice(-5)}`;
+    const result = await submitRiderSupportTicket({
+      sessionToken,
+      category: 'penalty_deduction',
+      subject: `Penalty Dispute for ${selectedDayName}`,
+      description: disputeReason.trim(),
+      metadata: { day: selectedDayName },
+    });
 
-    if (sessionToken) {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-ticket`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`,
-            'Origin': 'http://localhost:3000',
-          },
-          body: JSON.stringify({
-            category: 'penalty_deduction',
-            subject: `Penalty Dispute for ${selectedDayName}`,
-            description: disputeReason,
-            metadata: { day: selectedDayName },
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ticket?.id) ticketId = data.ticket.id;
-        }
-      } catch (err) {
-        console.error('Penalty claim error:', err);
-      }
+    if (!result.success || !result.ticket?.id) {
+      showAlertModal({
+        type: 'warning',
+        title: 'Submission Failed',
+        subtitle: result.error || 'Could not register penalty dispute on server.',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
+      return;
     }
 
+    setDisputeModalVisible(false);
     showAlertModal({
       type: 'success_online',
       title: 'Dispute Submitted 🎉',
-      subtitle: `Your penalty dispute (Ticket #${ticketId}) for ${selectedDayName} has been submitted. Our team will review the trip logs.`,
+      subtitle: `Your penalty dispute (Ticket #${result.ticket.id}) for ${selectedDayName} has been registered with support.`,
       primaryButtonText: 'Got It',
       onPrimaryPress: () => {
         hideAlertModal();
