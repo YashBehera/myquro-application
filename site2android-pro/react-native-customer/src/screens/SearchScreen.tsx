@@ -39,6 +39,8 @@ import { getOptimizedImageUrl } from '../utils/imageUtils';
 import { LazyImage } from '../components/LazyImage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SCREEN_WIDTH, isTablet, getSafeTopPadding, getSafeBottomPadding } from '../utils/responsive';
+import { isValidCoordPair } from '../utils/serviceability';
+import { formatRatingCount } from '../utils/ratingFormat';
 import {
   getStoredRecentSearches,
   addStoredRecentSearch,
@@ -116,7 +118,25 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   initialQuery = '',
 }) => {
   const insets = useSafeAreaInsets();
-  const { allRestaurants, foodItems, categories, addToCart, updateCartQuantity, cartItems } = useViewModel();
+  const {
+    allRestaurants,
+    restaurantsList,
+    currentLocation,
+    foodItems,
+    categories,
+    addToCart,
+    updateCartQuantity,
+    cartItems,
+  } = useViewModel();
+
+  const hasValidLocation = isValidCoordPair(currentLocation?.latitude, currentLocation?.longitude);
+  const serviceableRestaurants = useMemo(() => {
+    return hasValidLocation ? restaurantsList : allRestaurants;
+  }, [hasValidLocation, restaurantsList, allRestaurants]);
+  const serviceableRestIdSet = useMemo(
+    () => new Set(serviceableRestaurants.map((r: Restaurant) => String(r.id))),
+    [serviceableRestaurants]
+  );
 
   const [query, setQuery] = useState(initialQuery);
   const [isSubmitted, setIsSubmitted] = useState(!!initialQuery);
@@ -223,7 +243,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       };
     }
     
-    const res = allRestaurants.find(r => r.name.toLowerCase().includes(q));
+    const res = serviceableRestaurants.find(r => r.name.toLowerCase().includes(q));
     if (res) {
       return {
         name: res.name,
@@ -234,7 +254,12 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       };
     }
     
-    const food = foodItems.find(f => f.name && f.name.toLowerCase().includes(q));
+    const food = foodItems.find(
+      (f) =>
+        f.name &&
+        f.name.toLowerCase().includes(q) &&
+        (!hasValidLocation || serviceableRestIdSet.has(String(f.restaurantId || f.restaurant_id || '')))
+    );
     if (food) {
       return {
         name: food.name,
@@ -251,14 +276,14 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       type: 'Dish',
       image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=150',
     };
-  }, [query, categories, allRestaurants, foodItems]);
+  }, [query, categories, serviceableRestaurants, foodItems, hasValidLocation, serviceableRestIdSet]);
 
   // Matching Restaurants for suggestions
   const relevantRestaurants = useMemo(() => {
     if (query.trim().length < 1) return [];
     const q = query.toLowerCase().trim();
     
-    const matches = allRestaurants.filter((res: Restaurant) => {
+    const matches = serviceableRestaurants.filter((res: Restaurant) => {
       const cuisineStr = Array.isArray(res.cuisine)
         ? (res.cuisine as string[]).join(', ')
         : typeof res.cuisine === 'string'
@@ -273,7 +298,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     });
     
     return filtered.slice(0, 5);
-  }, [query, allRestaurants, firstSuggestion]);
+  }, [query, serviceableRestaurants, firstSuggestion]);
 
   // Matching Dishes for suggestions
   const moreResults = useMemo(() => {
@@ -281,18 +306,20 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     const q = query.toLowerCase().trim();
     
     const matchedDishes = foodItems.filter((food: any) =>
-      food.name && food.name.toLowerCase().includes(q)
+      food.name &&
+      food.name.toLowerCase().includes(q) &&
+      (!hasValidLocation || serviceableRestIdSet.has(String(food.restaurantId || food.restaurant_id || '')))
     );
 
     return matchedDishes.slice(0, 8);
-  }, [query, foodItems]);
+  }, [query, foodItems, hasValidLocation, serviceableRestIdSet]);
 
   // ─── FILTERED SEARCH RESULTS (When submitted or browsing) ───
   const searchMatchedRestaurants = useMemo(() => {
-    if (!query.trim()) return allRestaurants;
+    if (!query.trim()) return serviceableRestaurants;
     const lowerQuery = query.toLowerCase().trim();
 
-    return allRestaurants.filter((res: Restaurant) => {
+    return serviceableRestaurants.filter((res: Restaurant) => {
       const cuisineStr = Array.isArray(res.cuisine)
         ? (res.cuisine as string[]).join(', ')
         : typeof res.cuisine === 'string'
@@ -323,30 +350,30 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
 
       return true;
     });
-  }, [query, allRestaurants, foodItems, ratingFilter, offersOnlyFilter, fastDeliveryFilter]);
+  }, [query, serviceableRestaurants, foodItems, ratingFilter, offersOnlyFilter, fastDeliveryFilter]);
 
   // Primary restaurant
   const primaryRestaurant = useMemo(() => {
-    if (searchMatchedRestaurants.length === 0) return allRestaurants[0] || null;
+    if (searchMatchedRestaurants.length === 0) return serviceableRestaurants[0] || null;
     const directMatch = searchMatchedRestaurants.find(
       (res: Restaurant) => res.name.toLowerCase().includes(query.toLowerCase().trim())
     );
     return directMatch || searchMatchedRestaurants[0];
-  }, [searchMatchedRestaurants, allRestaurants, query]);
+  }, [searchMatchedRestaurants, serviceableRestaurants, query]);
 
   // Secondary featured restaurants
   const secondaryRestaurants = useMemo(() => {
     if (!primaryRestaurant) return searchMatchedRestaurants;
     const restList = searchMatchedRestaurants.filter((res: Restaurant) => res.id !== primaryRestaurant.id);
     if (restList.length === 0) {
-      return allRestaurants.filter(r => r.id !== primaryRestaurant.id);
+      return serviceableRestaurants.filter(r => r.id !== primaryRestaurant.id);
     }
     return restList;
-  }, [searchMatchedRestaurants, allRestaurants, primaryRestaurant]);
+  }, [searchMatchedRestaurants, serviceableRestaurants, primaryRestaurant]);
 
   // Dynamic promo banners
   const dynamicPromoBanners = useMemo(() => {
-    return allRestaurants.slice(0, 4).map((res, idx) => ({
+    return serviceableRestaurants.slice(0, 4).map((res, idx) => ({
       id: res.id,
       name: res.name,
       image: res.image || 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600',
@@ -408,9 +435,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
 
     dishes.forEach((food: any) => {
       const restId = String(food.restaurantId || food.restaurant_id || '');
-      let res = allRestaurants.find(r => String(r.id) === restId);
+      let res = serviceableRestaurants.find(r => String(r.id) === restId);
       if (!res && food.restaurantName) {
-        res = allRestaurants.find(r => r.name.toLowerCase() === food.restaurantName.toLowerCase());
+        res = serviceableRestaurants.find(r => r.name.toLowerCase() === food.restaurantName.toLowerCase());
       }
       if (!res) return;
 
@@ -424,8 +451,8 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       groups[key].dishes.push(food);
     });
 
-    if (Object.keys(groups).length === 0 && allRestaurants.length > 0) {
-      allRestaurants.slice(0, 3).forEach((res) => {
+    if (Object.keys(groups).length === 0 && serviceableRestaurants.length > 0) {
+      serviceableRestaurants.slice(0, 3).forEach((res) => {
         const sampleDishes = foodItems.filter(f => String(f.restaurantId) === String(res.id)).slice(0, 5);
         if (sampleDishes.length > 0) {
           groups[res.id] = { restaurant: res, dishes: sampleDishes };
@@ -434,7 +461,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     }
 
     return Object.values(groups);
-  }, [searchMatchedDishes, selectedSubPill, allRestaurants, foodItems]);
+  }, [searchMatchedDishes, selectedSubPill, serviceableRestaurants, foodItems]);
 
   const triggerSearch = (searchQuery: string) => {
     if (!searchQuery.trim()) return;
@@ -980,9 +1007,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                         <View style={styles.primaryRestRatingRow}>
                           <Star size={12} color="#DEA430" fill="#DEA430" style={{ marginRight: 3 }} />
                           <Text style={styles.primaryRestRatingVal}>{primaryRestaurant.rating || '4.5'}</Text>
-                          {primaryRestaurant.reviewCount ? (
+                          {Number(primaryRestaurant.reviewCount) > 0 ? (
                             <Text style={styles.primaryRestReviewCount}>
-                              ({primaryRestaurant.reviewCount >= 1000 ? `${(primaryRestaurant.reviewCount / 1000).toFixed(1)}K+` : `${primaryRestaurant.reviewCount}+`})
+                              ({formatRatingCount(primaryRestaurant.reviewCount)})
                             </Text>
                           ) : null}
                           <Text style={styles.metaDot}>•</Text>
@@ -1122,9 +1149,9 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                                     <Star size={10} color="#FFFFFF" fill="#FFFFFF" style={{ marginRight: 2 }} />
                                     <Text style={styles.greenStarRatingVal}>{res.rating || '4.4'}</Text>
                                   </View>
-                                  {res.reviewCount ? (
+                                  {Number(res.reviewCount) > 0 ? (
                                     <Text style={styles.featuredCardReviewCount}>
-                                      ({res.reviewCount >= 1000 ? `${(res.reviewCount / 1000).toFixed(1)}K+` : `${res.reviewCount}+`})
+                                      ({formatRatingCount(res.reviewCount)})
                                     </Text>
                                   ) : null}
                                   <Text style={styles.metaDot}>•</Text>

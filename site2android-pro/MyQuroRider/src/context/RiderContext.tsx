@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { io } from 'socket.io-client';
 import { BACKEND_URL } from '../config';
@@ -11,6 +11,7 @@ export interface TripOrder {
   id: string;
   customerName: string;
   customerPhone: string;
+  restaurantPhone?: string;
   customerRating: number;
   pickupAddress: string;
   dropoffAddress: string;
@@ -72,10 +73,13 @@ export interface RiderContextType {
   cancelActiveTrip: () => Promise<void>;
   todayEarnings: number;
   weeklyEarnings: number;
+  walletBalance: number;
+  strikeCount: number;
+  penaltyCooldownUntil: string | null;
+  totalPenaltiesPaise: number;
   tripsToday: number;
   onlineHours: number;
   tripHistory: TripOrder[];
-  triggerDemoRequest: () => void;
   cashoutBalance: () => void;
   refreshRiderProfile: () => Promise<void>;
   loginHistory: any | null;
@@ -121,6 +125,10 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [activeTrip, setActiveTrip] = useState<TripOrder | null>(null);
   const [todayEarnings, setTodayEarnings] = useState<number>(0);
   const [weeklyEarnings, setWeeklyEarnings] = useState<number>(0);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [strikeCount, setStrikeCount] = useState<number>(0);
+  const [penaltyCooldownUntil, setPenaltyCooldownUntil] = useState<string | null>(null);
+  const [totalPenaltiesPaise, setTotalPenaltiesPaise] = useState<number>(0);
   const [tripsToday, setTripsToday] = useState<number>(0);
   const [onlineHours, setOnlineHours] = useState<number>(0);
   const [tripHistory, setTripHistory] = useState<TripOrder[]>([]);
@@ -216,7 +224,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await fetch(`${BACKEND_URL}/api/delivery/rider/profile`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Origin': 'http://localhost:3000',
         },
       });
       if (res.ok) {
@@ -225,7 +232,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const profile = data.rider;
           const deId = profile.id ? String(Math.abs(profile.id.split('-').reduce((acc: number, str: string) => acc + str.charCodeAt(0), 10000000))).slice(0, 8) : '10651338';
           const formattedDate = profile.createdAt ? new Date(profile.createdAt).toLocaleDateString('en-GB') : '22/07/2026';
-          
+
           setDriverProfile((prev) => {
             const resolvedAvatar = profile.selfieUrl || prev.avatarUrl || '';
             const resolvedPhone = profile.phone ? profile.phone.replace('+91', '').trim() : (prev.phone || '');
@@ -286,7 +293,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await fetch(`${BACKEND_URL}/api/delivery/rider/dashboard`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Origin': 'http://localhost:3000',
         },
       });
       if (res.ok) {
@@ -297,6 +303,10 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
           setTodayEarnings(Math.round(Number(data.stats.todayEarnings || 0) * 100) / 100);
           setWeeklyEarnings(Math.round(Number(data.stats.weekEarnings || 0) * 100) / 100);
+          setWalletBalance(Math.round(Number(data.stats.walletBalance || 0) * 100) / 100);
+          setStrikeCount(Number(data.stats.strikeCount || 0));
+          setPenaltyCooldownUntil(data.stats.penaltyCooldownUntil || null);
+          setTotalPenaltiesPaise(Number(data.stats.totalPenaltiesPaise || 0));
           setTripsToday(data.stats.todayDeliveries || 0);
           setOnlineHours(6.2);
         }
@@ -332,11 +342,12 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: task.orderId,
       customerName: task.customerName || '',
       customerPhone: task.customerPhone || '',
+      restaurantPhone: task.restaurantPhone || '',
       customerRating: 4.9,
       pickupAddress: task.restaurantName ? `${task.restaurantName}, ${task.restaurantAddress}` : task.restaurantAddress,
       dropoffAddress: task.customerAddress || '',
-      pickupCoords: { latitude: task.restaurantLat || 22.8046, longitude: task.restaurantLng || 86.2029 },
-      dropoffCoords: { latitude: task.customerLat || 22.8046, longitude: task.customerLng || 86.2029 },
+      pickupCoords: { latitude: Number(task.restaurantLat) || 0, longitude: Number(task.restaurantLng) || 0 },
+      dropoffCoords: { latitude: Number(task.customerLat) || 0, longitude: Number(task.customerLng) || 0 },
       distanceKm: task.distanceKm ? Number(task.distanceKm) : 4.8,
       estimatedMinutes: task.etaMinutes || 15,
       fareAmount: fare,
@@ -357,7 +368,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await fetch(`${BACKEND_URL}/api/delivery/rider/active-task`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Origin': 'http://localhost:3000',
         },
       });
       if (res.ok) {
@@ -369,7 +379,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           fetchChatMessages(data.task.orderId, token);
           connectSocket(data.task.orderId, token);
         } else {
-          setActiveTrip((prev) => (prev?.id?.startsWith('demo_order_') ? prev : null));
+          setActiveTrip(null);
         }
       }
     } catch (e) {
@@ -388,11 +398,16 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await fetch(`${BACKEND_URL}/api/delivery/offers`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Origin': 'http://localhost:3000',
         },
       });
       if (res.ok) {
         const data = await res.json();
+        if (data.cooldownUntil !== undefined) {
+          setPenaltyCooldownUntil(data.cooldownUntil || null);
+        }
+        if (typeof data.strikeCount === 'number') {
+          setStrikeCount(data.strikeCount);
+        }
         if (data.success && data.offers && data.offers.length > 0) {
           const now = Date.now();
           const validOffers = data.offers.filter((offer: any) => {
@@ -411,11 +426,12 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 id: offer.orderId,
                 customerName: offer.customerName || '',
                 customerPhone: offer.customerPhone || '',
+                restaurantPhone: offer.restaurantPhone || '',
                 customerRating: 4.8,
                 pickupAddress: offer.restaurantName ? `${offer.restaurantName}, ${offer.restaurantAddress}` : offer.restaurantAddress,
                 dropoffAddress: offer.customerAddress || '',
-                pickupCoords: { latitude: offer.restaurantLat || 22.8046, longitude: offer.restaurantLng || 86.2029 },
-                dropoffCoords: { latitude: offer.customerLat || 22.8046, longitude: offer.customerLng || 86.2029 },
+                pickupCoords: { latitude: Number(offer.restaurantLat) || 0, longitude: Number(offer.restaurantLng) || 0 },
+                dropoffCoords: { latitude: Number(offer.customerLat) || 0, longitude: Number(offer.customerLng) || 0 },
                 distanceKm: offer.distanceKm ? Number(offer.distanceKm) : 3.4,
                 estimatedMinutes: offer.etaMinutes || 12,
                 fareAmount: offerFare,
@@ -427,20 +443,10 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             });
             setIncomingRequest(mapped[0]);
           } else {
-            setIncomingRequest((prev) => {
-              if (prev?.id?.startsWith('demo_order_')) {
-                return prev;
-              }
-              return null;
-            });
+            setIncomingRequest(null);
           }
         } else {
-          setIncomingRequest((prev) => {
-            if (prev?.id?.startsWith('demo_order_')) {
-              return prev;
-            }
-            return null;
-          });
+          setIncomingRequest(null);
         }
       }
     } catch (e) {
@@ -456,7 +462,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({
           latitude: lat,
@@ -488,7 +493,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: {
           'Authorization': `Bearer ${sessionToken}`,
           'Content-Type': 'application/json',
-          'Origin': 'http://localhost:3000',
         },
       });
       if (res.ok) {
@@ -503,8 +507,14 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           fetchActiveTask(sessionToken),
         ]);
       } else {
-        // Revert on server rejection
+        const errData = await res.json().catch(() => ({}));
         setIsOnline(!targetOnline);
+        if (errData?.cooldownUntil) {
+          setPenaltyCooldownUntil(errData.cooldownUntil);
+        }
+        if (errData?.message) {
+          Alert.alert('Cannot Go Online', errData.message);
+        }
       }
     } catch (err) {
       console.error('Toggle status network error', err);
@@ -530,7 +540,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await fetch(`${BACKEND_URL}/api/delivery/rider/login-history`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Origin': 'http://localhost:3000',
         },
       });
       if (res.ok) {
@@ -550,29 +559,30 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const acceptIncomingRequest = async () => {
-    if (!incomingRequest) return;
-    
-    // Support offline demo orders
-    if (incomingRequest.id.startsWith('demo_order_')) {
-      setActiveTrip(incomingRequest);
-      setIncomingRequest(null);
-      return;
-    }
-
-    if (!sessionToken) return;
+    if (!incomingRequest || !sessionToken) return;
     try {
       const res = await fetch(`${BACKEND_URL}/api/delivery/accept`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({ orderId: incomingRequest.id }),
       });
       if (res.ok) {
         setIncomingRequest(null);
         fetchActiveTask(sessionToken);
+        fetchDashboardStats(sessionToken);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        if (errData?.cooldownUntil) {
+          setPenaltyCooldownUntil(errData.cooldownUntil);
+          setIsOnline(false);
+          setIncomingRequest(null);
+        }
+        if (errData?.message) {
+          Alert.alert('Offer Unavailable', errData.message);
+        }
       }
     } catch (err) {
       console.error('Accept offer error', err);
@@ -585,9 +595,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     declinedOrderIdsRef.current.set(targetId, Date.now());
     setIncomingRequest(null);
 
-    if (targetId.startsWith('demo_order_')) {
-      return;
-    }
     if (!sessionToken) return;
     try {
       await fetch(`${BACKEND_URL}/api/delivery/decline`, {
@@ -595,7 +602,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({ orderId: targetId }),
       });
@@ -606,24 +612,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const advanceTripStatus = async () => {
     if (!activeTrip) return;
-
-    // Support offline demo order advancement
-    if (activeTrip.id.startsWith('demo_order_')) {
-      let nextStatus: TripStatus = 'NAVIGATING_TO_PICKUP';
-      if (activeTrip.status === 'NAVIGATING_TO_PICKUP') {
-        nextStatus = 'ARRIVED_AT_PICKUP';
-      } else if (activeTrip.status === 'ARRIVED_AT_PICKUP') {
-        nextStatus = 'TRIP_IN_PROGRESS';
-      } else if (activeTrip.status === 'TRIP_IN_PROGRESS') {
-        nextStatus = 'COMPLETED';
-      } else if (activeTrip.status === 'COMPLETED') {
-        setActiveTrip(null);
-        setChatMessages([]);
-        return;
-      }
-      setActiveTrip({ ...activeTrip, status: nextStatus });
-      return;
-    }
 
     if (activeTrip.status === 'COMPLETED') {
       setActiveTrip(null);
@@ -650,7 +638,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({
           orderId: activeTrip.id,
@@ -672,32 +659,35 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const cancelActiveTrip = async () => {
-    if (!activeTrip) return;
-
-    // Support offline demo cancel
-    if (activeTrip.id.startsWith('demo_order_')) {
-      setActiveTrip(null);
-      setChatMessages([]);
-      return;
-    }
-
-    if (!sessionToken) return;
+    if (!activeTrip || !sessionToken) return;
     try {
       const res = await fetch(`${BACKEND_URL}/api/delivery/decline`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({ orderId: activeTrip.id }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
         setActiveTrip(null);
         setChatMessages([]);
         if (socketRef.current) {
           socketRef.current.disconnect();
         }
+        if (data?.penaltyApplied) {
+          setIsOnline(false);
+          if (data.cooldownUntil) {
+            setPenaltyCooldownUntil(data.cooldownUntil);
+          }
+          Alert.alert(
+            'Trip Cancelled — Penalty Applied',
+            data.message || `A cancellation penalty of ₹${Math.round((data.penaltyApplied.amount || 0) / 100)} was applied.`
+          );
+        }
+        fetchDashboardStats(sessionToken);
+        fetchRiderProfile(sessionToken);
       }
     } catch (e) {
       console.error('Cancel trip error', e);
@@ -714,36 +704,16 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
-  const triggerDemoRequest = () => {
-    setIncomingRequest({
-      id: 'demo_order_' + Date.now(),
-      customerName: 'Ashok Kumar',
-      customerPhone: '+919876543210',
-      customerRating: 4.9,
-      pickupAddress: 'Sindhi Sweets, Cosmopolis Mall, Khandagiri',
-      dropoffAddress: 'Patia, Bhubaneswar',
-      pickupCoords: { latitude: 20.2462, longitude: 85.7865 },
-      dropoffCoords: { latitude: 20.3500, longitude: 85.8200 },
-      distanceKm: 5.09,
-      estimatedMinutes: 19,
-      fareAmount: 50,
-      surgeMultiplier: '₹25 Surge',
-      packageType: 'Food Delivery',
-      status: 'NAVIGATING_TO_PICKUP',
-      createdAt: new Date().toISOString(),
-      paymentMode: 'COD',
-    });
-  };
   const dismissIncomingRequest = () => {
     if (incomingRequest) {
       declinedOrderIdsRef.current.set(incomingRequest.id, Date.now());
-      declineIncomingRequest().catch(() => {});
+      declineIncomingRequest().catch(() => { });
     } else {
       setIncomingRequest(null);
     }
   };
 
-  const cashoutBalance = () => {};
+  const cashoutBalance = () => { };
 
   // Auth helper methods
   const sendOtp = async (phone: string): Promise<boolean> => {
@@ -752,7 +722,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({ phone }),
       });
@@ -784,7 +753,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({ phone, otp }),
       });
@@ -842,7 +810,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({
           riderId: driverProfile?.id || undefined, // backend will resolve from token if missing
@@ -891,6 +858,15 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return [...prev, msg];
       });
     });
+
+    socket.on('rider-penalty', () => {
+      fetchDashboardStats(token);
+      fetchRiderProfile(token);
+    });
+
+    socket.on('rider-compensation', () => {
+      fetchDashboardStats(token);
+    });
   };
 
   const fetchChatMessages = async (orderId: string, token: string) => {
@@ -898,7 +874,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const res = await fetch(`${BACKEND_URL}/api/chat/${orderId}/messages`, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Origin': 'http://localhost:3000',
         },
       });
       if (res.ok) {
@@ -920,7 +895,6 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({
           text: text.trim(),
@@ -948,10 +922,13 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         cancelActiveTrip,
         todayEarnings,
         weeklyEarnings,
+        walletBalance,
+        strikeCount,
+        penaltyCooldownUntil,
+        totalPenaltiesPaise,
         tripsToday,
         onlineHours,
         tripHistory,
-        triggerDemoRequest,
         cashoutBalance,
         refreshRiderProfile,
         loginHistory,

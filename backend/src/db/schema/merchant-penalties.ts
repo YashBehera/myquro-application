@@ -11,7 +11,14 @@ export const merchantPenalties = pgTable("merchant_penalties", {
     .references(() => orders.id, { onDelete: "set null" }),
   penaltyType: text("penalty_type")
     .notNull()
-    .$type<"unresponsive_cancellation" | "rider_wait_delay" | "late_merchant_cancellation" | "out_of_stock_cancellation" | "rush_cancellation">(),
+    .$type<
+      | "unresponsive_cancellation"
+      | "rider_wait_delay"
+      | "late_merchant_cancellation"
+      | "out_of_stock_cancellation"
+      | "rush_cancellation"
+      | "complaint_refund_fault"
+    >(),
   amount: integer("amount").notNull(), // amount in paise / cents (e.g. 5000 = ₹50)
   riderCompensationAmount: integer("rider_compensation_amount").default(0).notNull(),
   customerVoucherAmount: integer("customer_voucher_amount").default(0).notNull(),

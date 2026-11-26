@@ -19,12 +19,15 @@ console.log('  CLIENT_URL:', process.env.CLIENT_URL);
 console.log('  BACKEND_URL:', process.env.BACKEND_URL);
 
 const baseURL = process.env.BETTER_AUTH_URL || "https://api.myquro.com";
-console.log('🔧 [AUTH CONFIG] Final baseURL:', baseURL);
+const isDevOriginAllowed = process.env.NODE_ENV !== "production";
+const configuredOrigins = [
+  process.env.BACKEND_URL,
+  process.env.BETTER_AUTH_URL,
+  process.env.CLIENT_URL,
+].filter((origin): origin is string => Boolean(origin && origin.trim()));
 
-export const auth = betterAuth({
-  baseURL: baseURL,
-  trustHost: true,
-  trustedOrigins: [
+const trustedOriginsList = Array.from(
+  new Set([
     "https://myquro-backend.onrender.com",
     "https://api.myquro.com",
     "https://myquro.com",
@@ -34,22 +37,31 @@ export const auth = betterAuth({
     "https://myquro-paisa-speaks.onrender.com",
     "https://myquro-backend-myquro-paisa-speaks.onrender.com",
     "https://myquro-frontend-myquro-paisa-speaks.onrender.com",
-    "http://localhost:3000",
-    "http://localhost:4000",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:4000",
-    // Additional origins for mobile testing
-    "http://localhost:3001",
-    "https://localhost:3001",
-    "http://127.0.0.1:3001",
-    "https://127.0.0.1:3001",
-    "http://172.20.10.2:3000",
-    "http://172.20.10.2:4000",
-    "http://172.20.10.2:8000",
-    "http://192.168.1.40:3000",
-    "http://192.168.1.40:4000",
-    "http://192.168.1.40:8000"
-  ],
+    ...configuredOrigins,
+    ...(isDevOriginAllowed
+      ? [
+          "http://localhost:3000",
+          "http://localhost:4000",
+          "http://127.0.0.1:3000",
+          "http://127.0.0.1:4000",
+          "http://localhost:3001",
+          "https://localhost:3001",
+          "http://127.0.0.1:3001",
+          "https://127.0.0.1:3001",
+          ...(process.env.DEV_LAN_ORIGINS
+            ? process.env.DEV_LAN_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
+            : []),
+        ]
+      : []),
+  ])
+);
+
+console.log('🔧 [AUTH CONFIG] Final baseURL:', baseURL);
+
+export const auth = betterAuth({
+  baseURL: baseURL,
+  trustHost: true,
+  trustedOrigins: trustedOriginsList,
 
   advanced: {
     crossSubdomainCookies: {

@@ -109,7 +109,6 @@ export default function AddContactDetailsScreen() {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${sessionToken}`,
-            Origin: 'http://localhost:3000',
           },
           body: JSON.stringify({
             contactName: contactName.trim(),

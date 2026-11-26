@@ -11,9 +11,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Restaurant, FoodCategory, AuthState, CartItem } from '../types';
 import { RestaurantRepository } from '../data/RestaurantRepository';
 import { RestaurantDatabase } from '../data/RestaurantDatabase';
-import { BACKEND_URL, NEON_SQL_ENDPOINT, NEON_CONN_STRING } from '../config';
+import { BACKEND_URL } from '../config';
 import { SecureStorage } from '../utils/secureStorage';
 import { cleanLocationLabel } from '../services/LocationService';
+import {
+  MAX_DELIVERY_RADIUS_KM,
+  isValidCoordPair,
+  computeHaversineKm,
+  checkCustomerServiceability,
+} from '../utils/serviceability';
 
 export interface SavedAddress {
   id: string;
@@ -296,75 +302,6 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         }
       }
 
-      // Resilient fallback: Direct Neon PostgreSQL query if backend API had network latency, sleeping, or missing items
-      const cleanPhone = (userPhone || '').replace(/[^0-9]/g, '').slice(-10);
-      if ((remoteOrders.length === 0 || !remoteOrders[0]?.items) && (userId || cleanPhone)) {
-        try {
-          const conditions: string[] = [];
-          if (userId) conditions.push(`o.placed_by_user_id = '${userId}'`);
-          if (cleanPhone.length >= 7) {
-            conditions.push(`o.placed_by_user_id IN (SELECT user_id FROM profiles WHERE phone_number LIKE '%${cleanPhone}%')`);
-            conditions.push(`o.placed_by_user_id IN (SELECT id FROM auth_users WHERE email LIKE '%${cleanPhone}%')`);
-            conditions.push(`o.notes LIKE '%${cleanPhone}%'`);
-          }
-          if (conditions.length > 0) {
-            const neonQuery = `
-              SELECT 
-                o.id, 
-                o.restaurant_id as "restaurantId", 
-                o.notes, 
-                o.status, 
-                o.prep_time_minutes as "prepTimeMinutes", 
-                o.extended_prep_minutes as "extendedPrepMinutes", 
-                o.grand_total as "grandTotal", 
-                o.created_at as "createdAt", 
-                r.restaurant_name as "restaurantName", 
-                r.restaurant_banner as "restaurantBanner",
-                coalesce(
-                  json_agg(
-                    json_build_object(
-                      'id', oi.id,
-                      'orderId', oi.order_id,
-                      'menuItemId', oi.menu_item_id,
-                      'name', mi.name,
-                      'menuItemName', mi.name,
-                      'quantity', oi.quantity,
-                      'unitPrice', oi.unit_price,
-                      'totalPrice', oi.total_price,
-                      'isVeg', mi.is_veg,
-                      'imageURL', mi.image_url
-                    )
-                  ) FILTER (WHERE oi.id IS NOT NULL),
-                  '[]'::json
-                ) as items
-              FROM orders o 
-              LEFT JOIN restaurants r ON o.restaurant_id = r.id 
-              LEFT JOIN order_items oi ON o.id = oi.order_id
-              LEFT JOIN menu_items mi ON oi.menu_item_id = mi.id
-              WHERE ${conditions.join(' OR ')}
-              GROUP BY o.id, r.restaurant_name, r.restaurant_banner
-              ORDER BY o.created_at DESC;
-            `;
-            const neonResp = await fetch(NEON_SQL_ENDPOINT, {
-              method: 'POST',
-              headers: {
-                'Neon-Connection-String': NEON_CONN_STRING,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ query: neonQuery }),
-            });
-            if (neonResp.ok) {
-              const neonData = await neonResp.json();
-              if (neonData.rows && Array.isArray(neonData.rows)) {
-                remoteOrders = neonData.rows;
-              }
-            }
-          }
-        } catch (neonErr) {
-          console.warn('[MainViewModel] Error fetching user orders directly from Neon DB:', neonErr);
-        }
-      }
-
       // Parse delivery address and coordinates from notes if structured
       remoteOrders = remoteOrders.map((o: any) => {
         let deliveryAddress = o.deliveryAddress;
@@ -592,6 +529,14 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       (r.category?.toLowerCase() === 'veg')
     );
 
+    const isOpenFlag = r.isOpen !== undefined ? r.isOpen : r.is_open;
+    const snoozedUntil = r.snoozedUntil ?? r.snoozed_until ?? null;
+    const autoPausedUntil = r.autoPausedUntil ?? r.auto_paused_until ?? null;
+    const restaurantStatus = r.restaurantStatus ?? r.restaurant_status ?? 'active';
+    const isSnoozed = snoozedUntil ? new Date(snoozedUntil).getTime() > Date.now() : false;
+    const isAutoPaused = autoPausedUntil ? new Date(autoPausedUntil).getTime() > Date.now() : false;
+    const isClosed = !isOpenFlag || isSnoozed || isAutoPaused || String(restaurantStatus).toLowerCase() !== 'active';
+
     return {
       id: r.id,
       name: rawName,
@@ -609,8 +554,14 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       phone: r.phoneNumber || r.phone_number || '',
       email: r.email || '',
       address: r.restaurantAddress || r.restaurant_address || '',
-      isClosed: !(r.isOpen !== undefined ? r.isOpen : r.is_open),
-      closedReason: (r.isOpen !== undefined ? r.isOpen : r.is_open) ? '' : 'Kitchen offline',
+      isOpen: Boolean(isOpenFlag),
+      isClosed,
+      closedReason: isClosed ? 'Currently offline • Should be back soon' : '',
+      restaurantStatus,
+      snoozedUntil,
+      autoPausedUntil,
+      isServiceable: typeof r.isServiceable === 'boolean' ? r.isServiceable : undefined,
+      unserviceableReason: r.unserviceableReason ?? null,
       latitude: r.latitude !== null && r.latitude !== undefined ? Number(r.latitude) : undefined,
       longitude: r.longitude !== null && r.longitude !== undefined ? Number(r.longitude) : undefined,
     };
@@ -625,11 +576,15 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     // Stage 1: Try Primary Backend API with generous 12s timeout for Render cold starts
     try {
-      console.log(`🌐 [MainViewModel] Fetching restaurants from backend: ${BACKEND_URL}/api/restaurants`);
+      const hasValidLoc = isValidCoordPair(currentLocation?.latitude, currentLocation?.longitude);
+      const restUrl = hasValidLoc
+        ? `${BACKEND_URL}/api/restaurants?lat=${encodeURIComponent(String(currentLocation.latitude))}&lng=${encodeURIComponent(String(currentLocation.longitude))}&includeAll=true`
+        : `${BACKEND_URL}/api/restaurants`;
+      console.log(`🌐 [MainViewModel] Fetching restaurants from backend: ${restUrl}`);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-      const res = await fetch(`${BACKEND_URL}/api/restaurants`, {
+      const res = await fetch(restUrl, {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -644,33 +599,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       console.log("ℹ️ [MainViewModel] Primary backend slow/unreachable:", backendErr);
     }
 
-    // Stage 2: If primary backend failed or timed out, query Neon DB directly
-    if (rawList.length === 0) {
-      try {
-        console.log(`🔄 [MainViewModel] Querying Neon DB directly for active restaurants...`);
-        const neonResp = await fetch(NEON_SQL_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Neon-Connection-String': NEON_CONN_STRING,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: `SELECT id, restaurant_name, restaurant_type, cuisine, restaurant_status, is_open, city, restaurant_address, restaurant_banner, rating, rating_count, phone_number, email, latitude, longitude FROM restaurants WHERE restaurant_status = 'active';`
-          }),
-        });
-        if (neonResp.ok) {
-          const neonData = await neonResp.json();
-          if (neonData.rows && Array.isArray(neonData.rows) && neonData.rows.length > 0) {
-            console.log(`✅ [MainViewModel] Loaded ${neonData.rows.length} restaurants directly from Neon DB`);
-            rawList = neonData.rows;
-          }
-        }
-      } catch (neonErr) {
-        console.warn("⚠️ [MainViewModel] Direct Neon DB query failed:", neonErr);
-      }
-    }
-
-    // Stage 3: Process and persist restaurants
+    // Process and persist restaurants (relying cleanly on backend API + local cache)
     let liveRestaurants: Restaurant[] = [];
     if (rawList.length > 0) {
       liveRestaurants = rawList.map(r => formatRestaurantRecord(r, favIds));
@@ -737,40 +666,6 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       if (flatFoods.length > 0) {
         setFoodItems(flatFoods);
         await AsyncStorage.setItem('@all_food_items', JSON.stringify(flatFoods));
-      } else {
-        // Neon DB fallback for menu items
-        try {
-          const menuNeon = await fetch(NEON_SQL_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Neon-Connection-String': NEON_CONN_STRING,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              query: `SELECT mi.id, mi.name, mi.restaurant_id, mi.description, mi.image_url, mi.is_veg, mi.is_available, mc.category as category_name, mv.id as variant_id, mv.price FROM menu_items mi LEFT JOIN menu_categories mc ON mi.category_id = mc.id LEFT JOIN menu_item_variants mv ON mi.id = mv.menu_item_id WHERE mi.is_available = true LIMIT 60;`
-            }),
-          });
-          if (menuNeon.ok) {
-            const data = await menuNeon.json();
-            if (data.rows && Array.isArray(data.rows) && data.rows.length > 0) {
-              const mapped = data.rows.map((row: any) => ({
-                id: row.id,
-                name: row.name,
-                restaurantId: row.restaurant_id,
-                restaurantName: 'Restaurant',
-                price: Math.round((row.price || 20000) / 100),
-                rating: '4.5',
-                isVeg: Boolean(row.is_veg),
-                image: row.image_url || 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=300&auto=format&fit=crop&q=60',
-                description: row.description || "A delicious freshly-prepared choice from our chef's selection.",
-                categoryName: row.category_name || 'Specials',
-                variantId: row.variant_id || null,
-              }));
-              setFoodItems(mapped);
-              await AsyncStorage.setItem('@all_food_items', JSON.stringify(mapped));
-            }
-          }
-        } catch {}
       }
     });
 
@@ -859,36 +754,54 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     const userLat = currentLocation.latitude;
     const userLng = currentLocation.longitude;
+    const hasValidUserCoords = isValidCoordPair(userLat, userLng);
 
-    // Fast, lightweight 0ms local Haversine distance and delivery ETA
-    const calculatedList = allRestaurants.map(r => {
-      if (!r.latitude || !r.longitude) {
-        return { ...r, distance: 1.2, deliveryTime: 30 };
+    // Local Haversine distance & strict delivery radius / status serviceability (never invent fake distances)
+    const calculatedList = allRestaurants.map((r) => {
+      if (!hasValidUserCoords) {
+        return {
+          ...r,
+          distance: undefined,
+          deliveryTime: r.deliveryTime || undefined,
+        };
       }
-      
-      const dLat = (r.latitude - userLat) * Math.PI / 180;
-      const dLon = (r.longitude - userLng) * Math.PI / 180;
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(userLat * Math.PI / 180) * Math.cos(r.latitude * Math.PI / 180) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const dist = 6371 * c;
-      const eta = Math.round(15 + dist * 3); // 15m kitchen prep + 3m per km transit
-      
+
+      if (!isValidCoordPair(r.latitude, r.longitude)) {
+        return {
+          ...r,
+          distance: undefined,
+          deliveryTime: undefined,
+          isServiceable: false,
+          unserviceableReason: 'Restaurant delivery coordinates missing',
+        };
+      }
+
+      const dist = computeHaversineKm(userLat, userLng, Number(r.latitude), Number(r.longitude));
+      const svc = checkCustomerServiceability(r, userLat, userLng, MAX_DELIVERY_RADIUS_KM);
+      const eta = svc.estimatedDeliveryMinutes ?? Math.max(15, Math.min(60, Math.round(14 + dist * 3.5)));
+
       return {
         ...r,
-        distance: Number(dist.toFixed(1)),
-        deliveryTime: eta
+        distance: dist,
+        deliveryTime: eta,
+        isServiceable: svc.isServiceable,
+        unserviceableReason: svc.reason || null,
       };
     });
 
     setAllRestaurantsWithMetrics(calculatedList);
   }, [allRestaurants, currentLocation.latitude, currentLocation.longitude]);
 
-  // Compute live combined flows for restaurants and favorites list (mimicking Kotlin Flow structure)
+  // Compute live combined flows for restaurants and favorites list (enforce delivery radius when GPS is known)
   useEffect(() => {
+    const hasValidUserCoords = isValidCoordPair(currentLocation?.latitude, currentLocation?.longitude);
+
     const filtered = allRestaurantsWithMetrics.filter(res => {
+      if (hasValidUserCoords) {
+        if (!isValidCoordPair(res.latitude, res.longitude)) return false;
+        if (typeof res.distance !== 'number' || res.distance > MAX_DELIVERY_RADIUS_KM) return false;
+      }
+
       const cuisineStr = Array.isArray(res.cuisine)
         ? (res.cuisine as string[]).join(', ')
         : typeof res.cuisine === 'string'
@@ -919,9 +832,16 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       return matchesQuery && matchesTab && matchesDish;
     });
 
+    filtered.sort((a, b) => {
+      const aAvail = a.isServiceable !== false && !a.isClosed;
+      const bAvail = b.isServiceable !== false && !b.isClosed;
+      if (aAvail !== bAvail) return aAvail ? -1 : 1;
+      return (a.distance ?? Number.MAX_SAFE_INTEGER) - (b.distance ?? Number.MAX_SAFE_INTEGER);
+    });
+
     setRestaurantsList(filtered);
     setFavouriteRestaurantsList(allRestaurantsWithMetrics.filter(res => res.isFavourite));
-  }, [allRestaurantsWithMetrics, searchQuery, selectedCategoryTab, selectedDishCategory, foodItems]);
+  }, [allRestaurantsWithMetrics, searchQuery, selectedCategoryTab, selectedDishCategory, foodItems, currentLocation.latitude, currentLocation.longitude]);
 
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
   const toggleBiometrics = () => setIsBiometricsEnabled(prev => !prev);
@@ -1308,10 +1228,46 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
       const token = authState.type === 'Authenticated' ? authState.sessionToken : null;
       const currentUserId = (authState as any)?.userId || (authState as any)?.user?.id || (authState as any)?.id || undefined;
       const currentPhone = (authState as any)?.email ? (authState as any).email.replace('@myquro.customer', '') : undefined;
+
+      let parsedNotes: any = {};
+      if (notes && typeof notes === 'string' && notes.trim().startsWith('{')) {
+        try {
+          parsedNotes = JSON.parse(notes);
+        } catch {}
+      }
+      const deliveryLat = parsedNotes.latitude ?? currentLocation?.latitude;
+      const deliveryLng = parsedNotes.longitude ?? currentLocation?.longitude;
+      const deliveryAddress =
+        parsedNotes.address ||
+        parsedNotes.mapAddress ||
+        currentLocation?.address ||
+        '';
+
+      const targetRestaurant = allRestaurants.find(
+        (r) => String(r.id) === String(itemsToUse[0].restaurantId)
+      );
+      if (targetRestaurant) {
+        const svc = checkCustomerServiceability(targetRestaurant, deliveryLat, deliveryLng, MAX_DELIVERY_RADIUS_KM);
+        if (!svc.isServiceable) {
+          throw new Error(svc.reason || 'This restaurant does not deliver to your selected address.');
+        }
+      } else if (!isValidCoordPair(deliveryLat, deliveryLng)) {
+        throw new Error('Please select a valid delivery location with GPS before placing your order.');
+      }
+
+      const resolvedPaymentMethod = String(parsedNotes.paymentMethod || '').trim();
+      if (!resolvedPaymentMethod) {
+        throw new Error('Payment method is required before placing an order.');
+      }
+
       const body = {
         userId: currentUserId,
         customerPhone: currentPhone,
         restaurantId: itemsToUse[0].restaurantId,
+        latitude: Number(deliveryLat),
+        longitude: Number(deliveryLng),
+        deliveryAddress,
+        paymentMethod: resolvedPaymentMethod,
         notes: notes || "",
         items: itemsToUse.map(item => ({
           menuItemId: item.id,

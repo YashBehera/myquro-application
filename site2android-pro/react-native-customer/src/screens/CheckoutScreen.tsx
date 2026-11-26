@@ -45,7 +45,9 @@ import {
   Minus,
   Sparkles,
   Banknote,
+  AlertTriangle,
 } from 'lucide-react-native';
+import { checkCustomerServiceability, MAX_DELIVERY_RADIUS_KM } from '../utils/serviceability';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -236,6 +238,16 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   const activeRestaurantId = useMemo(() => {
     return currentRestaurant?.id || restaurantId || (cartItems && cartItems.length > 0 ? cartItems[0].restaurantId : null);
   }, [currentRestaurant, restaurantId, cartItems]);
+
+  const serviceability = useMemo(() => {
+    if (!currentRestaurant) return null;
+    return checkCustomerServiceability(
+      currentRestaurant,
+      currentLocation?.latitude,
+      currentLocation?.longitude,
+      MAX_DELIVERY_RADIUS_KM
+    );
+  }, [currentRestaurant, currentLocation?.latitude, currentLocation?.longitude]);
 
   const [restaurantMenuItems, setRestaurantMenuItems] = useState<any[]>([]);
 
@@ -781,6 +793,19 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       Alert.alert("Empty Cart", "Please add items to your cart before placing an order.");
       return;
     }
+
+    if (serviceability && !serviceability.isServiceable) {
+      Alert.alert(
+        serviceability.code === 'OUT_OF_DELIVERY_RANGE' ? 'Outside Delivery Area' : 'Outlet Unavailable',
+        serviceability.reason || `Delivery is unavailable for your selected address (max ${MAX_DELIVERY_RADIUS_KM} km).`,
+        [
+          { text: 'Change Address', onPress: () => setShowAddressModal(true) },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
     setShowPaymentLoader(true);
   };
 
@@ -831,6 +856,33 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 85 + insets.bottom }]}
       >
+        {serviceability && !serviceability.isServiceable && (
+          <View style={{
+            backgroundColor: 'rgba(239, 68, 68, 0.14)',
+            borderColor: 'rgba(239, 68, 68, 0.45)',
+            borderWidth: 1,
+            borderRadius: 14,
+            padding: 12,
+            marginBottom: 12,
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+              <AlertTriangle size={15} color="#F87171" style={{ marginRight: 6 }} />
+              <Text style={{ color: '#FCA5A5', fontWeight: '700', fontSize: 13, flex: 1 }}>
+                {serviceability.code === 'OUT_OF_DELIVERY_RANGE'
+                  ? 'Outside Delivery Range'
+                  : 'Restaurant Unavailable'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setShowAddressModal(true)}
+                style={{ backgroundColor: '#F2CA50', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
+              >
+                <Text style={{ color: '#000000', fontWeight: '800', fontSize: 11 }}>Change Address</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={{ color: '#FECACA', fontSize: 12 }}>{serviceability.reason}</Text>
+          </View>
+        )}
+
         {/* ════════════════════════════════════════════════════════════════════════
             [2] BENEFITS BANNER (LUXURY OBSIDIAN & CHAMPAGNE GOLD)
             ════════════════════════════════════════════════════════════════════════ */}

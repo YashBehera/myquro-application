@@ -23,8 +23,14 @@ export interface Restaurant {
   phone: string;
   email: string;
   address: string;
+  isOpen?: boolean;
   isClosed?: boolean;
   closedReason?: string;
+  restaurantStatus?: string;
+  snoozedUntil?: string | null;
+  autoPausedUntil?: string | null;
+  isServiceable?: boolean;
+  unserviceableReason?: string | null;
   latitude?: number;
   longitude?: number;
   distance?: number;

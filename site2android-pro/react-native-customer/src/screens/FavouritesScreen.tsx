@@ -28,6 +28,7 @@ import {
   ChevronRight,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { formatRatingCount } from '../utils/ratingFormat';
 import {
   SCALE,
   scale,
@@ -128,7 +129,7 @@ export const FavouritesScreen: React.FC<FavouritesScreenProps> = ({
                 >
                   <Text style={[styles.itemTitle, { color: theme.text }]}>{item.name}</Text>
                   <Text style={styles.itemCuisine}>{item.cuisine} • {item.category}</Text>
-                  <Text style={styles.itemMetadata}>{item.city} City • {item.reviewCount} reviews</Text>
+                  <Text style={styles.itemMetadata}>{item.city} City • {formatRatingCount(item.reviewCount, '0')} reviews</Text>
 
                   <Text style={styles.itemDesc} numberOfLines={isExpanded ? undefined : 2}>
                     {item.description}

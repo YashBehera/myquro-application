@@ -463,8 +463,9 @@ export const HelpSubView: React.FC<HelpSubViewProps> = ({
         return null;
       }
 
-      applyBackendComplaintToChat(data.complaint, cat);
-      return data.complaint;
+      const ticket = { ...data.complaint, __deDuplicated: Boolean(data.deDuplicated) };
+      applyBackendComplaintToChat(ticket, cat);
+      return ticket;
     } catch (err: any) {
       console.warn('Could not register complaint to backend:', err);
       Alert.alert('Network Error', 'Could not reach support servers. Please check your connection and try again.');
@@ -527,7 +528,7 @@ export const HelpSubView: React.FC<HelpSubViewProps> = ({
     setShowItemModal(false);
 
     const created = await registerBackendComplaint(activeCategory, selectedObjs);
-    if (created?.id) {
+    if (created?.id && !(created as any).__deDuplicated && created.status !== 'RESOLVED' && created.status !== 'CLOSED') {
       setChatMessages((prev) => [
         ...prev,
         {

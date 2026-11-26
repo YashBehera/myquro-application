@@ -41,6 +41,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKEND_URL } from '../config';
 import { useViewModel } from '../state/MainViewModel';
 import { SimCartItem } from './CheckoutScreen';
+import {
+  isValidCoordPair,
+  checkCustomerServiceability,
+  MAX_DELIVERY_RADIUS_KM,
+} from '../utils/serviceability';
 
 import {
   SCALE,
@@ -85,7 +90,7 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
   restaurantId,
   restaurantName = 'Restaurant',
   deliveryAddress,
-  paymentMethod = 'UPI',
+  paymentMethod,
   deliveryType = 'standard',
   deliveryTip = 0,
   deliveryInstructions = [],
@@ -175,8 +180,34 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
         restaurantId ||
         (cartItems && cartItems.length > 0
           ? ((cartItems[0] as any).restaurantId || (cartItems[0] as any).foodItem?.restaurantId)
-          : '') ||
-        'D2nCXr-XW_De3z7yBYeVc';
+          : '');
+
+      if (!resolvedRestId) {
+        throw new Error('Restaurant information missing from cart. Please re-add your items and try again.');
+      }
+
+      if (!isValidCoordPair(currentLocation?.latitude, currentLocation?.longitude)) {
+        throw new Error('Please set your delivery location on the map before placing your order.');
+      }
+
+      const targetRest = allRestaurants?.find((r) => String(r.id) === String(resolvedRestId));
+      if (targetRest) {
+        const svc = checkCustomerServiceability(
+          targetRest,
+          currentLocation?.latitude,
+          currentLocation?.longitude,
+          MAX_DELIVERY_RADIUS_KM
+        );
+        if (!svc.isServiceable) {
+          throw new Error(
+            svc.reason || `This restaurant does not deliver to your current location (max ${MAX_DELIVERY_RADIUS_KM} km).`
+          );
+        }
+      }
+
+      if (!paymentMethod || !String(paymentMethod).trim()) {
+        throw new Error('Please select a payment method before completing checkout.');
+      }
 
       const resolvedUserId = (authState as any)?.userId || (authState as any)?.user?.id || (authState as any)?.id || undefined;
       const resolvedPhone = (authState as any)?.email ? (authState as any).email.replace('@myquro.customer', '') : undefined;
@@ -210,7 +241,7 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
           };
         }),
         totalAmount: amount,
-        paymentMethod: paymentMethod || 'UPI',
+        paymentMethod,
         deliveryType: deliveryType || 'standard',
         deliveryTip: deliveryTip || 0,
         deliveryInstructions: deliveryInstructions || [],

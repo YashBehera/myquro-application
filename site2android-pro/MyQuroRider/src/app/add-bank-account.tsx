@@ -115,7 +115,6 @@ export default function AddBankAccountScreen() {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${sessionToken}`,
-            Origin: 'http://localhost:3000',
           },
           body: JSON.stringify({
             accountNumber: accountNumber.trim(),

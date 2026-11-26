@@ -2,6 +2,7 @@ import "dotenv/config";
 import { app } from "./app.js";
 import { Server as SocketServer } from "socket.io";
 import { initializeSocket } from "./lib/socket.js";
+import { startOrderWatchdog } from "./services/orderWatchdog.js";
 
 const PORT = Number(process.env.PORT) || 4000;
 
@@ -33,6 +34,7 @@ const io = new SocketServer(server, {
 });
 
 initializeSocket(io);
+startOrderWatchdog();
 
 app.set("trust proxy", true);
 

@@ -38,7 +38,6 @@ export async function submitRiderSupportTicket(
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${params.sessionToken}`,
-        Origin: 'http://localhost:3000',
       },
       body: JSON.stringify({
         category: params.category,

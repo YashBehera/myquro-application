@@ -92,47 +92,7 @@ const pendingStatusUpdates = new Map<string, { status: Order['status']; timestam
 const customPrepTimesMap = new Map<string, number>();
 const customExtendedPrepMap = new Map<string, number>();
 
-const NEON_CONN_STRING = 'postgresql://neondb_owner:npg_Tyq7fb1lexRO@ep-fancy-shape-aisogkwg-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require';
-const NEON_SQL_ENDPOINT = 'https://ep-fancy-shape-aisogkwg-pooler.c-4.us-east-1.aws.neon.tech/sql';
-
-async function syncPrepTimeToNeon(orderId: string, prepTimeMinutes: number) {
-  try {
-    const mins = Number(prepTimeMinutes) || 20;
-    try {
-      await AsyncStorage.setItem(`@prep_time_${orderId}`, String(mins));
-    } catch (e) {}
-
-    await fetch(NEON_SQL_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'neon-connection-string': NEON_CONN_STRING,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: `UPDATE orders SET prep_time_minutes = ${mins}, acknowledged_by_merchant = true, acknowledged_at = COALESCE(acknowledged_at, NOW()), updated_at = NOW() WHERE id = '${orderId}'`
-      }),
-    });
-  } catch (err) {
-    console.warn('Direct Neon DB prep time sync error:', err);
-  }
-}
-
-async function syncExtendPrepTimeToNeon(orderId: string, extraMinutes: number) {
-  try {
-    await fetch(NEON_SQL_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'neon-connection-string': NEON_CONN_STRING,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: `UPDATE orders SET extended_prep_minutes = COALESCE(extended_prep_minutes, 0) + ${Number(extraMinutes) || 5}, updated_at = NOW() WHERE id = '${orderId}'`
-      }),
-    });
-  } catch (err) {
-    console.warn('Direct Neon DB extend prep time sync error:', err);
-  }
-}
+// Prep time updates are persisted exclusively via authenticated backend endpoints (/orders/:id/status and /extend-prep).
 
 export const useOrderStore = create<OrderStore>((set, get) => ({
   orders: [],
@@ -352,10 +312,9 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
     const currentOrder = get().orders.find((o) => o.id === orderId);
     const finalPrepMinutes = Number(prepTimeMinutes) > 0 ? Number(prepTimeMinutes) : (currentOrder?.prepTimeMinutes || 20);
 
-    // Save to local custom prep times map and sync directly to Neon DB
+    // Save to local custom prep times map; backend API persists authoritative status & prep time
     customPrepTimesMap.set(orderId, finalPrepMinutes);
     AsyncStorage.setItem(`@prep_time_${orderId}`, String(finalPrepMinutes)).catch(() => {});
-    syncPrepTimeToNeon(orderId, finalPrepMinutes);
 
     // 2. Instant 0ms optimistic UI update
     set((state) => ({
@@ -552,9 +511,6 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
           : o
       ),
     }));
-    // Immediately sync to Neon DB for offline-resilient direct persistence
-    syncExtendPrepTimeToNeon(orderId, extraMinutes);
-
     try {
       await apiClient.patch(`/orders/${orderId}/extend-prep`, { extraMinutes });
     } catch (e) {

@@ -21,6 +21,7 @@ import { useViewModel } from '../state/MainViewModel';
 import { THEME, COLORS } from '../theme/Theme';
 import { Restaurant } from '../types';
 import { getOptimizedImageUrl } from '../utils/imageUtils';
+import { formatRatingCount } from '../utils/ratingFormat';
 import { LazyImage } from '../components/LazyImage';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -263,7 +264,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({ onNavigateToDining
                     </View>
 
                     <Text style={styles.itemDetailsSub}>
-                      {item.city} City • {item.reviewCount} Reviews
+                      {item.city} City • {formatRatingCount(item.reviewCount, '0')} Reviews
                     </Text>
 
                     <Text style={styles.itemDesc} numberOfLines={isExpanded ? undefined : 2}>

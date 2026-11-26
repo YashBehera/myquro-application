@@ -7,27 +7,105 @@ import {
   isRestaurantOwnerOrManager,
   getRestaurantRole,
 } from "../lib/checkRoles.js";
-import { eq, and, gte, sql, ne, desc } from "drizzle-orm";
+import { eq, and, gte, sql, ne, desc, inArray } from "drizzle-orm";
+import {
+  checkRestaurantServiceability,
+  isValidCoordinatePair,
+  MAX_DELIVERY_RADIUS_KM,
+} from "../lib/serviceability.js";
 import { reservations } from "../db/schema/reservations.js";
 import { tables } from "../db/schema/tables.js";
 import { tableSession } from "../db/schema/table-session.js";
 import { orders } from "../db/schema/orders.js";
+import { orderDeliveries } from "../db/schema/order-deliveries.js";
 import { merchantPenalties } from "../db/schema/merchant-penalties.js";
+import { complaints } from "../db/schema/complaints.js";
 import { menuItems } from "../db/schema/menu-items.js";
+import { nanoid } from "nanoid";
 
 
 import { analyticsCache } from "../lib/analytics-cache.js";
 
 const router = Router();
 
-// Get all restaurants
+// Get all restaurants (optionally filtered & sorted by customer delivery location radius)
 router.get("/", async (req: any, res) => {
   try {
     const allRestaurants = await db.select().from(restaurants);
-    res.status(200).json({ restaurants: allRestaurants });
+    const { lat, lng, maxDistanceKm, includeAll } = req.query as {
+      lat?: string;
+      lng?: string;
+      maxDistanceKm?: string;
+      includeAll?: string;
+    };
+
+    const hasCustomerCoords = isValidCoordinatePair(lat, lng);
+    const radiusKm = maxDistanceKm ? Math.max(1, Number(maxDistanceKm)) : MAX_DELIVERY_RADIUS_KM;
+
+    if (!hasCustomerCoords) {
+      return res.status(200).json({ restaurants: allRestaurants, maxRadiusKm: radiusKm });
+    }
+
+    const enriched = allRestaurants.map((r) => {
+      const svc = checkRestaurantServiceability(r, lat, lng, {
+        isDelivery: true,
+        maxRadiusKm: radiusKm,
+      });
+      return {
+        ...r,
+        distanceKm: svc.distanceKm ?? null,
+        estimatedDeliveryMinutes: svc.estimatedDeliveryMinutes ?? null,
+        isServiceable: svc.serviceable,
+        unserviceableReason: svc.reason || null,
+      };
+    });
+
+    const filtered =
+      includeAll === "true"
+        ? enriched
+        : enriched.filter(
+            (r) =>
+              r.restaurantStatus === "active" &&
+              r.distanceKm !== null &&
+              r.distanceKm <= radiusKm
+          );
+
+    filtered.sort((a, b) => {
+      if (a.isServiceable !== b.isServiceable) return a.isServiceable ? -1 : 1;
+      return (a.distanceKm ?? Number.MAX_SAFE_INTEGER) - (b.distanceKm ?? Number.MAX_SAFE_INTEGER);
+    });
+
+    return res.status(200).json({
+      restaurants: filtered,
+      totalRestaurantsCount: allRestaurants.length,
+      maxRadiusKm: radiusKm,
+    });
   } catch (error) {
     console.error("FETCH RESTAURANTS ERROR:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// Check whether a specific restaurant serves a delivery address / coordinates
+router.get("/:id/serviceability", async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const { lat, lng } = req.query as { lat?: string; lng?: string };
+    const [rest] = await db.select().from(restaurants).where(eq(restaurants.id, id)).limit(1);
+    if (!rest) {
+      return res.status(404).json({ serviceable: false, message: "Restaurant not found" });
+    }
+
+    const result = checkRestaurantServiceability(rest, lat, lng, { isDelivery: true });
+    return res.status(200).json({
+      restaurantId: id,
+      restaurantName: rest.restaurantName,
+      city: rest.city,
+      ...result,
+    });
+  } catch (error) {
+    console.error("CHECK SERVICEABILITY ERROR:", error);
+    return res.status(500).json({ serviceable: false, message: "Internal server error" });
   }
 });
 
@@ -641,7 +719,7 @@ router.patch("/:id/unpause", async (req: any, res) => {
   }
 });
 
-// GET /restaurants/:id/penalties (Fetch penalty history and strikes)
+// GET /restaurants/:id/penalties (Fetch penalty history, breakdown & strikes)
 router.get("/:id/penalties", async (req: any, res) => {
   try {
     const { id } = req.params;
@@ -653,20 +731,132 @@ router.get("/:id/penalties", async (req: any, res) => {
 
     const restaurant = await db
       .select({
+        restaurantName: restaurants.restaurantName,
         strikeCount: restaurants.strikeCount,
         autoPausedUntil: restaurants.autoPausedUntil,
+        lastHeartbeatAt: restaurants.lastHeartbeatAt,
       })
       .from(restaurants)
       .where(eq(restaurants.id, id))
       .limit(1);
 
+    let totalPendingPaise = 0;
+    let totalDeductedPaise = 0;
+    let totalRiderCompensationPaise = 0;
+    for (const p of penalties) {
+      if (p.status === "pending") totalPendingPaise += p.amount || 0;
+      if (p.status === "deducted") totalDeductedPaise += p.amount || 0;
+      if (p.status !== "waived") totalRiderCompensationPaise += p.riderCompensationAmount || 0;
+    }
+
     res.status(200).json({
+      success: true,
       penalties,
+      restaurantName: restaurant[0]?.restaurantName || null,
       strikeCount: restaurant[0]?.strikeCount || 0,
       autoPausedUntil: restaurant[0]?.autoPausedUntil || null,
+      lastHeartbeatAt: restaurant[0]?.lastHeartbeatAt || null,
+      summary: {
+        totalCount: penalties.length,
+        totalPendingPaise,
+        totalDeductedPaise,
+        totalRiderCompensationPaise,
+      },
     });
   } catch (error) {
     console.error("FETCH PENALTIES ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// POST /restaurants/:id/penalties/:penaltyId/dispute (Merchant disputes a penalty)
+router.post("/:id/penalties/:penaltyId/dispute", requireAuth, async (req: any, res) => {
+  try {
+    const { id, penaltyId } = req.params;
+    const { disputeNotes } = req.body || {};
+    const user = req.user;
+
+    if (!disputeNotes || !String(disputeNotes).trim()) {
+      return res.status(400).json({ message: "Please provide a reason to dispute this penalty." });
+    }
+
+    const hasAccess = await isRestaurantOwnerOrManager(user.id, id);
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const [existing] = await db
+      .select()
+      .from(merchantPenalties)
+      .where(and(eq(merchantPenalties.id, penaltyId), eq(merchantPenalties.restaurantId, id)))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ message: "Penalty record not found" });
+    }
+
+    const cleanNote = String(disputeNotes).trim();
+    const now = new Date();
+
+    const [updatedPenalty] = await db
+      .update(merchantPenalties)
+      .set({
+        status: "disputed",
+        disputeNotes: cleanNote,
+      })
+      .where(eq(merchantPenalties.id, penaltyId))
+      .returning();
+
+    const [rest] = await db
+      .select({ restaurantName: restaurants.restaurantName })
+      .from(restaurants)
+      .where(eq(restaurants.id, id))
+      .limit(1);
+
+    const ticketId = `TKT-${nanoid(7).toUpperCase()}`;
+    const nowIso = now.toISOString();
+    await db.insert(complaints).values({
+      id: ticketId,
+      ticketType: "merchant_issue",
+      orderId: existing.orderId || null,
+      orderNumber: existing.orderId ? `#MQ-${existing.orderId.slice(-5).toUpperCase()}` : null,
+      outletId: id,
+      outletName: rest?.restaurantName || "Merchant Partner",
+      customerName: user.name || rest?.restaurantName || "Restaurant Partner",
+      category: "penalty_dispute",
+      categoryLabel: `Merchant Penalty Dispute (${existing.penaltyType})`,
+      reason: `Dispute for penalty ${existing.id} (₹${Math.round((existing.amount || 0) / 100)})`,
+      description: cleanNote,
+      priority: "HIGH",
+      status: "OPEN",
+      metadata: {
+        penaltyId: existing.id,
+        penaltyType: existing.penaltyType,
+        amountPaise: existing.amount,
+      },
+      messages: [
+        {
+          id: `msg-${nanoid(6)}`,
+          complaintId: ticketId,
+          senderId: user.id,
+          senderName: user.name || rest?.restaurantName || "Restaurant Partner",
+          senderType: "RESTAURANT",
+          message: cleanNote,
+          timestamp: nowIso,
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+
+    res.status(200).json({
+      success: true,
+      message: `Dispute registered under ticket #${ticketId}`,
+      penalty: updatedPenalty,
+      ticketId,
+    });
+  } catch (error) {
+    console.error("DISPUTE MERCHANT PENALTY ERROR:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -710,6 +900,7 @@ router.post("/:id/unsnooze", async (req: any, res) => {
         isOpen: true,
         snoozedUntil: null,
         snoozeReason: null,
+        autoPausedUntil: null,
         updatedAt: new Date(),
       })
       .where(eq(restaurants.id, id))
@@ -836,7 +1027,7 @@ router.get("/:id/scorecard", async (req: any, res) => {
     const onTimeRate =
       readyOrders.length > 0
         ? Math.round((onTimeCount / readyOrders.length) * 1000) / 10
-        : 96.5;
+        : 100;
 
     res.status(200).json({
       success: true,
@@ -851,6 +1042,283 @@ router.get("/:id/scorecard", async (req: any, res) => {
     });
   } catch (error) {
     console.error("SCORECARD ERROR:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// GET /api/restaurants/:id/settlements — Real weekly settlement ledger computed from orders, deliveries & penalties
+router.get("/:id/settlements", requireAuth, async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+    const period = String(req.query?.period || "all");
+
+    const hasAccess = await isRestaurantOwnerOrManager(user.id, id);
+    if (!hasAccess) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const [restaurant] = await db
+      .select({
+        id: restaurants.id,
+        restaurantName: restaurants.restaurantName,
+        gstNumber: restaurants.gstNumber,
+        phoneNumber: restaurants.phoneNumber,
+        email: restaurants.email,
+      })
+      .from(restaurants)
+      .where(eq(restaurants.id, id))
+      .limit(1);
+
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    const commissionRate = Number(process.env.PLATFORM_COMMISSION_PERCENT) || 15;
+    const now = new Date();
+    const startOfCurrentWeek = new Date(now);
+    const day = startOfCurrentWeek.getDay();
+    const diffToMon = day === 0 ? -6 : 1 - day;
+    startOfCurrentWeek.setDate(startOfCurrentWeek.getDate() + diffToMon);
+    startOfCurrentWeek.setHours(0, 0, 0, 0);
+
+    const startOfLastWeek = new Date(startOfCurrentWeek);
+    startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
+
+    const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    let rangeStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    let rangeEnd = now;
+
+    if (period === "this_week") {
+      rangeStart = startOfCurrentWeek;
+    } else if (period === "last_week") {
+      rangeStart = startOfLastWeek;
+      rangeEnd = startOfCurrentWeek;
+    } else if (period === "this_month") {
+      rangeStart = startOfThisMonth;
+    } else if (period === "last_month") {
+      rangeStart = startOfLastMonth;
+      rangeEnd = startOfThisMonth;
+    }
+
+    // Fetch last ~90 days of completed/active non-cancelled orders + deliveries + penalties so month growth & weekly cycles work
+    const lookbackStart = rangeStart < startOfLastMonth ? rangeStart : startOfLastMonth;
+
+    const allOrders = await db
+      .select({
+        id: orders.id,
+        subtotal: orders.subtotal,
+        discount: orders.discount,
+        gst: orders.gst,
+        grandTotal: orders.grandTotal,
+        status: orders.status,
+        createdAt: orders.createdAt,
+      })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.restaurantId, id),
+          ne(orders.status, "cancelled"),
+          gte(orders.createdAt, lookbackStart)
+        )
+      )
+      .orderBy(desc(orders.createdAt));
+
+    const orderIds = allOrders.map((o) => o.id);
+    const deliveryFeeByOrderId = new Map<string, number>();
+    if (orderIds.length > 0) {
+      const delRows = await db
+        .select({
+          orderId: orderDeliveries.orderId,
+          deliveryFee: orderDeliveries.deliveryFee,
+        })
+        .from(orderDeliveries)
+        .where(inArray(orderDeliveries.orderId, orderIds));
+      for (const d of delRows) {
+        deliveryFeeByOrderId.set(d.orderId, Number(d.deliveryFee || 0));
+      }
+    }
+
+    const penaltyRows = await db
+      .select({
+        id: merchantPenalties.id,
+        amount: merchantPenalties.amount,
+        status: merchantPenalties.status,
+        createdAt: merchantPenalties.createdAt,
+      })
+      .from(merchantPenalties)
+      .where(
+        and(
+          eq(merchantPenalties.restaurantId, id),
+          ne(merchantPenalties.status, "waived"),
+          gte(merchantPenalties.createdAt, lookbackStart)
+        )
+      );
+
+    // Helper: get Monday 00:00 key for a given date
+    const getWeekStart = (dt: Date) => {
+      const d = new Date(dt);
+      const wDay = d.getDay();
+      const diff = wDay === 0 ? -6 : 1 - wDay;
+      d.setDate(d.getDate() + diff);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+
+    const formatShortDate = (dt: Date) =>
+      dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+
+    // Group orders in selected [rangeStart, rangeEnd] into weekly settlement cycles
+    const weekBuckets = new Map<
+      string,
+      {
+        weekStart: Date;
+        grossSales: number;
+        customerDeliveryFee: number;
+        discountsSubsidized: number;
+        orderCount: number;
+        penaltiesDeducted: number;
+      }
+    >();
+
+    const inPeriod = (dt: Date) =>
+      dt.getTime() >= rangeStart.getTime() &&
+      (period === "last_week" || period === "last_month"
+        ? dt.getTime() < rangeEnd.getTime()
+        : dt.getTime() <= rangeEnd.getTime());
+
+    for (const o of allOrders) {
+      const created = new Date(o.createdAt);
+      if (!inPeriod(created)) continue;
+      const ws = getWeekStart(created);
+      const key = ws.toISOString().slice(0, 10);
+      if (!weekBuckets.has(key)) {
+        weekBuckets.set(key, {
+          weekStart: ws,
+          grossSales: 0,
+          customerDeliveryFee: 0,
+          discountsSubsidized: 0,
+          orderCount: 0,
+          penaltiesDeducted: 0,
+        });
+      }
+      const bucket = weekBuckets.get(key)!;
+      const grandTotalRupees = Number(o.grandTotal ?? o.subtotal ?? 0);
+      const discountRupees = Number(o.discount || 0);
+      const deliveryRupees = Math.round(deliveryFeeByOrderId.get(o.id) || 0);
+      bucket.grossSales += Math.max(0, grandTotalRupees - deliveryRupees + discountRupees);
+      bucket.customerDeliveryFee += deliveryRupees;
+      bucket.discountsSubsidized += discountRupees;
+      bucket.orderCount += 1;
+    }
+
+    for (const p of penaltyRows) {
+      const created = new Date(p.createdAt);
+      if (!inPeriod(created)) continue;
+      const ws = getWeekStart(created);
+      const key = ws.toISOString().slice(0, 10);
+      if (!weekBuckets.has(key)) {
+        weekBuckets.set(key, {
+          weekStart: ws,
+          grossSales: 0,
+          customerDeliveryFee: 0,
+          discountsSubsidized: 0,
+          orderCount: 0,
+          penaltiesDeducted: 0,
+        });
+      }
+      const bucket = weekBuckets.get(key)!;
+      bucket.penaltiesDeducted += Math.round((Number(p.amount || 0)) / 100);
+    }
+
+    const settlements = Array.from(weekBuckets.entries())
+      .sort((a, b) => b[1].weekStart.getTime() - a[1].weekStart.getTime())
+      .map(([key, b]) => {
+        const weekEnd = new Date(b.weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const payoutMonday = new Date(b.weekStart);
+        payoutMonday.setDate(payoutMonday.getDate() + 7);
+
+        const commissionAmount = Number(((b.grossSales * commissionRate) / 100).toFixed(2));
+        const gstOnCommission = Number((commissionAmount * 0.18).toFixed(2));
+        const tcsDeduction = Number((b.grossSales * 0.01).toFixed(2));
+        const netPayout = Number(
+          Math.max(
+            0,
+            b.grossSales -
+              commissionAmount -
+              gstOnCommission -
+              tcsDeduction -
+              b.discountsSubsidized -
+              b.penaltiesDeducted
+          ).toFixed(2)
+        );
+        const isCurrentWeek = b.weekStart.getTime() >= startOfCurrentWeek.getTime();
+        const status: "settled" | "processing" = isCurrentWeek ? "processing" : "settled";
+
+        return {
+          id: `SET-${key.replace(/-/g, "")}`,
+          cycleLabel: `${formatShortDate(b.weekStart)} – ${formatShortDate(weekEnd)}`,
+          payoutDate: isCurrentWeek
+            ? `Scheduled ${formatShortDate(payoutMonday)} ${payoutMonday.getFullYear()}`
+            : `Cycle Ended ${formatShortDate(weekEnd)} ${weekEnd.getFullYear()}`,
+          status,
+          grossSales: Number(b.grossSales.toFixed(2)),
+          customerDeliveryFee: Number(b.customerDeliveryFee.toFixed(2)),
+          commissionRate,
+          commissionAmount,
+          gstOnCommission,
+          tcsDeduction,
+          discountsSubsidized: Number(b.discountsSubsidized.toFixed(2)),
+          penaltiesDeducted: Number(b.penaltiesDeducted.toFixed(2)),
+          netPayout,
+          orderCount: b.orderCount,
+          utrNumber: null,
+        };
+      });
+
+    // Compute month-over-month growth % cleanly from real orders
+    const sumMonthSales = (start: Date, end: Date) =>
+      allOrders
+        .filter((o) => {
+          const t = new Date(o.createdAt).getTime();
+          return t >= start.getTime() && t < end.getTime();
+        })
+        .reduce((acc, o) => acc + Number(o.grandTotal ?? o.subtotal ?? 0), 0);
+
+    const thisMonthTotal = sumMonthSales(startOfThisMonth, new Date(now.getTime() + 1000));
+    const lastMonthTotal = sumMonthSales(startOfLastMonth, startOfThisMonth);
+    const growthPercent =
+      lastMonthTotal > 0
+        ? Number((((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100).toFixed(1))
+        : null;
+
+    const totalGross = settlements.reduce((a, s) => a + s.grossSales, 0);
+    const totalCommission = settlements.reduce((a, s) => a + s.commissionAmount, 0);
+    const totalNetPayout = settlements.reduce((a, s) => a + s.netPayout, 0);
+    const totalOrdersCount = settlements.reduce((a, s) => a + s.orderCount, 0);
+    const totalPenalties = settlements.reduce((a, s) => a + s.penaltiesDeducted, 0);
+
+    res.status(200).json({
+      success: true,
+      period,
+      commissionRate,
+      restaurantName: restaurant.restaurantName,
+      gstNumber: restaurant.gstNumber || null,
+      summary: {
+        totalNetPayout: Number(totalNetPayout.toFixed(2)),
+        grossSales: Number(totalGross.toFixed(2)),
+        commissionAmount: Number(totalCommission.toFixed(2)),
+        totalOrders: totalOrdersCount,
+        penaltiesDeducted: Number(totalPenalties.toFixed(2)),
+        growthPercent,
+      },
+      settlements,
+    });
+  } catch (error) {
+    console.error("SETTLEMENTS FETCH ERROR:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });

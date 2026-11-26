@@ -85,13 +85,6 @@ import Svg, {
 
 import { BACKEND_URL, OLA_MAPS_API_KEY } from '../config';
 import { SecureStorage } from '../utils/secureStorage';
-
-// Public fallback session token to access live delivery tracking when customer is unauthenticated
-const PUBLIC_FALLBACK_TRACKING_TOKEN = 'Sd1mjQDnOckkKUkS8ddE0WJ3TJ8gG9Jv';
-
-// Direct Neon DB credentials for resilient real-time kitchen preparation sync
-const NEON_CONN_STRING = 'postgresql://neondb_owner:npg_Tyq7fb1lexRO@ep-fancy-shape-aisogkwg-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require';
-const NEON_SQL_ENDPOINT = 'https://ep-fancy-shape-aisogkwg-pooler.c-4.us-east-1.aws.neon.tech/sql';
 import { useViewModel } from '../state/MainViewModel';
 
 // Strict Figma Assets
@@ -1319,6 +1312,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
   const fullMapWebviewRef = useRef<WebView>(null);
   const miniMapWebviewRef = useRef<WebView>(null);
   const [prepExtensionNotice, setPrepExtensionNotice] = useState<string | null>(null);
+  const [slaWarningNotice, setSlaWarningNotice] = useState<string | null>(null);
   const socketRef = useRef<any>(null);
 
   // Live ticker updating every 1s for real-time ETA countdown matching restaurant app
@@ -1907,7 +1901,10 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     if (kitchenStatus === 'cancelled' || kitchenStatus === 'rejected') {
       return {
         title: 'Order Cancelled',
-        description: 'This order was cancelled. Any amount paid will be refunded to your source payment method.',
+        description:
+          orderDetail?.refundMessage ||
+          orderDetail?.details ||
+          'This order was cancelled by the restaurant. Any amount paid will be refunded to your source payment method.',
         badge: 'CANCELLED',
       };
     }
@@ -2075,49 +2072,7 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       return;
     }
     try {
-      // 1. Fetch live order data directly from Neon PostgreSQL for instant 0ms offline-resilient sync
-      if (!hasHydratedLocalRef.current) {
-        hasHydratedLocalRef.current = true;
-        try {
-          const neonQuery = `SELECT id, status, prep_time_minutes, extended_prep_minutes, acknowledged_at, created_at, updated_at, notes, grand_total, restaurant_id FROM orders WHERE id = '${orderId}' LIMIT 1;`;
-          const neonResp = await fetch(NEON_SQL_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Neon-Connection-String': NEON_CONN_STRING,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ query: neonQuery }),
-          });
-          if (neonResp.ok) {
-            const neonJson = await neonResp.json();
-            if (neonJson.rows && neonJson.rows.length > 0) {
-              const row = neonJson.rows[0];
-              const parsedInfo = parseOrderDeliveryInfo(row);
-              const livePrepMins = Number(row.prep_time_minutes) > 0 ? Number(row.prep_time_minutes) : undefined;
-              const liveExtPrepMins = row.extended_prep_minutes !== null && row.extended_prep_minutes !== undefined ? Number(row.extended_prep_minutes) : undefined;
-              setOrderDetail((prev: any) => {
-                const resolvedStatus = mergeKitchenStatus(prev?.status, row.status);
-                const acceptedTime = row.acknowledged_at || (resolvedStatus === 'preparing' ? (row.updated_at || prev?.acceptedTime) : undefined) || prev?.acceptedTime;
-                return {
-                  ...prev,
-                  ...row,
-                  deliveryAddress: parsedInfo.address || row.deliveryAddress || prev?.deliveryAddress,
-                  customerLatitude: parsedInfo.latitude || row.customerLatitude || prev?.customerLatitude,
-                  customerLongitude: parsedInfo.longitude || row.customerLongitude || prev?.customerLongitude,
-                  status: resolvedStatus,
-                  ...(livePrepMins ? { prepTimeMinutes: livePrepMins } : {}),
-                  ...(liveExtPrepMins !== undefined ? { extendedPrepMinutes: liveExtPrepMins } : {}),
-                  ...(acceptedTime ? { acceptedTime } : {}),
-                };
-              });
-            }
-          }
-        } catch (neonErr) {
-          console.warn('[TrackingScreen] Neon direct query error:', neonErr);
-        }
-      }
-
-      // Retrieve active auth token if available (Keychain/KeyStore -> Auth State -> Session Storage -> Public Fallback)
+      // Retrieve active auth token if available (Keychain/KeyStore -> Auth State -> Session Storage)
       let activeToken = sessionToken;
       if (!activeToken) {
         try {
@@ -2141,9 +2096,9 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         } catch (e) { }
       }
 
-      // If user is guest/unauthenticated, use public fallback token to access tracking on live server
-      const effectiveToken = activeToken || PUBLIC_FALLBACK_TRACKING_TOKEN;
-      const authHeaders: Record<string, string> = { Authorization: `Bearer ${effectiveToken}` };
+      const authHeaders: Record<string, string> = activeToken
+        ? { Authorization: `Bearer ${activeToken}` }
+        : {};
 
       // 2. Fetch live data from backend order detail endpoint
       const orderResp = await fetch(`${BACKEND_URL}/api/orders/${orderId}/detail`, {
@@ -2215,14 +2170,8 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       let trackResp = await fetch(`${BACKEND_URL}/api/delivery/track/${orderId}`, {
         headers: authHeaders,
       });
-      if (!trackResp.ok && trackResp.status === 401 && effectiveToken !== PUBLIC_FALLBACK_TRACKING_TOKEN) {
-        // Fallback retry with public tracking token
-        trackResp = await fetch(`${BACKEND_URL}/api/delivery/track/${orderId}`, {
-          headers: { Authorization: `Bearer ${PUBLIC_FALLBACK_TRACKING_TOKEN}` },
-        });
-      }
-      if (!trackResp.ok && trackResp.status === 401) {
-        // Fallback retry without auth header in case server is running updated public route
+      if (!trackResp.ok && trackResp.status === 401 && activeToken) {
+        // Retry without auth header for public order-room tracking
         trackResp = await fetch(`${BACKEND_URL}/api/delivery/track/${orderId}`);
       }
       if (trackResp.ok) {
@@ -2533,14 +2482,35 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
       });
     });
 
-    socket.on('order-cancelled', (data: any) => {
-      console.log('📡 [TrackingScreen] Received order-cancelled event:', data);
+    const handleOrderCancelled = (data: any) => {
+      console.log('📡 [TrackingScreen] Received cancellation event:', data);
+      setSlaWarningNotice(null);
       setOrderDetail((prev: any) => ({
         ...prev,
         status: 'cancelled',
-        cancellationReason: data.reason,
-        refundMessage: data.refundMessage || '100% refund initiated to your payment method.'
+        cancelledBy: data.cancelledBy || prev?.cancelledBy,
+        cancellationReason: data.reason || data.details || prev?.cancellationReason,
+        refundMessage: data.refundMessage || '100% refund initiated to your payment method.',
+        refund: data.refundInitiated
+          ? {
+              status: 'refunded',
+              amountPaise: data.refundAmountPaise,
+              referenceNumber: data.refundReference,
+            }
+          : prev?.refund,
+        voucherCode: data.voucherCode || prev?.voucherCode,
       }));
+    };
+
+    socket.on('order-cancelled', handleOrderCancelled);
+    socket.on('order-auto-cancelled', handleOrderCancelled);
+    socket.on('order-sla-update', (data: any) => {
+      if (data?.message) {
+        setSlaWarningNotice(data.message);
+      }
+      if (data?.type === 'no_rider_delay_warning' || data?.type === 'acceptance_delay_warning') {
+        fetchInitialData().catch(() => {});
+      }
     });
 
     // Real-time chat events: listen to both 'new-message' and 'chat-message' for seamless delivery updates
@@ -2582,9 +2552,6 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             if (parsed?.sessionToken) activeToken = parsed.sessionToken;
           }
         } catch (e) {}
-      }
-      if (!activeToken) {
-        activeToken = PUBLIC_FALLBACK_TRACKING_TOKEN;
       }
 
       const res = await fetch(`${BACKEND_URL}/api/chat/${orderId}/messages`, {
@@ -2645,9 +2612,6 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
             if (parsed?.sessionToken) activeToken = parsed.sessionToken;
           }
         } catch (e) {}
-      }
-      if (!activeToken) {
-        activeToken = PUBLIC_FALLBACK_TRACKING_TOKEN;
       }
 
       const res = await fetch(`${BACKEND_URL}/api/chat/${orderId}/messages`, {
@@ -3187,8 +3151,8 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                   <ChevronDown size={13 * SCALE} color="#8A8A90" strokeWidth={2.4} />
                 </View>
               </TouchableOpacity>
-              {!isRiderAccepted ? (
-                /* ── STAGE 1: ORDER RECEIVED / KITCHEN PREPARING (NO RIDER ASSIGNED YET) ── */
+              {(!isRiderAccepted || isCancelled) ? (
+                /* ── STAGE 1: ORDER RECEIVED / KITCHEN PREPARING (NO RIDER ASSIGNED YET) OR CANCELLED ── */
                 <View>
                   <View style={styles.statusCardTopSection}>
                     {/* Left: Order Received Title + Restaurant/Address Timeline */}
@@ -3244,13 +3208,31 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
                         <PickupHandoverOtpBadge otp={orderDetail.handoverOtp} />
                       )}
 
-                      {/* Restaurant rush cancellation banner if cancelled */}
-                      {orderDetail?.status === 'cancelled' && (
-                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2A0E0E', borderColor: '#EF4444', marginTop: 6 }]}>
-                          <AlertCircle size={14} color="#EF4444" style={{ marginRight: 6 }} />
-                          <Text style={[styles.waitingPartnerBadgeText, { color: '#FCA5A5', flex: 1 }]}>
-                            Order Cancelled by Kitchen • 100% Refund Initiated
+                      {slaWarningNotice && !isCancelled && (
+                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2E2005', borderColor: '#F59E0B', marginTop: 6 }]}>
+                          <AlertCircle size={13} color="#F5B800" style={{ marginRight: 6 }} />
+                          <Text style={[styles.waitingPartnerBadgeText, { color: '#FDE68A', flex: 1 }]}>
+                            {slaWarningNotice}
                           </Text>
+                        </View>
+                      )}
+
+                      {/* Restaurant cancellation / non-acceptance refund banner */}
+                      {isCancelled && (
+                        <View style={[styles.waitingPartnerBadge, { backgroundColor: '#2A0E0E', borderColor: '#EF4444', marginTop: 6, flexDirection: 'column', alignItems: 'flex-start' }]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <AlertCircle size={14} color="#EF4444" style={{ marginRight: 6 }} />
+                            <Text style={[styles.waitingPartnerBadgeText, { color: '#FCA5A5', flex: 1 }]}>
+                              {orderDetail?.cancelledBy === 'system'
+                                ? 'Closed (Restaurant Did Not Confirm) • Refund Initiated'
+                                : 'Order Cancelled by Kitchen • Refund Initiated'}
+                            </Text>
+                          </View>
+                          {Boolean(orderDetail?.refund?.referenceNumber) && (
+                            <Text style={{ color: '#FECACA', fontSize: 11 * SCALE, marginTop: 4 }}>
+                              Refund Ref: {orderDetail.refund.referenceNumber} ({orderDetail.refund.status || 'refunded'})
+                            </Text>
+                          )}
                         </View>
                       )}
                     </Animated.View>

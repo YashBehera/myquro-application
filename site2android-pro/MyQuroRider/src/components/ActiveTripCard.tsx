@@ -391,8 +391,19 @@ export const ActiveTripCard: React.FC = () => {
     : activeTrip.dropoffAddress;
 
   const handleCall = () => {
-    const phone = isNavOrArrived ? '+919876543210' : activeTrip.customerPhone;
-    Linking.openURL(`tel:${phone}`);
+    const phone = isNavOrArrived
+      ? (activeTrip.restaurantPhone || '')
+      : (activeTrip.customerPhone || '');
+    if (!phone.trim()) {
+      Alert.alert(
+        'Phone Unavailable',
+        isNavOrArrived
+          ? 'Restaurant phone number is not available for this order.'
+          : 'Customer phone number is not available for this order.'
+      );
+      return;
+    }
+    Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`);
   };
 
   const handleMaps = () => {
@@ -693,7 +704,7 @@ export const ActiveTripCard: React.FC = () => {
     );
   };
 
-  const earningsAmount = activeTrip.id.startsWith('demo_order_') ? 22 : (Math.round(activeTrip.fareAmount * 0.3) || 22);
+  const earningsAmount = Math.round(activeTrip.fareAmount * 0.3) || 22;
 
   if (showEarningsScreen || activeTrip.status === 'COMPLETED') {
     return (

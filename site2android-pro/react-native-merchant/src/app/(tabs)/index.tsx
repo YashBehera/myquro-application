@@ -48,14 +48,20 @@ export default function RestaurantDashboard() {
     state?: string;
     postalCode?: string | number;
     autoAcceptOrders?: boolean;
+    isOpen?: boolean;
+    snoozedUntil?: string | null;
+    snoozeReason?: string | null;
+    autoPausedUntil?: string | null;
+    strikeCount?: number;
   } | null>(null);
   const [activeBottomTab, setActiveBottomTab] = useState<'Orders' | 'Menu' | 'Business' | 'Complaints' | 'More'>('Orders');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
-  // Swiggy Outlet Snooze State
+  // Swiggy Outlet Snooze & Auto-Pause State
   const [showSnoozeModal, setShowSnoozeModal] = useState(false);
   const [snoozedUntil, setSnoozedUntil] = useState<Date | null>(null);
   const [snoozeReason, setSnoozeReason] = useState<string>('');
+  const [autoPausedUntil, setAutoPausedUntil] = useState<Date | null>(null);
 
   // Swiggy Partial Out-of-Stock Modal State
   const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
@@ -107,6 +113,26 @@ export default function RestaurantDashboard() {
         if (rest) {
           setRestaurantProfile(rest);
           setAutoAcceptEnabled(rest.autoAcceptOrders ?? true);
+
+          const now = Date.now();
+          const snoozeDate = rest.snoozedUntil ? new Date(rest.snoozedUntil) : null;
+          if (snoozeDate && !isNaN(snoozeDate.getTime()) && snoozeDate.getTime() > now) {
+            setSnoozedUntil(snoozeDate);
+            setSnoozeReason(rest.snoozeReason || 'Outlet Snoozed');
+          } else {
+            setSnoozedUntil(null);
+          }
+
+          const pauseDate = rest.autoPausedUntil ? new Date(rest.autoPausedUntil) : null;
+          if (pauseDate && !isNaN(pauseDate.getTime()) && pauseDate.getTime() > now) {
+            setAutoPausedUntil(pauseDate);
+          } else {
+            setAutoPausedUntil(null);
+          }
+
+          if (typeof rest.isOpen === 'boolean') {
+            setIsOnline(rest.isOpen);
+          }
         }
       } catch (e) {
         console.warn('Error fetching restaurant profile in index:', e);
@@ -122,8 +148,29 @@ export default function RestaurantDashboard() {
       loadComplaints(undefined, true);
     }, 4000);
 
-    return () => clearInterval(pollInterval);
+    const profileSyncInterval = setInterval(() => {
+      fetchRestaurantProfile();
+    }, 30000);
+
+    return () => {
+      clearInterval(pollInterval);
+      clearInterval(profileSyncInterval);
+    };
   }, []);
+
+  // Device presence heartbeat every 60s when restaurant is online
+  useEffect(() => {
+    const restId = restaurantProfile?.id;
+    if (!restId || !isOnline) return;
+
+    const sendHeartbeat = () => {
+      apiClient.post(`/restaurants/${restId}/heartbeat`).catch(() => {});
+    };
+
+    sendHeartbeat();
+    const hbInterval = setInterval(sendHeartbeat, 60000);
+    return () => clearInterval(hbInterval);
+  }, [restaurantProfile?.id, isOnline]);
 
   // Fade out speech bubble after 5s
   useEffect(() => {
@@ -153,19 +200,9 @@ export default function RestaurantDashboard() {
 
   const activeComplaintsCount = getActiveComplaintsCount();
 
-  // Automatically generate new orders every 15 seconds (only when online)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (isOnline) {
-        addSimulatedOrder(isOnline);
-      }
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [isOnline, addSimulatedOrder]);
-
   // Swiggy-style Outlet Availability & Snooze Handler
   const handleToggleOnline = () => {
-    if (snoozedUntil) {
+    if (snoozedUntil || (autoPausedUntil && autoPausedUntil.getTime() > Date.now())) {
       handleResumeFromSnooze();
       return;
     }
@@ -188,13 +225,31 @@ export default function RestaurantDashboard() {
         'Choose how you want to manage your outlet status:',
         [
           { text: 'Snooze Outlet (Rush Hour / Break)', onPress: () => setShowSnoozeModal(true) },
-          { text: 'Turn Completely Offline', style: 'destructive', onPress: () => setIsOnline(false) },
+          {
+            text: 'Turn Completely Offline',
+            style: 'destructive',
+            onPress: async () => {
+              setIsOnline(false);
+              try {
+                const restId = restaurantProfile?.id;
+                if (restId) {
+                  await apiClient.patch(`/restaurants/${restId}/close`);
+                }
+              } catch (e) {
+                console.warn('Error closing outlet:', e);
+              }
+            },
+          },
           { text: 'Stay Online', style: 'cancel' },
         ]
       );
     } else {
       setIsOnline(true);
       setSnoozedUntil(null);
+      const restId = restaurantProfile?.id;
+      if (restId) {
+        apiClient.patch(`/restaurants/${restId}/open`).catch((e) => console.warn('Error opening outlet:', e));
+      }
     }
   };
 
@@ -220,10 +275,14 @@ export default function RestaurantDashboard() {
     try {
       setSnoozedUntil(null);
       setSnoozeReason('');
+      setAutoPausedUntil(null);
       setIsOnline(true);
 
-      const restRes = await apiClient.get('/restaurants/my-restaurant');
-      const restId = restRes.data?.restaurant?.id;
+      let restId = restaurantProfile?.id;
+      if (!restId) {
+        const restRes = await apiClient.get('/restaurants/my-restaurant');
+        restId = restRes.data?.restaurant?.id;
+      }
       if (restId) {
         await apiClient.post(`/restaurants/${restId}/unsnooze`);
       }
@@ -236,13 +295,16 @@ export default function RestaurantDashboard() {
 
   const newOrders = orders.filter((o) => o.status === 'New');
 
-  // Auto-alert and sound alarm whenever a new order arrives or is pending review
+  // Auto-alert and sound alarm whenever a new order arrives; stop & dismiss immediately if auto-cancelled
   const lastAlertedOrderId = useRef<string | null>(null);
 
   useEffect(() => {
     if (newOrders.length > 0) {
       const latestOrder = newOrders[0];
-      if (lastAlertedOrderId.current !== latestOrder.id) {
+      if (
+        lastAlertedOrderId.current !== latestOrder.id ||
+        (selectedNewOrder && !newOrders.some((o) => o.id === selectedNewOrder.id))
+      ) {
         lastAlertedOrderId.current = latestOrder.id;
         setSelectedNewOrder(latestOrder);
         setShowNewOrderModal(true);
@@ -251,8 +313,12 @@ export default function RestaurantDashboard() {
     } else {
       soundService.stopOrderAlarm();
       lastAlertedOrderId.current = null;
+      if (showNewOrderModal) {
+        setShowNewOrderModal(false);
+        setSelectedNewOrder(null);
+      }
     }
-  }, [newOrders.length]);
+  }, [newOrders.length, selectedNewOrder?.id, showNewOrderModal]);
 
   useEffect(() => {
     return () => {
@@ -429,6 +495,35 @@ export default function RestaurantDashboard() {
           </View>
           <TouchableOpacity
             style={styles.resumeNowPill}
+            activeOpacity={0.8}
+            onPress={handleResumeFromSnooze}
+          >
+            <Text style={styles.resumeNowText}>Resume Now</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* AUTO-PAUSE PROTECTION BANNER (Triggered by 5m unresponsive SLA or rush overload) */}
+      {autoPausedUntil && autoPausedUntil.getTime() > nowMs && (
+        <View style={[styles.snoozeNotificationCard, { backgroundColor: 'rgba(239, 68, 68, 0.14)', borderColor: 'rgba(239, 68, 68, 0.4)' }]}>
+          <TouchableOpacity
+            style={styles.snoozeNotificationLeft}
+            activeOpacity={0.8}
+            onPress={() => router.push('/penalties' as any)}
+          >
+            <Ionicons name="warning" size={20} color="#F87171" />
+            <View style={{ marginLeft: 8, flex: 1 }}>
+              <Text style={[styles.snoozeNotificationTitle, { color: '#FCA5A5' }]}>
+                Outlet Auto-Paused (Missed / Overload SLA)
+              </Text>
+              <Text style={styles.snoozeNotificationSub}>
+                New orders paused until {autoPausedUntil.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {typeof restaurantProfile?.strikeCount === 'number' ? ` • Strikes: ${restaurantProfile.strikeCount} (Tap to view)` : ' • Tap to view'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.resumeNowPill, { backgroundColor: '#F87171' }]}
             activeOpacity={0.8}
             onPress={handleResumeFromSnooze}
           >

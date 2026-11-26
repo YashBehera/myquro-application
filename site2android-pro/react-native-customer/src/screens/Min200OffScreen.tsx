@@ -27,6 +27,7 @@ import {
 } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
 import { SCREEN_WIDTH, getSafeTopPadding } from '../utils/responsive';
+import { formatRatingCount } from '../utils/ratingFormat';
 
 // Local hero banner asset containing 3D "MINIMUM ₹200 OFF"
 const min200OffHeroImg = require('../assets/home/min_200_off_hero.png');
@@ -114,7 +115,7 @@ export const Min200OffScreen: React.FC<Min200OffScreenProps> = ({
         name: r.name,
         image: imgUri,
         rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.2,
-        ratingCount: r.reviewCount ? `${r.reviewCount}+` : '2.8K+',
+        ratingCount: formatRatingCount(r.reviewCount, '2.8K+'),
         time: '25–35 mins',
         cuisines: r.cuisine || r.category || 'Multi-cuisine',
         location: r.address || r.city || '',

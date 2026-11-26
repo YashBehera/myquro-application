@@ -113,6 +113,13 @@ export default function MoreScreen() {
       route: '/complaints',
     },
     {
+      id: 'penalties',
+      title: 'Penalties & SLA Strikes',
+      icon: 'shield-half-outline',
+      badge: restaurant?.strikeCount > 0 ? `${restaurant.strikeCount} Strikes` : undefined,
+      route: '/penalties',
+    },
+    {
       id: 'help',
       title: 'Help & Support Center',
       icon: 'headset-outline',

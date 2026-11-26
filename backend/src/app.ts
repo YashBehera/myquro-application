@@ -85,6 +85,9 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/api/test/trigger-ws", async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(403).json({ error: "Test endpoint is disabled in production" });
+  }
   const { restaurantId, type } = req.query as { restaurantId?: string, type?: 'order' | 'reservation' };
   if (!restaurantId) {
     return res.status(400).json({ error: "Missing restaurantId" });

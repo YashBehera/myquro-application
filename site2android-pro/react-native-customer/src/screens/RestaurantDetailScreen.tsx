@@ -27,7 +27,9 @@ import {
   Clipboard,
   StatusBar,
   Animated,
+  Easing,
 } from 'react-native';
+import Svg, { Line } from 'react-native-svg';
 import {
   Heart,
   MoreVertical,
@@ -49,7 +51,15 @@ import {
   Utensils,
   ChevronRight,
   Info,
+  AlertTriangle,
 } from 'lucide-react-native';
+import {
+  checkCustomerServiceability,
+  isKitchenOffline,
+  formatOfflineReopenMessage,
+  MAX_DELIVERY_RADIUS_KM,
+} from '../utils/serviceability';
+import { formatRatingCount } from '../utils/ratingFormat';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
 import { Restaurant } from '../types';
@@ -141,6 +151,91 @@ const dishLacchaParantha    = require('../assets/restaurant_detail/pair_and_cart
 const pairAccordionChevron  = require('../assets/restaurant_detail/pair_and_cart/pairAccordionChevron.png');  // Up Chevron
 const plusIconSmall         = require('../assets/restaurant_detail/pair_and_cart/plusIconSmall.png');         // Plus button
 const starGreenSmall        = require('../assets/restaurant_detail/pair_and_cart/starGreenSmall.png');        // Star rating icon
+
+const PENDULUM_SAMPLES = 48;
+const PENDULUM_INPUT_RANGE = Array.from(
+  { length: PENDULUM_SAMPLES + 1 },
+  (_, i) => i / PENDULUM_SAMPLES
+);
+const PENDULUM_OUTPUT_RANGE = PENDULUM_INPUT_RANGE.map(
+  (t) => `${(Math.sin(t * Math.PI * 2) * 5.2).toFixed(3)}deg`
+);
+const SIGN_STRING_HEIGHT = 24 * SCALE;
+const SIGN_BOARD_HEIGHT = 50 * SCALE;
+const SIGN_ASSEMBLY_HALF_HEIGHT = (SIGN_STRING_HEIGHT + SIGN_BOARD_HEIGHT) / 2;
+
+const OscillatingClosedSign = React.memo(() => {
+  const phase = useRef(new Animated.Value(0)).current;
+
+  const swingRotation = useMemo(
+    () =>
+      phase.interpolate({
+        inputRange: PENDULUM_INPUT_RANGE,
+        outputRange: PENDULUM_OUTPUT_RANGE,
+      }),
+    [phase]
+  );
+
+  useEffect(() => {
+    phase.setValue(0);
+    // Single native-driven linear timing loop avoids JS-bridge sequence restart hiccups
+    const loop = Animated.loop(
+      Animated.timing(phase, {
+        toValue: 1,
+        duration: 2800,
+        easing: Easing.linear,
+        useNativeDriver: true,
+        isInteraction: false,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [phase]);
+
+  return (
+    <View style={styles.hangingClosedWrapper} pointerEvents="none">
+      <View style={styles.hangingNailDot} />
+      <Animated.View
+        renderToHardwareTextureAndroid
+        style={[
+          styles.hangingSwingAssembly,
+          {
+            transform: [
+              { translateY: -SIGN_ASSEMBLY_HALF_HEIGHT },
+              { rotate: swingRotation },
+              { translateY: SIGN_ASSEMBLY_HALF_HEIGHT },
+            ],
+          },
+        ]}
+      >
+        <Svg width={136 * SCALE} height={SIGN_STRING_HEIGHT}>
+          <Line
+            x1={68 * SCALE}
+            y1={0}
+            x2={26 * SCALE}
+            y2={SIGN_STRING_HEIGHT}
+            stroke="#A1A1AA"
+            strokeWidth={1.6}
+          />
+          <Line
+            x1={68 * SCALE}
+            y1={0}
+            x2={110 * SCALE}
+            y2={SIGN_STRING_HEIGHT}
+            stroke="#A1A1AA"
+            strokeWidth={1.6}
+          />
+        </Svg>
+        <View style={styles.closedBoardOuter}>
+          <View style={styles.closedBoardInner}>
+            <Text style={styles.closedBoardCurrentlyText}>Currently</Text>
+            <Text style={styles.closedBoardClosedText}>CLOSED</Text>
+          </View>
+        </View>
+      </Animated.View>
+    </View>
+  );
+});
 
 interface RestaurantDetailScreenProps {
   restaurantId: string | null;
@@ -265,8 +360,12 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
               phone: rest.phoneNumber || '',
               email: rest.email || '',
               address: rest.restaurantAddress || '',
+              isOpen: Boolean(rest.isOpen),
               isClosed: !rest.isOpen,
-              closedReason: rest.isOpen ? '' : 'Kitchen offline',
+              closedReason: rest.isOpen ? '' : 'Currently offline • Should be back soon',
+              restaurantStatus: rest.restaurantStatus,
+              snoozedUntil: rest.snoozedUntil ?? null,
+              autoPausedUntil: rest.autoPausedUntil ?? null,
               latitude: rest.latitude ? Number(rest.latitude) : undefined,
               longitude: rest.longitude ? Number(rest.longitude) : undefined,
             });
@@ -614,8 +713,36 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
     return found ? found.quantity : 0;
   };
 
+  const isOfflineKitchen = useMemo(() => isKitchenOffline(restaurant), [restaurant]);
+  const offlineReopenMessage = useMemo(
+    () => (isOfflineKitchen ? formatOfflineReopenMessage(restaurant) : ''),
+    [isOfflineKitchen, restaurant]
+  );
+
+  const serviceability = useMemo(() => {
+    return checkCustomerServiceability(
+      restaurant,
+      currentLocation?.latitude,
+      currentLocation?.longitude,
+      MAX_DELIVERY_RADIUS_KM
+    );
+  }, [restaurant, currentLocation?.latitude, currentLocation?.longitude]);
+
+  const isOrderingBlocked = Boolean(
+    !serviceability.isServiceable &&
+      serviceability.code &&
+      serviceability.code !== 'MISSING_DELIVERY_LOCATION'
+  );
+
   // Trigger Customization Modal on ADD click (Figma Node 3027:1105)
   const handleOpenCustomization = (item: SimFoodItem) => {
+    if (isOrderingBlocked) {
+      Alert.alert(
+        serviceability.code === 'OUT_OF_DELIVERY_RANGE' ? 'Outside Delivery Area' : 'Outlet Unavailable',
+        serviceability.reason || `This restaurant cannot deliver to your location (max ${MAX_DELIVERY_RADIUS_KM} km).`
+      );
+      return;
+    }
     setSelectedDishForCustomization(item);
     setSelectedVariantIndex(0);
     setSelectedAddonIds([]);
@@ -623,6 +750,13 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
   };
 
   const handleAddItemDirect = (item: SimFoodItem) => {
+    if (isOrderingBlocked) {
+      Alert.alert(
+        serviceability.code === 'OUT_OF_DELIVERY_RANGE' ? 'Outside Delivery Area' : 'Outlet Unavailable',
+        serviceability.reason || `This restaurant cannot deliver to your location (max ${MAX_DELIVERY_RADIUS_KM} km).`
+      );
+      return;
+    }
     setCart((prev) => {
       const existing = prev.find((c) => c.foodItem.id === item.id);
       if (existing) {
@@ -910,7 +1044,33 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
         {/* ════════════════════════════════════════════════════════════════════════
             [CHILD 0] MAIN RESTAURANT CARD CONTAINER (Scrolls away)
             ════════════════════════════════════════════════════════════════════════ */}
-        <View style={styles.mainCardContainer}>
+        <View>
+          {/* Oscillating Hanging "Currently CLOSED" Sign — rendered strictly for offline kitchens */}
+          {isOfflineKitchen && <OscillatingClosedSign />}
+
+          <View style={[styles.mainCardContainer, isOfflineKitchen && styles.mainCardContainerOffline]}>
+            {isOfflineKitchen ? (
+              <View style={styles.offlineNoticeBlock}>
+                <Text style={styles.offlineNoticeText}>{offlineReopenMessage}</Text>
+              </View>
+            ) : isOrderingBlocked ? (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: 'rgba(239, 68, 68, 0.14)',
+                borderWidth: 1,
+                borderColor: 'rgba(239, 68, 68, 0.45)',
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                marginBottom: 12,
+              }}>
+                <AlertTriangle size={16} color="#F87171" style={{ marginRight: 8 }} />
+                <Text style={{ color: '#FCA5A5', fontSize: 12, fontWeight: '600', flex: 1 }}>
+                  {serviceability.reason}
+                </Text>
+              </View>
+            ) : null}
           {/* Card Header: Gourmet badge + Seal + Rating Badge */}
           <View style={styles.cardHeaderRow}>
             <View style={styles.gourmetSealWrap}>
@@ -936,10 +1096,10 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                 {Number(restaurant.rating) > 0 && <Image source={imgImage18} style={styles.ratingStarImg} />}
               </View>
               <Text style={styles.ratingCountText}>
-                {restaurant.reviewCount && Number(restaurant.reviewCount) > 0
+                {Number(restaurant.reviewCount) > 0
                   ? (Number(restaurant.reviewCount) >= 1000
-                      ? `${(Number(restaurant.reviewCount) / 1000).toFixed(1)}K+ ratings`
-                      : `${restaurant.reviewCount} rating${Number(restaurant.reviewCount) > 1 ? 's' : ''}`)
+                      ? `${formatRatingCount(restaurant.reviewCount)} ratings`
+                      : `${Number(restaurant.reviewCount)} rating${Number(restaurant.reviewCount) > 1 ? 's' : ''}`)
                   : 'No ratings yet'}
               </Text>
             </View>
@@ -1022,6 +1182,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
             <View style={styles.oneGoldBadge}>
               <Image source={quroBadgeImg} style={styles.quroDetailBadgeImg} resizeMode="contain" />
             </View>
+          </View>
           </View>
         </View>
 
@@ -1266,7 +1427,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                               <Image source={contImg16} style={styles.greenStarIcon} />
                               <Text style={styles.greenRatingText}>
                                 {Number(item.rating) > 0 ? Number(item.rating).toFixed(1) : 'NEW'}
-                                {Number(item.ratingCount) > 0 ? `(${item.ratingCount})` : ''}
+                                {formatRatingCount(item.ratingCount) ? `(${formatRatingCount(item.ratingCount)})` : ''}
                               </Text>
                             </View>
                           </View>
@@ -1363,7 +1524,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                               <Image source={contImg8} style={styles.greenStarIcon} />
                               <Text style={styles.greenRatingText}>
                                 {Number(item.rating) > 0 ? Number(item.rating).toFixed(1) : 'NEW'}
-                                {Number(item.ratingCount) > 0 ? ` (${item.ratingCount})` : ''}
+                                {formatRatingCount(item.ratingCount) ? ` (${formatRatingCount(item.ratingCount)})` : ''}
                               </Text>
                             </View>
                           </View>
@@ -1448,7 +1609,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
                             <Image source={starGreenSmall} style={styles.pairStarIcon} />
                             <Text style={styles.pairRatingText}>
                               {Number(dish.rating) > 0 ? Number(dish.rating).toFixed(1) : 'NEW'}
-                              {Number(dish.ratingCount) > 0 ? `(${dish.ratingCount})` : ''}
+                              {formatRatingCount(dish.ratingCount) ? `(${formatRatingCount(dish.ratingCount)})` : ''}
                             </Text>
                           </View>
                         </View>
@@ -1676,7 +1837,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
               onPress={() => {
                 Alert.alert(
                   restaurant.name,
-                  `Address: ${restaurant.address}\nCuisine: ${restaurant.cuisine}\nRating: ${Number(restaurant.rating) > 0 ? `${Number(restaurant.rating).toFixed(1)} ★ (${restaurant.reviewCount || 0} ratings)` : 'New on My Quro'}`
+                  `Address: ${restaurant.address}\nCuisine: ${restaurant.cuisine}\nRating: ${Number(restaurant.rating) > 0 ? `${Number(restaurant.rating).toFixed(1)} ★ (${formatRatingCount(restaurant.reviewCount, '0')} ratings)` : 'New on My Quro'}`
                 );
                 setShowMoreMenu(false);
               }}
@@ -3408,5 +3569,78 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#000000',
     letterSpacing: 0.3,
+  },
+  hangingClosedWrapper: {
+    alignItems: 'center',
+    marginTop: 6 * SCALE,
+    marginBottom: -14 * SCALE,
+    zIndex: 20,
+    elevation: 10,
+    position: 'relative',
+  },
+  hangingNailDot: {
+    position: 'absolute',
+    top: -3.5 * SCALE,
+    width: 7 * SCALE,
+    height: 7 * SCALE,
+    borderRadius: 3.5 * SCALE,
+    backgroundColor: '#D4D4D8',
+    borderWidth: 1,
+    borderColor: '#52525B',
+    zIndex: 25,
+  },
+  hangingSwingAssembly: {
+    alignItems: 'center',
+    height: SIGN_STRING_HEIGHT + SIGN_BOARD_HEIGHT,
+  },
+  closedBoardOuter: {
+    backgroundColor: '#E86A17',
+    borderRadius: 12 * SCALE,
+    height: SIGN_BOARD_HEIGHT,
+    padding: 3.5 * SCALE,
+    justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  closedBoardInner: {
+    flex: 1,
+    justifyContent: 'center',
+    borderWidth: 1.4,
+    borderColor: 'rgba(255, 247, 237, 0.72)',
+    borderRadius: 9 * SCALE,
+    paddingHorizontal: 18 * SCALE,
+    alignItems: 'center',
+  },
+  closedBoardCurrentlyText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 11 * SCALE,
+    color: '#FFF7ED',
+    lineHeight: 13 * SCALE,
+  },
+  closedBoardClosedText: {
+    fontFamily: 'Urbanist-Black',
+    fontSize: 17 * SCALE,
+    color: '#FFFFFF',
+    letterSpacing: 1.1,
+    lineHeight: 20 * SCALE,
+  },
+  mainCardContainerOffline: {
+    paddingTop: 24 * SCALE,
+    borderColor: '#27272A',
+  },
+  offlineNoticeBlock: {
+    paddingBottom: 12 * SCALE,
+    marginBottom: 12 * SCALE,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E1E22',
+  },
+  offlineNoticeText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 13.5 * SCALE,
+    lineHeight: 19 * SCALE,
+    color: '#F97316',
   },
 });

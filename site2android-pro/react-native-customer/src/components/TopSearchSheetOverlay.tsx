@@ -29,6 +29,7 @@ import {
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
+import { formatRatingCount } from '../utils/ratingFormat';
 import {
   getStoredRecentSearches,
   addStoredRecentSearch,
@@ -635,11 +636,7 @@ export const TopSearchSheetOverlay: React.FC<TopSearchSheetOverlayProps> = ({
                     <View style={styles.resultsListCard}>
                       {relevantRestaurants.map((res: Restaurant, index: number) => {
                         const ratingVal = res.rating || '4.5';
-                        const countStr = res.reviewCount
-                          ? res.reviewCount >= 1000
-                            ? `${(res.reviewCount / 1000).toFixed(1)}K+`
-                            : `${res.reviewCount}+`
-                          : '5K+';
+                        const countStr = formatRatingCount(res.reviewCount, '5K+');
                         const deliveryTimeStr = typeof res.deliveryTime === 'number' ? `${res.deliveryTime} mins` : res.deliveryTime || '30 mins';
                         const areaStr = res.address || res.city || 'Patrapada';
 

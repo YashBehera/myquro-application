@@ -42,6 +42,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
 import { cleanLocationLabel } from '../services/LocationService';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
+import { isValidCoordPair, MAX_DELIVERY_RADIUS_KM } from '../utils/serviceability';
+import { formatRatingCount } from '../utils/ratingFormat';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
 import { Restaurant } from '../types';
 import {
@@ -372,12 +374,15 @@ export const HomeScreen = ({
     }
   };
 
-  // Base list of restaurants
+  const hasValidLocation = isValidCoordPair(currentLocation?.latitude, currentLocation?.longitude);
+
+  // Base list of restaurants: enforce radius-filtered restaurantsList whenever user GPS is known
   const sourceRestaurants = useMemo(() => {
-    if (allRestaurants && allRestaurants.length > 0) return allRestaurants;
+    if (hasValidLocation) return restaurantsList || [];
     if (restaurantsList && restaurantsList.length > 0) return restaurantsList;
+    if (allRestaurants && allRestaurants.length > 0) return allRestaurants;
     return [];
-  }, [allRestaurants, restaurantsList]);
+  }, [hasValidLocation, allRestaurants, restaurantsList]);
 
   // Dynamic filtering based on all active user selections
   const filteredRestaurants = useMemo(() => {
@@ -414,6 +419,28 @@ export const HomeScreen = ({
     });
   }, [sourceRestaurants, isVegOnly, isPureVegRestaurant, activeExploreCat, activeDealOffer, foodItems]);
 
+  const isRestaurantOffline = useCallback((res: Restaurant): boolean => {
+    if (res.isClosed === true || res.isOpen === false) return true;
+    if (res.snoozedUntil && new Date(res.snoozedUntil).getTime() > Date.now()) return true;
+    if (res.autoPausedUntil && new Date(res.autoPausedUntil).getTime() > Date.now()) return true;
+    if (res.restaurantStatus && String(res.restaurantStatus).toLowerCase() !== 'active') return true;
+    return false;
+  }, []);
+
+  // Separate currently open restaurants from offline ones while keeping active filters
+  const { onlineRestaurants, offlineRestaurants } = useMemo(() => {
+    const online: Restaurant[] = [];
+    const offline: Restaurant[] = [];
+    for (const res of filteredRestaurants) {
+      if (isRestaurantOffline(res)) {
+        offline.push(res);
+      } else {
+        online.push(res);
+      }
+    }
+    return { onlineRestaurants: online, offlineRestaurants: offline };
+  }, [filteredRestaurants, isRestaurantOffline]);
+
   // Horizontal cards based on active segment (Reorder vs Food in 15 mins)
   const horizontalCardList = useMemo(() => {
     let baseList = sourceRestaurants;
@@ -422,7 +449,7 @@ export const HomeScreen = ({
     }
     if (activeSegment === 'food15') {
       return baseList
-        .filter((r) => r.deliveryTime && r.deliveryTime <= 25)
+        .filter((r) => !isRestaurantOffline(r) && r.deliveryTime && r.deliveryTime <= 25)
         .slice(0, 5);
     }
     // Reorder: Prioritize restaurants from real past orders in database!
@@ -432,13 +459,13 @@ export const HomeScreen = ({
         .map(id => baseList.find(r => r.id === id))
         .filter(Boolean) as Restaurant[];
       const otherPlaces = baseList.filter(
-        r => !orderedRestIds.includes(r.id) && (isFav(r.id) || r.rating >= 4.0)
+        r => !orderedRestIds.includes(r.id) && !isRestaurantOffline(r) && (isFav(r.id) || r.rating >= 4.0)
       );
       return [...orderedRestaurants, ...otherPlaces].slice(0, 5);
     }
-    // Fallback: Favorite and highly rated places
+    // Fallback: Favorite and highly rated places (online kitchens first)
     return baseList
-      .filter((r) => isFav(r.id) || r.rating >= 4.0)
+      .filter((r) => !isRestaurantOffline(r) && (isFav(r.id) || r.rating >= 4.0))
       .slice(0, 5);
   }, [sourceRestaurants, isVegOnly, isPureVegRestaurant, activeSegment, favouriteRestaurantsList, isFav, userOrders]);
 
@@ -488,6 +515,116 @@ export const HomeScreen = ({
         right: 20,
       });
     }
+  };
+
+  const renderVerticalRestaurantCard = (restaurant: Restaurant, isOffline: boolean) => {
+    const resImg = getRestaurantImageSource(restaurant);
+
+    return (
+      <TouchableOpacity
+        key={restaurant.id}
+        style={[styles.vResCard, isOffline && styles.vResCardOffline]}
+        activeOpacity={isOffline ? 0.8 : 0.92}
+        onPress={() => onSelectRestaurant(restaurant.id)}
+      >
+        {/* Left Photo & Badges */}
+        <View style={styles.vResImgBox}>
+          <Image
+            source={resImg}
+            style={[styles.vResImg, isOffline && { opacity: 0.42 }]}
+          />
+
+          {/* Interactive Favorite Heart */}
+          <TouchableOpacity
+            style={styles.vResHeartBtn}
+            activeOpacity={0.7}
+            onPress={() => handleToggleFav(restaurant.id, restaurant.name)}
+          >
+            <Heart
+              size={14 * SCALE}
+              color={isFav(restaurant.id) ? '#FF334B' : '#FFFFFF'}
+              fill={isFav(restaurant.id) ? '#FF334B' : 'rgba(0,0,0,0.3)'}
+            />
+          </TouchableOpacity>
+
+          {isOffline ? (
+            <View style={styles.vResImgOfflineOverlay}>
+              <View style={styles.vResOfflineBadge}>
+                <Clock size={11 * SCALE} color="#D4D4D8" />
+                <Text style={styles.vResOfflineBadgeText}>OFFLINE</Text>
+              </View>
+            </View>
+          ) : restaurant.offer ? (
+            <View style={styles.vResOfferBox}>
+              <Text style={styles.vResOffer70} numberOfLines={1}>
+                {restaurant.offer.split(' ')[0]}
+              </Text>
+              <Text style={styles.vResOfferUpto} numberOfLines={1}>
+                {restaurant.offer.split(' ').slice(1).join(' ')}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Right Info Column */}
+        <View style={[styles.vResInfoBox, isOffline && { opacity: 0.72 }]}>
+          <View style={styles.vResHeaderRow}>
+            <Text style={[styles.vResTitleText, isOffline && { color: '#9CA3AF' }]} numberOfLines={1}>
+              {restaurant.name}
+            </Text>
+
+            {/* 3 Dots Action Button */}
+            <TouchableOpacity
+              activeOpacity={0.6}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              onPress={(e) => handleOpenActionMenu(restaurant, e)}
+            >
+              <MoreVertical size={16 * SCALE} color="#777777" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.vResRatingRow}>
+            <Image source={expImg19} style={[styles.vResGreenStar, isOffline && { opacity: 0.55 }]} />
+            <Text style={styles.vResRatingText}>
+              {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : 'NEW'}{formatRatingCount(restaurant.reviewCount) ? ` (${formatRatingCount(restaurant.reviewCount)})` : ''}{!isOffline && restaurant.deliveryTime ? ` • ${restaurant.deliveryTime} mins` : ''}
+            </Text>
+            {isPureVegRestaurant(restaurant) && (
+              <View style={{ backgroundColor: '#051A0E', borderWidth: 1, borderColor: isOffline ? '#3F3F46' : '#00A352', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 6 }}>
+                <Text style={{ color: isOffline ? '#9CA3AF' : '#00D06C', fontSize: 9 * SCALE, fontFamily: 'Urbanist-Bold' }}>PURE VEG</Text>
+              </View>
+            )}
+          </View>
+
+          <Text style={styles.vResCuisineText} numberOfLines={1}>
+            {restaurant.cuisine}
+          </Text>
+          <Text style={styles.vResLocationText} numberOfLines={1}>
+            {restaurant.address || restaurant.city || ''} {restaurant.distance ? `• ${restaurant.distance} km` : ''}
+          </Text>
+
+          {isOffline ? (
+            <View style={styles.vResOfflineStatusPill}>
+              <Clock size={12 * SCALE} color="#9CA3AF" />
+              <Text style={styles.vResOfflineStatusText} numberOfLines={1}>
+                Uh-oh! Outlet closed • Should be back soon
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.vResDeliveryPill}>
+              <View style={styles.vResDeliveryLeft}>
+                <Image source={expImg18} style={styles.vResTruckIcon} />
+                <Text style={styles.vResFreeDeliveryText}>FREE DELIVERY</Text>
+              </View>
+              <View style={styles.vResPillDivider} />
+              <View style={styles.vResOneBenefitsRight}>
+                <Image source={quroBadgeImg} style={styles.vResQuroBadgeImg} resizeMode="contain" />
+                <Text style={styles.vResBenefitsText}>BENEFITS</Text>
+              </View>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
   };
 
   return (
@@ -898,16 +1035,20 @@ export const HomeScreen = ({
         >
           {horizontalCardList.map((restaurant) => {
             const cardImg = getRestaurantImageSource(restaurant);
+            const cardOffline = isRestaurantOffline(restaurant);
 
             return (
               <TouchableOpacity
                 key={restaurant.id}
-                style={styles.resCard}
+                style={[styles.resCard, cardOffline && { opacity: 0.72 }]}
                 activeOpacity={0.9}
                 onPress={() => onSelectRestaurant(restaurant.id)}
               >
                 <View style={styles.resCardImgBox}>
-                  <Image source={cardImg} style={styles.resCardImg} />
+                  <Image
+                    source={cardImg}
+                    style={[styles.resCardImg, cardOffline && { opacity: 0.45 }]}
+                  />
 
                   {/* Crisp QURO Badge */}
                   <View style={styles.quroBadgeContainer}>
@@ -927,8 +1068,17 @@ export const HomeScreen = ({
                     />
                   </TouchableOpacity>
 
-                  {/* Offer Overlay */}
-                  {restaurant.offer ? (
+                  {/* Offline Badge or Offer Overlay */}
+                  {cardOffline ? (
+                    <View style={styles.resOfferOverlay}>
+                      <Text style={[styles.resOfferMainText, { color: '#D4D4D8' }]} numberOfLines={1}>
+                        OFFLINE
+                      </Text>
+                      <Text style={[styles.resOfferSubText, { color: '#9CA3AF' }]} numberOfLines={1}>
+                        {restaurant.closedReason || 'Currently closed'}
+                      </Text>
+                    </View>
+                  ) : restaurant.offer ? (
                     <View style={styles.resOfferOverlay}>
                       <Text style={styles.resOfferMainText} numberOfLines={1}>
                         {restaurant.offer.split(' ')[0]}
@@ -1048,7 +1198,7 @@ export const HomeScreen = ({
           <Text style={styles.exploreTitleMain}>
             <Text style={styles.exploreTitleTop}>Top </Text>
             <Text style={styles.exploreTitleGold}>
-              {filteredRestaurants.length}{' '}
+              {onlineRestaurants.length}{' '}
             </Text>
             <Text style={styles.exploreTitleMain}>restaurants to explore</Text>
           </Text>
@@ -1078,115 +1228,72 @@ export const HomeScreen = ({
             },
           ]}
         >
-          {filteredRestaurants.length === 0 ? (
+          {onlineRestaurants.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No restaurants found matching active filters.</Text>
-              <TouchableOpacity
-                style={styles.resetFiltersBtn}
-                onPress={() => {
-                  setIsVegOnly(false);
-                  setActiveExploreCat('Specials');
-                  setActiveDealOffer(null);
-                }}
-              >
-                <Text style={styles.resetFiltersText}>Reset All Filters</Text>
-              </TouchableOpacity>
+              <Text style={styles.emptyText}>
+                {offlineRestaurants.length > 0
+                  ? 'All nearby restaurants are currently offline. Check back soon or browse below.'
+                  : hasValidLocation && (!restaurantsList || restaurantsList.length === 0)
+                  ? `No restaurants deliver to ${cleanLocationLabel(currentLocation?.label) || 'this location'} (within ${MAX_DELIVERY_RADIUS_KM} km) right now.`
+                  : 'No open restaurants found matching active filters.'}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+                {hasValidLocation && (!restaurantsList || restaurantsList.length === 0) && (
+                  <TouchableOpacity
+                    style={styles.resetFiltersBtn}
+                    onPress={() => setShowLocationSheet(true)}
+                  >
+                    <Text style={styles.resetFiltersText}>Change Location</Text>
+                  </TouchableOpacity>
+                )}
+                {(isVegOnly || activeExploreCat !== 'Specials' || activeDealOffer !== null) && (
+                  <TouchableOpacity
+                    style={styles.resetFiltersBtn}
+                    onPress={() => {
+                      setIsVegOnly(false);
+                      setActiveExploreCat('Specials');
+                      setActiveDealOffer(null);
+                    }}
+                  >
+                    <Text style={styles.resetFiltersText}>Reset All Filters</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           ) : (
-            filteredRestaurants.map((restaurant) => {
-              const resImg = getRestaurantImageSource(restaurant);
-
-              return (
-                <TouchableOpacity
-                  key={restaurant.id}
-                  style={styles.vResCard}
-                  activeOpacity={0.92}
-                  onPress={() => onSelectRestaurant(restaurant.id)}
-                >
-                  {/* Left Photo & Badges */}
-                  <View style={styles.vResImgBox}>
-                    <Image source={resImg} style={styles.vResImg} />
-
-                    {/* Interactive Favorite Heart */}
-                    <TouchableOpacity
-                      style={styles.vResHeartBtn}
-                      activeOpacity={0.7}
-                      onPress={() => handleToggleFav(restaurant.id, restaurant.name)}
-                    >
-                      <Heart
-                        size={14 * SCALE}
-                        color={isFav(restaurant.id) ? '#FF334B' : '#FFFFFF'}
-                        fill={isFav(restaurant.id) ? '#FF334B' : 'rgba(0,0,0,0.3)'}
-                      />
-                    </TouchableOpacity>
-
-                    {/* Discount Offer Overlay */}
-                    {restaurant.offer ? (
-                      <View style={styles.vResOfferBox}>
-                        <Text style={styles.vResOffer70} numberOfLines={1}>
-                          {restaurant.offer.split(' ')[0]}
-                        </Text>
-                        <Text style={styles.vResOfferUpto} numberOfLines={1}>
-                          {restaurant.offer.split(' ').slice(1).join(' ')}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-
-                  {/* Right Info Column */}
-                  <View style={styles.vResInfoBox}>
-                    <View style={styles.vResHeaderRow}>
-                      <Text style={styles.vResTitleText} numberOfLines={1}>
-                        {restaurant.name}
-                      </Text>
-
-                      {/* 3 Dots Action Button */}
-                      <TouchableOpacity
-                        activeOpacity={0.6}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        onPress={(e) => handleOpenActionMenu(restaurant, e)}
-                      >
-                        <MoreVertical size={16 * SCALE} color="#777777" />
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.vResRatingRow}>
-                      <Image source={expImg19} style={styles.vResGreenStar} />
-                      <Text style={styles.vResRatingText}>
-                        {Number(restaurant.rating) > 0 ? Number(restaurant.rating).toFixed(1) : 'NEW'} {Number(restaurant.reviewCount) > 0 ? `(${restaurant.reviewCount})` : ''} • {restaurant.deliveryTime || 25} mins
-                      </Text>
-                      {isPureVegRestaurant(restaurant) && (
-                        <View style={{ backgroundColor: '#051A0E', borderWidth: 1, borderColor: '#00A352', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 6 }}>
-                          <Text style={{ color: '#00D06C', fontSize: 9 * SCALE, fontFamily: 'Urbanist-Bold' }}>PURE VEG</Text>
-                        </View>
-                      )}
-                    </View>
-
-                    <Text style={styles.vResCuisineText} numberOfLines={1}>
-                      {restaurant.cuisine}
-                    </Text>
-                    <Text style={styles.vResLocationText} numberOfLines={1}>
-                      {restaurant.address || restaurant.city || ''} {restaurant.distance ? `• ${restaurant.distance} km` : ''}
-                    </Text>
-
-                    {/* Free Delivery & One Benefits Pill */}
-                    <View style={styles.vResDeliveryPill}>
-                      <View style={styles.vResDeliveryLeft}>
-                        <Image source={expImg18} style={styles.vResTruckIcon} />
-                        <Text style={styles.vResFreeDeliveryText}>FREE DELIVERY</Text>
-                      </View>
-                      <View style={styles.vResPillDivider} />
-                      <View style={styles.vResOneBenefitsRight}>
-                        <Image source={quroBadgeImg} style={styles.vResQuroBadgeImg} resizeMode="contain" />
-                        <Text style={styles.vResBenefitsText}>BENEFITS</Text>
-                      </View>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              );
-            })
+            onlineRestaurants.map((restaurant) => renderVerticalRestaurantCard(restaurant, false))
           )}
         </Animated.View>
+
+        {/* ════════════════════════════════════════════════════════════════════════
+            [CHILD 11] RESTAURANTS CURRENTLY OFFLINE (Below Top Restaurants to Explore)
+            ════════════════════════════════════════════════════════════════════════ */}
+        {offlineRestaurants.length > 0 && (
+          <Animated.View
+            style={[
+              styles.offlineSectionWrapper,
+              {
+                opacity: restaurantsAnim,
+              },
+            ]}
+          >
+            <View style={styles.offlineSectionHeader}>
+              <View style={styles.offlineHeaderTitleRow}>
+                <Text style={styles.offlineTitleMain}>Restaurants currently offline</Text>
+                <View style={styles.offlineCountBadge}>
+                  <Text style={styles.offlineCountText}>{offlineRestaurants.length}</Text>
+                </View>
+              </View>
+              <Text style={styles.offlineSubtitle}>
+                Temporarily closed or paused from accepting online orders
+              </Text>
+            </View>
+
+            <View style={styles.verticalCardsContainer}>
+              {offlineRestaurants.map((restaurant) => renderVerticalRestaurantCard(restaurant, true))}
+            </View>
+          </Animated.View>
+        )}
       </ScrollView>
 
 
@@ -2211,5 +2318,92 @@ const styles = StyleSheet.create({
     fontSize: 12.5 * SCALE,
     color: '#E4E4E7',
     flex: 1,
+  },
+  offlineSectionWrapper: {
+    marginTop: 18,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#141414',
+    backgroundColor: '#000000',
+  },
+  offlineSectionHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
+  offlineHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  offlineTitleMain: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 18 * SCALE,
+    color: '#9CA3AF',
+    letterSpacing: -0.2,
+  },
+  offlineCountBadge: {
+    backgroundColor: '#161618',
+    borderWidth: 1,
+    borderColor: '#2A2A2D',
+    borderRadius: 10 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    paddingVertical: 2 * SCALE,
+  },
+  offlineCountText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 11 * SCALE,
+    color: '#9CA3AF',
+  },
+  offlineSubtitle: {
+    fontFamily: 'Urbanist-Regular',
+    fontSize: 12 * SCALE,
+    color: '#6B7280',
+    marginTop: 3,
+  },
+  vResCardOffline: {
+    borderColor: '#18181B',
+    backgroundColor: '#070708',
+  },
+  vResImgOfflineOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8 * SCALE,
+  },
+  vResOfflineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4 * SCALE,
+    backgroundColor: 'rgba(15, 15, 18, 0.92)',
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+    borderRadius: 8 * SCALE,
+    paddingHorizontal: 8 * SCALE,
+    paddingVertical: 4 * SCALE,
+  },
+  vResOfflineBadgeText: {
+    fontFamily: 'Urbanist-Bold',
+    fontSize: 10 * SCALE,
+    color: '#D4D4D8',
+    letterSpacing: 0.6,
+  },
+  vResOfflineStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5 * SCALE,
+    backgroundColor: '#101012',
+    borderWidth: 1,
+    borderColor: '#27272A',
+    borderRadius: 9 * SCALE,
+    paddingHorizontal: 9 * SCALE,
+    paddingVertical: 6 * SCALE,
+  },
+  vResOfflineStatusText: {
+    fontFamily: 'Urbanist-SemiBold',
+    fontSize: 10.5 * SCALE,
+    color: '#9CA3AF',
+    flexShrink: 1,
   },
 });

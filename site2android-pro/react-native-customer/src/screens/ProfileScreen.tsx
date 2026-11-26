@@ -49,7 +49,7 @@ import {
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BACKEND_URL, NEON_SQL_ENDPOINT, NEON_CONN_STRING } from '../config';
+import { BACKEND_URL } from '../config';
 import { useViewModel } from '../state/MainViewModel';
 import { isTablet, getSafeTopPadding, getSafeBottomPadding } from '../utils/responsive';
 
@@ -352,29 +352,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           }
         } catch (e) {
           console.warn('[ProfileScreen] Error fetching remote user orders from server:', e);
-        }
-      }
-
-      // Resilient fallback: Direct Neon PostgreSQL query if backend API had network latency or cold-start
-      if (remoteOrders.length === 0 && userId) {
-        try {
-          const neonQuery = `SELECT o.id, o.restaurant_id as "restaurantId", o.notes, o.status, o.prep_time_minutes as "prepTimeMinutes", o.extended_prep_minutes as "extendedPrepMinutes", o.grand_total as "grandTotal", o.created_at as "createdAt", r.restaurant_name as "restaurantName", r.restaurant_banner as "restaurantBanner" FROM orders o LEFT JOIN restaurants r ON o.restaurant_id = r.id WHERE o.placed_by_user_id = '${userId}' ORDER BY o.created_at DESC;`;
-          const neonResp = await fetch(NEON_SQL_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Neon-Connection-String': NEON_CONN_STRING,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ query: neonQuery }),
-          });
-          if (neonResp.ok) {
-            const neonData = await neonResp.json();
-            if (neonData.rows && Array.isArray(neonData.rows)) {
-              remoteOrders = neonData.rows;
-            }
-          }
-        } catch (neonErr) {
-          console.warn('[ProfileScreen] Error fetching orders directly from Neon DB:', neonErr);
         }
       }
 

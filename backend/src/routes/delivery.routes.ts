@@ -12,11 +12,21 @@ import { menuItemVariants } from "../db/schema/menu-item-variants.js";
 import { authSessions } from "../db/schema/auth-sessions.js";
 import { operatingCities, operatingZones } from "../db/schema/rider-onboarding.js";
 import { complaints } from "../db/schema/complaints.js";
+import { riderPenalties } from "../db/schema/rider-penalties.js";
+import { riderFloatingCashTxns } from "../db/schema/rider-cash-ledger.js";
+import { payments } from "../db/schema/payments.js";
 import { requireAuth } from "../auth/requireAuth.js";
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
 import { calculateSwiggyETA, seedRidersIfEmpty, startDeliverySimulation, haversineDistance } from "../lib/delivery-simulation.js";
+import {
+  isValidCoordinatePair,
+  parseDeliveryCoordinates,
+  MAX_DELIVERY_RADIUS_KM,
+  MAX_RIDER_PICKUP_RADIUS_KM,
+} from "../lib/serviceability.js";
+import { applyRiderPenalty, PENALTY_CONFIG } from "../services/penaltyEngine.js";
 
 const router = Router();
 
@@ -407,28 +417,20 @@ router.post("/assign", requireAuth, async (req: any, res) => {
       const userId = order.placedByUserId || (firstUser.length > 0 ? firstUser[0].id : null);
 
       if (userId) {
-        // Parse order notes to get coordinates passed by customer app
-        let parsedNotes: any = {};
+        const parsedNotes = parseDeliveryCoordinates(order.notes);
+        let parsedJson: any = {};
         try {
-          parsedNotes = JSON.parse(order.notes || "{}");
-        } catch (e) {
-          // Fallback if not JSON
+          parsedJson = JSON.parse(order.notes || "{}");
+        } catch {}
+
+        if (!isValidCoordinatePair(parsedNotes.latitude, parsedNotes.longitude)) {
+          return res.status(400).json({ message: "Valid delivery coordinates are missing for this order." });
         }
 
-        let latitude = Number(parsedNotes.latitude) || 23.6693;
-        let longitude = Number(parsedNotes.longitude) || 86.1511;
-        let addressLine = parsedNotes.address || parsedNotes.mapAddress || "Sector 4, Bokaro Steel City, Jharkhand, India";
-        let city = parsedNotes.city || "Bokaro Steel City";
-
-        // Fallback for default keys
-        if (!parsedNotes.latitude) {
-          if (addressId === "2" || addressId.includes("Gurugram")) {
-            latitude = 28.4952;
-            longitude = 77.0894;
-            addressLine = "Cyber City, DLF Phase 3, Gurugram, Haryana, India";
-            city = "Gurugram";
-          }
-        }
+        const latitude = Number(parsedNotes.latitude);
+        const longitude = Number(parsedNotes.longitude);
+        const addressLine = parsedNotes.address || parsedJson.address || parsedJson.mapAddress || "";
+        const city = parsedJson.city || "";
 
         try {
           await db.insert(deliveryAddresses).values({
@@ -456,7 +458,7 @@ router.post("/assign", requireAuth, async (req: any, res) => {
     }
     const address = addressList[0];
 
-    // 3. Find available real riders (those who have registered accounts with role 'rider')
+    // 3. Find available real riders (excluding those in penalty cooldown)
     const availableRiders = await db
       .select({
         id: deliveryRiders.id,
@@ -465,6 +467,7 @@ router.post("/assign", requireAuth, async (req: any, res) => {
         latitude: deliveryRiders.latitude,
         longitude: deliveryRiders.longitude,
         status: deliveryRiders.status,
+        penaltyCooldownUntil: deliveryRiders.penaltyCooldownUntil,
       })
       .from(deliveryRiders)
       .innerJoin(authUsers, eq(deliveryRiders.id, authUsers.id))
@@ -475,26 +478,54 @@ router.post("/assign", requireAuth, async (req: any, res) => {
         )
       );
 
-    if (availableRiders.length === 0) {
+    const nowMs = Date.now();
+    const activeRiders = availableRiders.filter(
+      (r) => !r.penaltyCooldownUntil || new Date(r.penaltyCooldownUntil).getTime() <= nowMs
+    );
+
+    if (activeRiders.length === 0) {
       return res.status(400).json({ message: "No delivery riders are currently online and available." });
     }
-
-    const rider = availableRiders[0];
-
-    // 4. Do NOT mark rider as busy yet — only mark busy when rider accepts
 
     // Fetch actual restaurant coordinates
     const restList = await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1);
     const restaurant = restList[0];
-    const restLat = (restaurant?.latitude !== null && restaurant?.latitude !== undefined) ? Number(restaurant.latitude) : 22.8046;
-    const restLng = (restaurant?.longitude !== null && restaurant?.longitude !== undefined) ? Number(restaurant.longitude) : 86.2029;
-    const custLat = address.latitude;
-    const custLng = address.longitude;
+    if (!restaurant || !isValidCoordinatePair(restaurant.latitude, restaurant.longitude)) {
+      return res.status(400).json({ message: "Restaurant coordinates are missing." });
+    }
+    const restLat = Number(restaurant.latitude);
+    const restLng = Number(restaurant.longitude);
+    const custLat = Number(address.latitude);
+    const custLng = Number(address.longitude);
+    if (!isValidCoordinatePair(custLat, custLng)) {
+      return res.status(400).json({ message: "Customer delivery coordinates are invalid or missing." });
+    }
 
     // Calculate Swiggy ETA (prep time + travel time)
     const etaMinutes = calculateSwiggyETA(restLat, restLng, custLat, custLng, 1);
 
     const distanceKm = Number(haversineDistance(restLat, restLng, custLat, custLng).toFixed(2));
+    if (distanceKm > MAX_DELIVERY_RADIUS_KM * 2) {
+      return res.status(422).json({
+        message: `Destination is ${distanceKm.toFixed(1)} km away and exceeds dispatch range.`,
+      });
+    }
+
+    const ridersWithDist = activeRiders
+      .map((r) => ({
+        rider: r,
+        dist: isValidCoordinatePair(r.latitude, r.longitude)
+          ? haversineDistance(restLat, restLng, Number(r.latitude), Number(r.longitude))
+          : 0,
+      }))
+      .filter((x) => !isValidCoordinatePair(x.rider.latitude, x.rider.longitude) || x.dist <= MAX_RIDER_PICKUP_RADIUS_KM)
+      .sort((a, b) => a.dist - b.dist);
+
+    if (ridersWithDist.length === 0) {
+      return res.status(400).json({ message: "No nearby delivery riders are available right now." });
+    }
+
+    const rider = ridersWithDist[0].rider;
     const deliveryFee = distanceKm * 12;
 
     // 5. Create order_deliveries tracking record with status "offered"
@@ -715,6 +746,7 @@ router.get("/rider/active-task", requireAuth, async (req: any, res) => {
         restaurantName: restaurants.restaurantName,
         restaurantAddress: restaurants.restaurantAddress,
         restaurantLogo: restaurants.restaurantLogo,
+        restaurantPhone: restaurants.phoneNumber,
 
         distanceKm: orderDeliveries.distanceKm,
         deliveryFee: orderDeliveries.deliveryFee,
@@ -794,9 +826,18 @@ router.get("/offers", requireAuth, async (req: any, res) => {
     const riderList = await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, user.id)).limit(1);
     const rider = riderList[0];
 
-    // If rider is not online or is busy, return empty offers list immediately
-    if (!rider || rider.status !== "available") {
-      return res.status(200).json({ success: true, offers: [] });
+    // If rider is not online, is busy, or is serving a penalty cooldown, return empty offers list immediately
+    if (
+      !rider ||
+      rider.status !== "available" ||
+      (rider.penaltyCooldownUntil && new Date(rider.penaltyCooldownUntil).getTime() > Date.now())
+    ) {
+      return res.status(200).json({
+        success: true,
+        offers: [],
+        cooldownUntil: rider?.penaltyCooldownUntil || null,
+        strikeCount: rider?.strikeCount || 0,
+      });
     }
 
     // Check if rider already has an active ongoing delivery trip
@@ -863,24 +904,40 @@ router.get("/offers", requireAuth, async (req: any, res) => {
           .limit(1);
 
         if (existingDel.length === 0) {
-          // Parse coordinates from order notes
-          let latitude = 20.2505; // Fallback
-          let longitude = 85.7882;
-          try {
-            const parsedNotes = JSON.parse(order.notes || "{}");
-            if (parsedNotes.latitude && parsedNotes.longitude) {
-              latitude = Number(parsedNotes.latitude);
-              longitude = Number(parsedNotes.longitude);
-            }
-          } catch (e) { }
+          const parsedCoords = parseDeliveryCoordinates(order.notes);
+          if (!isValidCoordinatePair(parsedCoords.latitude, parsedCoords.longitude)) {
+            continue;
+          }
+          const latitude = Number(parsedCoords.latitude);
+          const longitude = Number(parsedCoords.longitude);
 
-          // Fetch restaurant details
+          // Fetch restaurant details with strict valid coordinates
           const restList = await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1);
           const restaurant = restList[0];
-          const restLat = restaurant?.latitude ? Number(restaurant.latitude) : 22.8046;
-          const restLng = restaurant?.longitude ? Number(restaurant.longitude) : 86.2029;
+          if (!restaurant || !isValidCoordinatePair(restaurant.latitude, restaurant.longitude)) {
+            continue;
+          }
+          const restLat = Number(restaurant.latitude);
+          const restLng = Number(restaurant.longitude);
+
+          // Enforce pickup proximity if rider has valid GPS
+          if (isValidCoordinatePair(rider.latitude, rider.longitude)) {
+            const pickupDist = haversineDistance(
+              Number(rider.latitude),
+              Number(rider.longitude),
+              restLat,
+              restLng
+            );
+            if (pickupDist > MAX_RIDER_PICKUP_RADIUS_KM) {
+              continue;
+            }
+          }
 
           const distanceKm = Number(haversineDistance(restLat, restLng, latitude, longitude).toFixed(2));
+          if (distanceKm > MAX_DELIVERY_RADIUS_KM * 2) {
+            continue;
+          }
+
           const deliveryFee = distanceKm * 12;
           const etaMinutes = calculateSwiggyETA(restLat, restLng, latitude, longitude, 1);
 
@@ -896,10 +953,10 @@ router.get("/offers", requireAuth, async (req: any, res) => {
             etaMinutes,
             distanceKm,
             deliveryFee,
-            currentLat: rider.latitude || restLat,
-            currentLng: rider.longitude || restLng,
-            startLat: rider.latitude || restLat,
-            startLng: rider.longitude || restLng,
+            currentLat: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.latitude) : restLat,
+            currentLng: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.longitude) : restLng,
+            startLat: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.latitude) : restLat,
+            startLng: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.longitude) : restLng,
             customerLat: latitude,
             customerLng: longitude,
             restaurantLat: restLat,
@@ -926,6 +983,7 @@ router.get("/offers", requireAuth, async (req: any, res) => {
         restaurantName: restaurants.restaurantName,
         restaurantAddress: restaurants.restaurantAddress,
         restaurantLogo: restaurants.restaurantLogo,
+        restaurantPhone: restaurants.phoneNumber,
         distanceKm: orderDeliveries.distanceKm,
         deliveryFee: orderDeliveries.deliveryFee,
         orderAmount: orders.grandTotal,
@@ -948,16 +1006,18 @@ router.get("/offers", requireAuth, async (req: any, res) => {
 
     const mappedOffers = filteredList.map((item) => {
       let customerName = "Customer";
-      let customerPhone = "+91 9876543210";
-      let customerAddress = "Bhubaneswar, Odisha";
-      let orderNotes = "Standard Delivery";
+      let customerPhone = "";
+      let customerAddress = "";
+      let orderNotes = "";
 
       if (item.notes) {
         try {
           const parsed = JSON.parse(item.notes);
           if (parsed.customerName) customerName = parsed.customerName;
           if (parsed.customerPhone) customerPhone = parsed.customerPhone;
-          if (parsed.deliveryAddress) customerAddress = parsed.deliveryAddress;
+          if (parsed.deliveryAddress || parsed.address || parsed.mapAddress) {
+            customerAddress = parsed.deliveryAddress || parsed.address || parsed.mapAddress;
+          }
           if (parsed.cookingInstructions) orderNotes = parsed.cookingInstructions;
         } catch (e) {
           if (!item.notes.startsWith("{")) customerAddress = item.notes;
@@ -993,13 +1053,35 @@ router.post("/accept", requireAuth, async (req: any, res) => {
     const { stopDeliverySimulation } = await import("../lib/delivery-simulation.js");
     stopDeliverySimulation(orderId);
 
-    const delList = await db.select().from(orderDeliveries).where(eq(orderDeliveries.orderId, orderId));
-    if (delList.length === 0) {
-      return res.status(404).json({ message: "Delivery not found" });
+    const [riderRow] = await db
+      .select({ penaltyCooldownUntil: deliveryRiders.penaltyCooldownUntil })
+      .from(deliveryRiders)
+      .where(eq(deliveryRiders.id, user.id))
+      .limit(1);
+
+    if (riderRow?.penaltyCooldownUntil && new Date(riderRow.penaltyCooldownUntil).getTime() > Date.now()) {
+      const minsLeft = Math.max(1, Math.ceil((new Date(riderRow.penaltyCooldownUntil).getTime() - Date.now()) / 60000));
+      return res.status(403).json({
+        message: `You are in a penalty cooldown period (${minsLeft}m remaining) and cannot accept orders.`,
+        cooldownUntil: riderRow.penaltyCooldownUntil,
+      });
     }
 
-    // Mark rider as busy
-    await db.update(deliveryRiders).set({ status: "busy" }).where(eq(deliveryRiders.id, user.id));
+    const delList = await db.select().from(orderDeliveries).where(eq(orderDeliveries.orderId, orderId));
+    if (delList.length === 0) {
+      return res.status(404).json({ message: "Delivery offer expired or no longer available" });
+    }
+
+    // Mark rider as busy and record acceptance metrics
+    await db
+      .update(deliveryRiders)
+      .set({
+        status: "busy",
+        acceptanceCount: sql`COALESCE(${deliveryRiders.acceptanceCount}, 0) + 1`,
+        consecutiveOfferTimeouts: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(deliveryRiders.id, user.id));
 
     // Update delivery record
     await db
@@ -1104,13 +1186,46 @@ router.post("/decline", requireAuth, async (req: any, res) => {
       return res.status(400).json({ message: "Cannot cancel delivery — order already picked up or in progress" });
     }
 
-    // Reset current rider status back to available so they can receive other tasks
-    await db.update(deliveryRiders).set({ status: "available", updatedAt: new Date() }).where(eq(deliveryRiders.id, user.id));
+    // Always track rider rejection count
+    await db
+      .update(deliveryRiders)
+      .set({
+        rejectionCount: sql`COALESCE(${deliveryRiders.rejectionCount}, 0) + 1`,
+        status: "available",
+        updatedAt: new Date(),
+      })
+      .where(eq(deliveryRiders.id, user.id));
 
-    // Delete the existing delivery offer for this rider
+    // Apply financial penalty + strike + temporary cooldown if rider cancelled AFTER accepting
+    let penaltyApplied: any = null;
+    if (delivery.status === "assigned") {
+      penaltyApplied = await applyRiderPenalty({
+        riderId: user.id,
+        orderId,
+        penaltyType: "post_accept_cancellation",
+        amountPaise: PENALTY_CONFIG.rider.postAcceptCancelPaise,
+        cooldownMinutes: PENALTY_CONFIG.rider.postAcceptCooldownMinutes,
+        strikeDelta: 1,
+        forceOffline: true,
+        reason: "Cancelled delivery trip after accepting dispatch assignment.",
+      });
+    } else if (delivery.status === "arrived_at_store") {
+      penaltyApplied = await applyRiderPenalty({
+        riderId: user.id,
+        orderId,
+        penaltyType: "arrived_store_cancellation",
+        amountPaise: PENALTY_CONFIG.rider.arrivedStoreCancelPaise,
+        cooldownMinutes: PENALTY_CONFIG.rider.arrivedCooldownMinutes,
+        strikeDelta: 1,
+        forceOffline: true,
+        reason: "Abandoned delivery trip after arriving at restaurant pickup.",
+      });
+    }
+
+    // Delete the existing delivery offer/assignment for this rider
     await db.delete(orderDeliveries).where(eq(orderDeliveries.id, delivery.id));
 
-    // Find the next available rider (excluding those who declined this order)
+    // Find the next available nearby rider (excluding declined & cooled-down riders)
     const availableRiders = await db
       .select({
         id: deliveryRiders.id,
@@ -1118,6 +1233,7 @@ router.post("/decline", requireAuth, async (req: any, res) => {
         phone: deliveryRiders.phone,
         latitude: deliveryRiders.latitude,
         longitude: deliveryRiders.longitude,
+        penaltyCooldownUntil: deliveryRiders.penaltyCooldownUntil,
       })
       .from(deliveryRiders)
       .innerJoin(authUsers, eq(deliveryRiders.id, authUsers.id))
@@ -1129,35 +1245,48 @@ router.post("/decline", requireAuth, async (req: any, res) => {
         )
       );
 
-    const eligibleRiders = availableRiders.filter((r) => {
-      const rDeclined = riderDeclinedOrders.get(r.id);
-      return !rDeclined || !rDeclined.has(orderId);
-    });
+    const nowMs = Date.now();
+    const restLat = delivery.restaurantLat;
+    const restLng = delivery.restaurantLng;
+
+    const eligibleRiders = availableRiders
+      .filter((r) => {
+        if (r.penaltyCooldownUntil && new Date(r.penaltyCooldownUntil).getTime() > nowMs) {
+          return false;
+        }
+        const rDeclined = riderDeclinedOrders.get(r.id);
+        return !rDeclined || !rDeclined.has(orderId);
+      })
+      .map((r) => ({
+        rider: r,
+        dist: isValidCoordinatePair(r.latitude, r.longitude)
+          ? haversineDistance(restLat, restLng, Number(r.latitude), Number(r.longitude))
+          : 0,
+      }))
+      .filter((x) => !isValidCoordinatePair(x.rider.latitude, x.rider.longitude) || x.dist <= MAX_RIDER_PICKUP_RADIUS_KM)
+      .sort((a, b) => a.dist - b.dist);
 
     if (eligibleRiders.length === 0) {
       emitToOrder(orderId, "delivery-update", {
         orderId,
         status: "no_rider",
-        message: "No other riders available",
+        message: "No other nearby riders available",
       });
 
-      return res.status(200).json({ success: true, message: "Declined. No other riders available." });
+      return res.status(200).json({
+        success: true,
+        message: penaltyApplied?.applied
+          ? `Trip cancelled. ₹${Math.round((penaltyApplied.penalty?.amount || 0) / 100)} penalty deducted (${penaltyApplied.penalty?.cooldownMinutes || 0}m cooldown).`
+          : "Declined. No other nearby riders available.",
+        penaltyApplied: penaltyApplied?.penalty || null,
+        cooldownUntil: penaltyApplied?.cooldownUntil || null,
+      });
     }
 
-    // Pick the closest available rider
-    const restLat = delivery.restaurantLat;
-    const restLng = delivery.restaurantLng;
-    let bestRider = eligibleRiders[0];
-    let bestDist = Infinity;
-    for (const r of eligibleRiders) {
-      const d = haversineDistance(restLat, restLng, r.latitude || restLat, r.longitude || restLng);
-      if (d < bestDist) {
-        bestDist = d;
-        bestRider = r;
-      }
-    }
+    const bestRider = eligibleRiders[0].rider;
 
-    // Create new offer for the next rider
+    // Create new offer with fresh timestamps
+    const now = new Date();
     const newDeliveryId = `del_${nanoid(10)}`;
     await db.insert(orderDeliveries).values({
       ...delivery,
@@ -1168,10 +1297,18 @@ router.post("/decline", requireAuth, async (req: any, res) => {
       currentLng: bestRider.longitude || restLng,
       startLat: bestRider.latitude || restLat,
       startLng: bestRider.longitude || restLng,
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     });
 
-    return res.status(200).json({ success: true, message: `Declined. Re-assigned to ${bestRider.name}.` });
+    return res.status(200).json({
+      success: true,
+      message: penaltyApplied?.applied
+        ? `Trip cancelled. ₹${Math.round((penaltyApplied.penalty?.amount || 0) / 100)} penalty deducted and reassigned to ${bestRider.name}.`
+        : `Declined. Re-assigned to ${bestRider.name}.`,
+      penaltyApplied: penaltyApplied?.penalty || null,
+      cooldownUntil: penaltyApplied?.cooldownUntil || null,
+    });
   } catch (err) {
     console.error("❌ POST decline offer error:", err);
     return res.status(500).json({ message: "Internal server error" });
@@ -1242,9 +1379,10 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
         updatedAt: new Date().toISOString()
       });
     } else if (nextDeliveryStatus === "delivered") {
+      const preDeliverOrder = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
       await db.update(orders).set({ status: "served", updatedAt: new Date() }).where(eq(orders.id, orderId));
 
-      const orderRecord = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
+      const orderRecord = preDeliverOrder;
       if (orderRecord) {
         emitToRestaurant(orderRecord.restaurantId, 'order-updated', {
           orderId,
@@ -1258,16 +1396,90 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
       const deliveryRecord = delList[0];
       const fee = deliveryRecord.deliveryFee || 0;
 
+      // Determine whether this order was Cash on Delivery (COD) and record floating cash collection idempotently
+      let codCollectedAmount = 0;
+      let codCustomerPhone: string | null = null;
+      if (orderRecord) {
+        let isCodOrder = false;
+        if (orderRecord.notes && orderRecord.notes.trim().startsWith("{")) {
+          try {
+            const parsedNotes = JSON.parse(orderRecord.notes);
+            const pm = String(parsedNotes.paymentMethod || "").trim().toLowerCase();
+            if (pm.includes("cod") || pm === "cash") {
+              isCodOrder = true;
+            }
+            if (parsedNotes.customerPhone || parsedNotes.phone) {
+              codCustomerPhone = String(parsedNotes.customerPhone || parsedNotes.phone);
+            }
+          } catch {}
+        }
+        if (isCodOrder && Number(orderRecord.grandTotal || 0) > 0) {
+          codCollectedAmount = Number(orderRecord.grandTotal);
+        }
+      }
+
       const riderId = user?.id || delList[0].riderId;
       if (riderId) {
+        if (codCollectedAmount > 0) {
+          const existingCodTxn = await db
+            .select({ id: riderFloatingCashTxns.id })
+            .from(riderFloatingCashTxns)
+            .where(
+              and(
+                eq(riderFloatingCashTxns.orderId, orderId),
+                eq(riderFloatingCashTxns.txnType, "cod_collected")
+              )
+            )
+            .limit(1);
+
+          if (existingCodTxn.length === 0) {
+            await db.insert(riderFloatingCashTxns).values({
+              id: `TXN-${nanoid(8).toUpperCase()}`,
+              riderId,
+              orderId,
+              txnType: "cod_collected",
+              amount: codCollectedAmount,
+              customerPhone: codCustomerPhone,
+              method: "cod",
+              referenceId: orderId,
+              status: "completed",
+              notes: `COD cash collected for Order #${orderId.slice(-6).toUpperCase()}`,
+            });
+          } else {
+            codCollectedAmount = 0; // already logged
+          }
+        }
+
         await db.update(deliveryRiders)
           .set({
             status: "available",
-            walletBalance: sql`${deliveryRiders.walletBalance} + ${fee}`,
-            totalEarnings: sql`${deliveryRiders.totalEarnings} + ${fee}`,
-            totalDeliveries: sql`${deliveryRiders.totalDeliveries} + 1`
+            walletBalance: sql`COALESCE(${deliveryRiders.walletBalance}, 0) + ${fee}`,
+            totalEarnings: sql`COALESCE(${deliveryRiders.totalEarnings}, 0) + ${fee}`,
+            totalDeliveries: sql`COALESCE(${deliveryRiders.totalDeliveries}, 0) + 1`,
+            ...(codCollectedAmount > 0
+              ? { pendingSettlement: sql`COALESCE(${deliveryRiders.pendingSettlement}, 0) + ${codCollectedAmount}` }
+              : {}),
           })
           .where(eq(deliveryRiders.id, riderId));
+
+        // Apply post-pickup extreme delay penalty when transit duration breaches threshold
+        if (orderRecord?.updatedAt) {
+          const transitMins = (Date.now() - new Date(orderRecord.updatedAt).getTime()) / 60000;
+          const baseEta = Math.max(15, deliveryRecord.etaMinutes || 20);
+          const delayThresholdMins = Math.max(45, Math.round(baseEta * 2.5));
+          if (transitMins >= delayThresholdMins && transitMins - baseEta >= 25) {
+            await applyRiderPenalty({
+              riderId,
+              orderId,
+              penaltyType: "delivery_delay",
+              amountPaise: PENALTY_CONFIG.rider.deliveryDelayPaise,
+              cooldownMinutes: 0,
+              strikeDelta: 0,
+              forceOffline: false,
+              reason: `Severe post-pickup delivery delay (${Math.round(transitMins)}m vs ${baseEta}m ETA).`,
+            }).catch((err) => console.warn("⚠️ Could not apply delivery delay penalty:", err));
+          }
+        }
       }
 
       emitToOrder(orderId, "order-status", { orderId, status: "delivered", deliveryStatus: "delivered" });
@@ -1387,6 +1599,9 @@ router.post("/location/update", requireAuth, async (req: any, res) => {
 
 // POST /api/delivery/simulate/step
 router.post("/simulate/step", requireAuth, async (req: any, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(403).json({ message: "Delivery simulation is disabled in production" });
+  }
   try {
     const { orderId, status } = req.body;
     if (!orderId || !status) {
@@ -1469,8 +1684,8 @@ router.post("/simulate/step", requireAuth, async (req: any, res) => {
       status: nextStatus,
       currentLat: lat,
       currentLng: lng,
-      riderName: rider ? rider.name : "Rahul Kumar",
-      riderPhone: rider ? rider.phone : "+91 9876543210",
+      riderName: rider ? rider.name : null,
+      riderPhone: rider ? rider.phone : null,
     });
 
     return res.status(200).json({ success: true, message: `Simulated state ${nextStatus} updated successfully` });
@@ -1523,6 +1738,14 @@ router.get("/rider/dashboard", requireAuth, async (req: any, res) => {
       }
     });
 
+    const riderPenRows = await db
+      .select({ amount: riderPenalties.amount, status: riderPenalties.status })
+      .from(riderPenalties)
+      .where(eq(riderPenalties.riderId, user.id));
+    const totalPenaltiesPaise = riderPenRows
+      .filter((p) => p.status !== "waived")
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+
     return res.status(200).json({
       success: true,
       stats: {
@@ -1533,6 +1756,9 @@ router.get("/rider/dashboard", requireAuth, async (req: any, res) => {
         totalDeliveries: rider.totalDeliveries,
         acceptanceCount: rider.acceptanceCount,
         rejectionCount: rider.rejectionCount,
+        strikeCount: rider.strikeCount || 0,
+        penaltyCooldownUntil: rider.penaltyCooldownUntil || null,
+        totalPenaltiesPaise,
         todayEarnings: Math.round(todayEarnings * 100) / 100,
         weekEarnings: Math.round(weekEarnings * 100) / 100,
         todayDeliveries,
@@ -1599,6 +1825,22 @@ router.post("/rider/toggle-status", requireAuth, async (req: any, res) => {
     }
 
     const nextStatus = (currentStatus === "available" || currentStatus === "busy") ? "offline" : "available";
+
+    if (
+      nextStatus === "available" &&
+      riderList[0].penaltyCooldownUntil &&
+      new Date(riderList[0].penaltyCooldownUntil).getTime() > Date.now()
+    ) {
+      const minsLeft = Math.max(
+        1,
+        Math.ceil((new Date(riderList[0].penaltyCooldownUntil).getTime() - Date.now()) / 60000)
+      );
+      return res.status(403).json({
+        message: `You are in a penalty cooldown period (${minsLeft}m left) and cannot go online yet.`,
+        cooldownUntil: riderList[0].penaltyCooldownUntil,
+        cooldownMinutesRemaining: minsLeft,
+      });
+    }
 
     await db.update(deliveryRiders)
       .set({ status: nextStatus, updatedAt: new Date() })
@@ -1946,6 +2188,138 @@ router.get("/rider/support-tickets", requireAuth, async (req: any, res) => {
   }
 });
 
+// GET /api/delivery/rider/penalties (Real PostgreSQL rider penalty ledger & strike state)
+router.get("/rider/penalties", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+    const [rider] = await db
+      .select({
+        walletBalance: deliveryRiders.walletBalance,
+        strikeCount: deliveryRiders.strikeCount,
+        penaltyCooldownUntil: deliveryRiders.penaltyCooldownUntil,
+        acceptanceCount: deliveryRiders.acceptanceCount,
+        rejectionCount: deliveryRiders.rejectionCount,
+      })
+      .from(deliveryRiders)
+      .where(eq(deliveryRiders.id, user.id))
+      .limit(1);
+
+    const penalties = await db
+      .select()
+      .from(riderPenalties)
+      .where(eq(riderPenalties.riderId, user.id))
+      .orderBy(desc(riderPenalties.createdAt));
+
+    let totalDeductedPaise = 0;
+    let totalDisputedPaise = 0;
+    let totalWaivedPaise = 0;
+    for (const p of penalties) {
+      if (p.status === "deducted") totalDeductedPaise += p.amount || 0;
+      else if (p.status === "disputed") totalDisputedPaise += p.amount || 0;
+      else if (p.status === "waived") totalWaivedPaise += p.amount || 0;
+    }
+
+    return res.status(200).json({
+      success: true,
+      penalties,
+      walletBalance: Number(rider?.walletBalance ?? 0),
+      strikeCount: rider?.strikeCount ?? 0,
+      penaltyCooldownUntil: rider?.penaltyCooldownUntil || null,
+      acceptanceCount: rider?.acceptanceCount ?? 0,
+      rejectionCount: rider?.rejectionCount ?? 0,
+      summary: {
+        totalCount: penalties.length,
+        totalDeductedPaise,
+        totalDisputedPaise,
+        totalWaivedPaise,
+      },
+    });
+  } catch (err) {
+    console.error("❌ GET rider penalties error:", err);
+    return res.status(500).json({ message: "Failed to load rider penalties" });
+  }
+});
+
+// POST /api/delivery/rider/penalties/:penaltyId/dispute (Rider disputes a real penalty row)
+router.post("/rider/penalties/:penaltyId/dispute", requireAuth, async (req: any, res) => {
+  try {
+    const user = req.user;
+    const { penaltyId } = req.params;
+    const { disputeNotes } = req.body || {};
+
+    if (!disputeNotes || !String(disputeNotes).trim()) {
+      return res.status(400).json({ message: "Please provide a reason for your dispute." });
+    }
+
+    const [existing] = await db
+      .select()
+      .from(riderPenalties)
+      .where(and(eq(riderPenalties.id, penaltyId), eq(riderPenalties.riderId, user.id)))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ message: "Penalty record not found" });
+    }
+
+    const cleanNote = String(disputeNotes).trim();
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    const [updatedPenalty] = await db
+      .update(riderPenalties)
+      .set({
+        status: "disputed",
+        disputeNotes: cleanNote,
+      })
+      .where(eq(riderPenalties.id, penaltyId))
+      .returning();
+
+    const ticketId = `TKT-${nanoid(7).toUpperCase()}`;
+    await db.insert(complaints).values({
+      id: ticketId,
+      ticketType: "rider_issue",
+      orderId: existing.orderId || null,
+      orderNumber: existing.orderId ? `#MQ-${existing.orderId.slice(-5).toUpperCase()}` : null,
+      riderId: user.id,
+      customerName: user.name || "Rider",
+      category: "penalty_deduction",
+      categoryLabel: `Penalty Dispute (${existing.penaltyType})`,
+      reason: `Dispute for penalty ${existing.id} (₹${Math.round((existing.amount || 0) / 100)})`,
+      description: cleanNote,
+      priority: "HIGH",
+      status: "OPEN",
+      metadata: {
+        penaltyId: existing.id,
+        penaltyType: existing.penaltyType,
+        amountPaise: existing.amount,
+      },
+      messages: [
+        {
+          id: `msg-${nanoid(6)}`,
+          complaintId: ticketId,
+          senderId: user.id,
+          senderName: user.name || "Rider",
+          senderType: "RIDER",
+          message: cleanNote,
+          timestamp: nowIso,
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    } as any);
+
+    return res.status(200).json({
+      success: true,
+      message: `Dispute submitted under Ticket #${ticketId}`,
+      penalty: updatedPenalty,
+      ticketId,
+    });
+  } catch (err) {
+    console.error("❌ POST dispute rider penalty error:", err);
+    return res.status(500).json({ message: "Failed to submit penalty dispute" });
+  }
+});
+
 
 // In-memory Floating Cash Store per rider
 interface FloatingCashTxn {
@@ -1967,110 +2341,139 @@ interface FloatingCashTxn {
   description: string;
 }
 
-const riderFloatingCashStore = new Map<string, {
-  balance: number;
-  limit: number;
-  transactions: FloatingCashTxn[];
-}>();
+const DEFAULT_RIDER_CASH_LIMIT = Number(process.env.RIDER_CASH_LIMIT) || 2500;
 
-// Helper to get or init rider floating cash
-function getRiderFloatingCashState(riderId: string) {
-  if (!riderFloatingCashStore.has(riderId)) {
-    // Seed with realistic starting data
-    const initialTxns: FloatingCashTxn[] = [
-      {
-        id: `TXN-${nanoid(8).toUpperCase()}`,
-        riderId,
-        type: "cod_collected",
-        amount: 450,
-        orderId: "MQ-8419",
-        customerName: "Rahul Sharma",
-        customerPhone: "9876543210",
-        orderAmount: 450,
-        cashReceived: 450,
-        status: "completed",
-        createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
-        description: "COD cash collected for Order #MQ-8419",
-      },
-      {
-        id: `TXN-${nanoid(8).toUpperCase()}`,
-        riderId,
-        type: "cod_collected",
-        amount: 380,
-        orderId: "MQ-8432",
-        customerName: "Pooja Verma",
-        customerPhone: "9123456789",
-        orderAmount: 380,
-        cashReceived: 380,
-        status: "completed",
-        createdAt: new Date(Date.now() - 3600000 * 1.5).toISOString(),
-        description: "COD cash collected for Order #MQ-8432",
-      },
-    ];
-
-    riderFloatingCashStore.set(riderId, {
-      balance: 830,
-      limit: 2500,
-      transactions: initialTxns,
-    });
+function parseOrderNotesMeta(notes: string | null | undefined) {
+  if (!notes || !notes.trim().startsWith("{")) return {};
+  try {
+    return JSON.parse(notes) as Record<string, any>;
+  } catch {
+    return {};
   }
-  return riderFloatingCashStore.get(riderId)!;
+}
+
+function formatCashTxnForApp(row: typeof riderFloatingCashTxns.$inferSelect) {
+  const type =
+    row.txnType === "cod_collected"
+      ? "cod_collected"
+      : row.txnType === "change_returned"
+      ? "change_returned_upi"
+      : (`cash_deposited_${row.method || "upi"}` as any);
+  return {
+    id: row.id,
+    riderId: row.riderId,
+    type,
+    amount: Number(row.amount || 0),
+    orderId: row.orderId || undefined,
+    customerPhone: row.customerPhone || undefined,
+    referenceNumber: row.referenceId || undefined,
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+    description:
+      row.notes ||
+      (row.txnType === "cod_collected"
+        ? `COD cash collected for Order #${(row.orderId || "").slice(-6).toUpperCase()}`
+        : row.txnType === "change_returned"
+        ? `Returned ₹${row.amount} change via ${(row.method || "UPI").toUpperCase()}`
+        : `Deposited ₹${row.amount} via ${(row.method || "UPI").toUpperCase()}`),
+  };
 }
 
 // GET /api/delivery/rider/floating-cash
 router.get("/rider/floating-cash", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
-    const state = getRiderFloatingCashState(user.id);
+    const [rider] = await db
+      .select()
+      .from(deliveryRiders)
+      .where(eq(deliveryRiders.id, user.id))
+      .limit(1);
 
-    // Calculate today's stats
+    if (!rider) {
+      return res.status(404).json({ message: "Rider profile not found" });
+    }
+
+    const txnRows = await db
+      .select()
+      .from(riderFloatingCashTxns)
+      .where(eq(riderFloatingCashTxns.riderId, user.id))
+      .orderBy(desc(riderFloatingCashTxns.createdAt))
+      .limit(50);
+
+    const formattedTxns = txnRows.map(formatCashTxnForApp);
+    const currentBalance = Math.max(0, Number(rider.pendingSettlement || 0));
+    const cashLimit = DEFAULT_RIDER_CASH_LIMIT;
+
+    // Today's stats
     const today = new Date().toISOString().slice(0, 10);
-    const todayTxns = state.transactions.filter(t => t.createdAt.startsWith(today));
-    const totalCollectedToday = todayTxns.filter(t => t.type === 'cod_collected').reduce((sum, t) => sum + t.amount, 0);
-    const totalChangeReturnedToday = todayTxns.filter(t => t.type === 'change_returned_upi').reduce((sum, t) => sum + t.amount, 0);
-    const totalDepositedToday = todayTxns.filter(t => t.type.startsWith('cash_deposited')).reduce((sum, t) => sum + t.amount, 0);
+    const todayRows = txnRows.filter((t) => t.createdAt.toISOString().startsWith(today));
+    const totalCollectedToday = todayRows
+      .filter((t) => t.txnType === "cod_collected")
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    const totalChangeReturnedToday = todayRows
+      .filter((t) => t.txnType === "change_returned")
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    const totalDepositedToday = todayRows
+      .filter((t) => t.txnType === "company_deposit")
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
-    // Mock active/recent COD orders to choose from for fast 1-tap change calculation
-    const recentCodOrders = [
-      {
-        orderId: "MQ-8432",
-        customerName: "Pooja Verma",
-        customerPhone: "9123456789",
-        customerUpiId: "9123456789@paytm",
-        orderAmount: 380,
-        status: "Delivered",
-      },
-      {
-        orderId: "MQ-8419",
-        customerName: "Rahul Sharma",
-        customerPhone: "9876543210",
-        customerUpiId: "rahul.sharma@okaxis",
-        orderAmount: 450,
-        status: "Delivered",
-      },
-      {
-        orderId: "MQ-8450",
-        customerName: "Vikram Malhotra",
-        customerPhone: "9811223344",
-        customerUpiId: "vikram@icici",
-        orderAmount: 260,
-        status: "Out for Delivery",
-      },
-    ];
+    // Query real recent COD deliveries/active tasks assigned to this rider
+    const riderDeliveryRows = await db
+      .select({
+        orderId: orders.id,
+        grandTotal: orders.grandTotal,
+        notes: orders.notes,
+        deliveryStatus: orderDeliveries.status,
+        orderStatus: orders.status,
+        customerName: authUsers.name,
+        createdAt: orderDeliveries.createdAt,
+      })
+      .from(orderDeliveries)
+      .innerJoin(orders, eq(orderDeliveries.orderId, orders.id))
+      .leftJoin(authUsers, eq(orders.placedByUserId, authUsers.id))
+      .where(eq(orderDeliveries.riderId, user.id))
+      .orderBy(desc(orderDeliveries.createdAt))
+      .limit(20);
+
+    const recentCodOrders = riderDeliveryRows
+      .filter((row) => {
+        if (row.orderStatus === "cancelled") return false;
+        const meta = parseOrderNotesMeta(row.notes);
+        const pm = String(meta.paymentMethod || "").toLowerCase();
+        return pm.includes("cod") || pm === "cash";
+      })
+      .map((row) => {
+        const meta = parseOrderNotesMeta(row.notes);
+        const rawPhone = meta.customerPhone || meta.phone || "";
+        return {
+          orderId: row.orderId,
+          customerName: row.customerName || "Customer",
+          customerPhone: String(rawPhone),
+          customerUpiId: rawPhone ? `${String(rawPhone).replace(/\D/g, "").slice(-10)}@upi` : "",
+          orderAmount: Number(row.grandTotal || 0),
+          status:
+            row.deliveryStatus === "delivered"
+              ? "Delivered"
+              : row.deliveryStatus === "out_for_delivery" || row.deliveryStatus === "picked_up"
+              ? "Out for Delivery"
+              : "Assigned",
+        };
+      });
 
     return res.status(200).json({
       success: true,
-      currentBalance: state.balance,
-      limit: state.limit,
-      availableLimit: Math.max(0, state.limit - state.balance),
-      isLimitReached: state.balance >= state.limit,
+      currentBalance,
+      limit: cashLimit,
+      availableLimit: Math.max(0, cashLimit - currentBalance),
+      isLimitReached: currentBalance >= cashLimit,
+      settlementUpiId: process.env.COMPANY_SETTLEMENT_UPI_ID || null,
       todaySummary: {
         collected: totalCollectedToday,
         changeReturned: totalChangeReturnedToday,
         deposited: totalDepositedToday,
       },
       recentCodOrders,
-      transactions: state.transactions,
+      transactions: formattedTxns,
     });
   } catch (err) {
     console.error("❌ GET floating-cash error:", err);
@@ -2091,7 +2494,6 @@ router.post("/rider/floating-cash/return-change", requireAuth, async (req: any, 
       cashReceived,
       changeAmount,
       upiRefNumber,
-      paymentGatewayRef,
     } = req.body;
 
     const changeVal = Number(changeAmount);
@@ -2099,50 +2501,68 @@ router.post("/rider/floating-cash/return-change", requireAuth, async (req: any, 
       return res.status(400).json({ message: "Valid change amount is required" });
     }
 
-    const state = getRiderFloatingCashState(user.id);
+    const [rider] = await db
+      .select()
+      .from(deliveryRiders)
+      .where(eq(deliveryRiders.id, user.id))
+      .limit(1);
+
+    if (!rider) {
+      return res.status(404).json({ message: "Rider profile not found" });
+    }
+
+    const currentBal = Math.max(0, Number(rider.pendingSettlement || 0));
+    const nextBalance = Math.max(0, Number((currentBal - changeVal).toFixed(2)));
     const txnId = `CHG-${nanoid(8).toUpperCase()}`;
     const refNo = upiRefNumber || `UPI-${Date.now().toString().slice(-6)}`;
 
-    // Create change return transaction
-    const newTxn: FloatingCashTxn = {
-      id: txnId,
-      riderId: user.id,
-      type: "change_returned_upi",
-      amount: changeVal,
-      orderId: orderId || "MQ-COD",
-      customerName: customerName || "Customer",
-      customerPhone: customerPhone || "",
-      customerUpiId: customerUpiId || `${customerPhone}@upi`,
-      orderAmount: Number(orderAmount) || 0,
-      cashReceived: Number(cashReceived) || 0,
-      changeAmount: changeVal,
-      referenceNumber: refNo,
-      paymentGatewayRef: paymentGatewayRef || `PG-${nanoid(6).toUpperCase()}`,
-      status: "completed",
-      createdAt: new Date().toISOString(),
-      description: `Returned ₹${changeVal} change via UPI to ${customerName || 'Customer'} (Order #${orderId || 'COD'})`,
-    };
+    let validOrderId: string | null = null;
+    if (orderId && typeof orderId === "string") {
+      const [ord] = await db
+        .select({ id: orders.id })
+        .from(orders)
+        .where(eq(orders.id, orderId))
+        .limit(1);
+      if (ord) validOrderId = ord.id;
+    }
 
-    // Deduct change from rider's floating cash liability
-    state.balance = Math.max(0, state.balance - changeVal);
-    state.transactions.unshift(newTxn);
+    const [inserted] = await db
+      .insert(riderFloatingCashTxns)
+      .values({
+        id: txnId,
+        riderId: user.id,
+        orderId: validOrderId,
+        txnType: "change_returned",
+        amount: changeVal,
+        customerPhone: customerPhone ? String(customerPhone) : null,
+        method: "upi",
+        referenceId: refNo,
+        status: "completed",
+        notes: `Returned ₹${changeVal} change via UPI to ${customerName || "Customer"}${orderId ? ` (Order #${orderId})` : ""}`,
+      })
+      .returning();
+
+    await db
+      .update(deliveryRiders)
+      .set({ pendingSettlement: nextBalance, updatedAt: new Date() })
+      .where(eq(deliveryRiders.id, user.id));
 
     return res.status(200).json({
       success: true,
-      message: `Successfully processed change of ₹${changeVal} to customer.`,
-      currentBalance: state.balance,
-      transaction: newTxn,
+      message: `Successfully recorded change return of ₹${changeVal} to customer.`,
+      currentBalance: nextBalance,
+      transaction: formatCashTxnForApp(inserted),
       receipt: {
         receiptId: txnId,
-        orderId: orderId || "MQ-COD",
+        orderId: orderId || null,
         customerName: customerName || "Customer",
-        customerUpi: customerUpiId || `${customerPhone}@upi`,
+        customerUpi: customerUpiId || (customerPhone ? `${customerPhone}@upi` : ""),
         orderBill: Number(orderAmount) || 0,
         cashReceived: Number(cashReceived) || 0,
         changePaid: changeVal,
-        adjustedFloatingCash: state.balance,
+        adjustedFloatingCash: nextBalance,
         utrNumber: refNo,
-        timestamp: newTxn.createdAt,
+        timestamp: inserted.createdAt.toISOString(),
       },
     });
   } catch (err) {
@@ -2155,45 +2575,62 @@ router.post("/rider/floating-cash/return-change", requireAuth, async (req: any, 
 router.post("/rider/floating-cash/deposit", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
-    const { amount, method, referenceNumber, paymentGatewayRef } = req.body;
+    const { amount, method, referenceNumber } = req.body;
 
     const depositAmount = Number(amount);
     if (!depositAmount || depositAmount <= 0) {
       return res.status(400).json({ message: "Valid deposit amount is required" });
     }
 
-    const state = getRiderFloatingCashState(user.id);
+    const [rider] = await db
+      .select()
+      .from(deliveryRiders)
+      .where(eq(deliveryRiders.id, user.id))
+      .limit(1);
+
+    if (!rider) {
+      return res.status(404).json({ message: "Rider profile not found" });
+    }
+
+    const currentBal = Math.max(0, Number(rider.pendingSettlement || 0));
+    const nextBalance = Math.max(0, Number((currentBal - depositAmount).toFixed(2)));
     const txnId = `DEP-${nanoid(8).toUpperCase()}`;
-    const validMethod = method || "upi";
-    const refNo = referenceNumber || `DEP-UTR-${Date.now().toString().slice(-6)}`;
+    const validMethod = String(method || "upi").toLowerCase();
+    const refNo = referenceNumber || `DEP-${Date.now().toString().slice(-6)}`;
 
-    const newTxn: FloatingCashTxn = {
-      id: txnId,
-      riderId: user.id,
-      type: `cash_deposited_${validMethod}` as any,
-      amount: depositAmount,
-      referenceNumber: refNo,
-      paymentGatewayRef: paymentGatewayRef || `PG-${nanoid(6).toUpperCase()}`,
-      status: "completed",
-      createdAt: new Date().toISOString(),
-      description: `Deposited ₹${depositAmount} cash via ${validMethod.toUpperCase()}`,
-    };
+    const [inserted] = await db
+      .insert(riderFloatingCashTxns)
+      .values({
+        id: txnId,
+        riderId: user.id,
+        orderId: null,
+        txnType: "company_deposit",
+        amount: depositAmount,
+        customerPhone: null,
+        method: validMethod,
+        referenceId: refNo,
+        status: "completed",
+        notes: `Deposited ₹${depositAmount} cash via ${validMethod.toUpperCase()}`,
+      })
+      .returning();
 
-    state.balance = Math.max(0, state.balance - depositAmount);
-    state.transactions.unshift(newTxn);
+    await db
+      .update(deliveryRiders)
+      .set({ pendingSettlement: nextBalance, updatedAt: new Date() })
+      .where(eq(deliveryRiders.id, user.id));
 
     return res.status(200).json({
       success: true,
       message: `₹${depositAmount} deposited successfully via ${validMethod.toUpperCase()}.`,
-      currentBalance: state.balance,
-      transaction: newTxn,
+      currentBalance: nextBalance,
+      transaction: formatCashTxnForApp(inserted),
       receipt: {
         receiptId: txnId,
         amount: depositAmount,
         method: validMethod,
         utrNumber: refNo,
-        timestamp: newTxn.createdAt,
-        remainingBalance: state.balance,
+        timestamp: inserted.createdAt.toISOString(),
+        remainingBalance: nextBalance,
       },
     });
   } catch (err) {
@@ -2205,17 +2642,61 @@ router.post("/rider/floating-cash/deposit", requireAuth, async (req: any, res) =
 // POST /api/delivery/rider/floating-cash/generate-gateway-order
 router.post("/rider/floating-cash/generate-gateway-order", requireAuth, async (req: any, res) => {
   try {
+    const user = req.user;
     const { amount, purpose, customerUpi } = req.body;
-    const orderId = `order_${nanoid(14)}`;
-    const upiIntent = `upi://pay?pa=${customerUpi || 'myquro.settlement@icici'}&pn=MyQuro+Delivery&am=${amount}&cu=INR&tn=${encodeURIComponent(purpose || 'MyQuro Settlement')}`;
+    const numericAmount = Number(amount);
+    if (!numericAmount || numericAmount <= 0) {
+      return res.status(400).json({ success: false, message: "Valid deposit amount is required" });
+    }
+
+    const rzpKey = process.env.RAZORPAY_KEY_ID;
+    const rzpSecret = process.env.RAZORPAY_KEY_SECRET;
+    const targetUpi = String(customerUpi || process.env.COMPANY_SETTLEMENT_UPI_ID || "").trim();
+
+    if (!(rzpKey && rzpSecret) && !targetUpi) {
+      return res.status(503).json({
+        success: false,
+        message: "Online settlement gateway is not configured on the server yet. Deposit cash via hub partner or configure RAZORPAY_KEY_ID / COMPANY_SETTLEMENT_UPI_ID.",
+      });
+    }
+
+    let gatewayOrderId = `intent_${nanoid(12)}`;
+    if (rzpKey && rzpSecret) {
+      const authHeader = Buffer.from(`${rzpKey}:${rzpSecret}`).toString("base64");
+      const rzpResp = await fetch("https://api.razorpay.com/v1/orders", {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${authHeader}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          amount: Math.round(numericAmount * 100),
+          currency: "INR",
+          receipt: `fc_${String(user.id).slice(-8)}_${Date.now()}`,
+          notes: { riderId: user.id, purpose: purpose || "MyQuro Floating Cash Settlement" },
+        }),
+      });
+      const rzpData: any = await rzpResp.json().catch(() => ({}));
+      if (!rzpResp.ok || !rzpData?.id) {
+        return res.status(502).json({
+          success: false,
+          message: rzpData?.error?.description || "Failed to initialize Razorpay settlement order",
+        });
+      }
+      gatewayOrderId = rzpData.id;
+    }
+
+    const upiIntentUrl = targetUpi
+      ? `upi://pay?pa=${encodeURIComponent(targetUpi)}&pn=MyQuro+Delivery&am=${numericAmount}&cu=INR&tn=${encodeURIComponent(purpose || "MyQuro Settlement")}`
+      : null;
 
     return res.status(200).json({
       success: true,
-      gatewayOrderId: orderId,
-      amount: Number(amount),
+      gatewayOrderId,
+      amount: numericAmount,
       currency: "INR",
-      keyId: "rzp_live_MYQURO_PROD",
-      upiIntentUrl: upiIntent,
+      keyId: rzpKey || null,
+      upiIntentUrl,
     });
   } catch (err) {
     console.error("❌ Generate gateway order error:", err);

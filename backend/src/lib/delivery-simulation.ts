@@ -41,33 +41,36 @@ export function calculateSwiggyETA(
   return Math.max(10, Math.round(prepTime + travelTimeMin));
 }
 
-// Seed riders if none exist
+// Seed riders only if explicitly enabled in non-production dev/sandbox environments
 export async function seedRidersIfEmpty() {
+  if (process.env.NODE_ENV === "production" || process.env.ALLOW_DEV_SEED !== "true") {
+    return;
+  }
   try {
     const existing = await db.select().from(deliveryRiders);
     if (existing.length === 0) {
-      console.log("🏍️ Seeding initial delivery riders...");
+      console.log("🏍️ [DEV] Seeding initial delivery riders (ALLOW_DEV_SEED=true)...");
       const sampleRiders = [
         {
           id: `rider_${nanoid(10)}`,
-          name: "Rahul Kumar",
-          phone: "+91 9876543210",
+          name: "Dev Rider 1",
+          phone: "",
           latitude: 22.8120,
           longitude: 86.2100,
           status: "available" as const,
         },
         {
           id: `rider_${nanoid(10)}`,
-          name: "Amit Singh",
-          phone: "+91 8765432109",
+          name: "Dev Rider 2",
+          phone: "",
           latitude: 22.7950,
           longitude: 86.1900,
           status: "available" as const,
         },
         {
           id: `rider_${nanoid(10)}`,
-          name: "Vikram Sharma",
-          phone: "+91 7654321098",
+          name: "Dev Rider 3",
+          phone: "",
           latitude: 22.8080,
           longitude: 86.1850,
           status: "available" as const,

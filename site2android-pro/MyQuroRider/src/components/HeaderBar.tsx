@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 
 export const HeaderBar: React.FC = () => {
   const router = useRouter();
-  const { isOnline, toggleOnlineStatus, driverProfile, todayEarnings, triggerDemoRequest, incomingRequest, activeTrip } = useRider();
+  const { isOnline, toggleOnlineStatus, driverProfile, todayEarnings, incomingRequest, activeTrip } = useRider();
 
   return (
     <View style={styles.container}>
@@ -63,10 +63,6 @@ export const HeaderBar: React.FC = () => {
             <TouchableOpacity style={styles.onboardingBtn} onPress={() => router.push('/onboarding')}>
               <Ionicons name="location-outline" size={14} color="#F2CA50" />
               <Text style={styles.onboardingBtnText}>Permission UI</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.demoBtn} onPress={triggerDemoRequest}>
-              <Ionicons name="flash" size={14} color="#00E5FF" />
-              <Text style={styles.demoBtnText}>Simulate Order</Text>
             </TouchableOpacity>
           </View>
         )}

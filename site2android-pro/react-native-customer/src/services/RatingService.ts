@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BACKEND_URL, NEON_SQL_ENDPOINT, NEON_CONN_STRING } from '../config';
+import { BACKEND_URL } from '../config';
 
 export interface OrderRatingPayload {
   orderId?: string;
@@ -66,10 +66,10 @@ export class RatingService {
 
     let backendSuccess = false;
 
-    // 1. Try Backend API
+    // Submit order rating via backend API (handles restaurant, menu items, and rider ratings server-side)
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       const res = await fetch(`${BACKEND_URL}/api/reviews/rate-order`, {
         method: 'POST',
@@ -84,109 +84,15 @@ export class RatingService {
       if (res.ok) {
         backendSuccess = true;
         console.log('✅ [RatingService] Successfully submitted to backend API');
+      } else {
+        const errText = await res.text().catch(() => '');
+        console.warn('⚠️ [RatingService] Backend rating request failed:', res.status, errText);
       }
     } catch (apiErr) {
-      console.warn('ℹ️ [RatingService] Backend slow or offline, using direct Neon DB sync:', apiErr);
+      console.warn('⚠️ [RatingService] Backend rating request error:', apiErr);
     }
 
-    // 2. Direct Neon DB SQL Sync (ensures 100% reliability even if Render server sleeps)
-    try {
-      const sqlQueries: string[] = [];
-
-      // A. Rate restaurant and create review record
-      if (restaurantId && foodRating && foodRating >= 1 && foodRating <= 5) {
-        const reviewId = `rev_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        const fullReview = reviewText
-          ? (compliments.length > 0 ? `${reviewText} [${compliments.join(', ')}]` : reviewText)
-          : (compliments.length > 0 ? compliments.join(', ') : '');
-
-        sqlQueries.push(`
-          INSERT INTO reviews (id, order_id, user_id, restaurant_id, rating, review_text, created_at, updated_at)
-          VALUES ('${reviewId}', ${orderId ? `'${orderId}'` : 'NULL'}, '${userId}', '${restaurantId}', ${Math.round(foodRating)}, ${fullReview ? `'${fullReview.replace(/'/g, "''")}'` : 'NULL'}, NOW(), NOW());
-        `);
-
-        sqlQueries.push(`
-          UPDATE restaurants
-          SET 
-            rating = ROUND(((COALESCE(rating, 0.0) * COALESCE(rating_count, 0) + ${foodRating}) / (COALESCE(rating_count, 0) + 1))::numeric, 1),
-            rating_count = COALESCE(rating_count, 0) + 1,
-            updated_at = NOW()
-          WHERE id = '${restaurantId}';
-        `);
-      }
-
-      // B. Rate all individual food items in the order
-      if (foodRating && foodRating >= 1 && foodRating <= 5) {
-        if (items.length > 0) {
-          for (const item of items) {
-            const mId = item.menuItemId || item.id;
-            if (mId && !mId.startsWith('reorder_')) {
-              const iRating = item.rating || foodRating;
-              sqlQueries.push(`
-                UPDATE menu_items
-                SET
-                  rating = ROUND(((COALESCE(rating, 0.0) * COALESCE(rating_count, 0) + ${iRating}) / (COALESCE(rating_count, 0) + 1))::numeric, 1),
-                  rating_count = COALESCE(rating_count, 0) + 1,
-                  updated_at = NOW()
-                WHERE id = '${mId}';
-              `);
-            }
-          }
-        } else if (orderId) {
-          // If items list not provided directly, update all menu_items linked via order_items
-          sqlQueries.push(`
-            UPDATE menu_items
-            SET
-              rating = ROUND(((COALESCE(rating, 0.0) * COALESCE(rating_count, 0) + ${foodRating}) / (COALESCE(rating_count, 0) + 1))::numeric, 1),
-              rating_count = COALESCE(rating_count, 0) + 1,
-              updated_at = NOW()
-            WHERE id IN (SELECT menu_item_id FROM order_items WHERE order_id = '${orderId}');
-          `);
-        }
-      }
-
-      // C. Rate delivery rider
-      if (deliveryRating && deliveryRating >= 1 && deliveryRating <= 5) {
-        if (riderId) {
-          sqlQueries.push(`
-            UPDATE delivery_riders
-            SET
-              rating = ROUND(((COALESCE(rating, 0.0) * COALESCE(total_ratings, 0) + ${deliveryRating}) / (COALESCE(total_ratings, 0) + 1))::numeric, 1),
-              total_ratings = COALESCE(total_ratings, 0) + 1,
-              updated_at = NOW()
-            WHERE id = '${riderId}';
-          `);
-        } else if (orderId) {
-          // Update rider assigned via order_deliveries
-          sqlQueries.push(`
-            UPDATE delivery_riders
-            SET
-              rating = ROUND(((COALESCE(rating, 0.0) * COALESCE(total_ratings, 0) + ${deliveryRating}) / (COALESCE(total_ratings, 0) + 1))::numeric, 1),
-              total_ratings = COALESCE(total_ratings, 0) + 1,
-              updated_at = NOW()
-            WHERE id IN (SELECT rider_id FROM order_deliveries WHERE order_id = '${orderId}' AND rider_id IS NOT NULL);
-          `);
-        }
-      }
-
-      // Execute each query sequentially on Neon
-      for (const query of sqlQueries) {
-        await fetch(NEON_SQL_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Neon-Connection-String': NEON_CONN_STRING,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: query.trim() }),
-        });
-      }
-
-      console.log(`✅ [RatingService] Executed ${sqlQueries.length} direct Neon DB updates`);
-      return { success: true };
-    } catch (neonErr) {
-      console.warn('⚠️ [RatingService] Neon direct sync encountered an issue:', neonErr);
-      return { success: backendSuccess };
-    }
+    return { success: backendSuccess };
   }
 
   /**

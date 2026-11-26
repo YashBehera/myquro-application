@@ -12,6 +12,12 @@ import {
 import { eq, desc, and, or, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
+import { runAutonomousComplaintRules } from "../services/orderWatchdog.js";
+import {
+  applyMerchantPenalty,
+  applyRiderPenalty,
+  computeFaultPenaltyPaise,
+} from "../services/penaltyEngine.js";
 
 const router = express.Router();
 
@@ -145,6 +151,84 @@ router.post("/", async (req, res) => {
       } catch {}
     }
 
+    // Deduplicate active order complaints from the same customer on the same order
+    // so repeated follow-ups update the live thread & SLA instead of spawning duplicates
+    if (ticketType === "order_complaint" && orderId && customerId) {
+      const activeExisting = await db
+        .select()
+        .from(complaints)
+        .where(
+          and(
+            eq(complaints.orderId, orderId),
+            eq(complaints.customerId, customerId),
+            eq(complaints.ticketType, "order_complaint"),
+            inArray(complaints.status, ["OPEN", "IN_PROGRESS", "AWAITING_CUSTOMER"])
+          )
+        )
+        .orderBy(desc(complaints.createdAt))
+        .limit(1);
+
+      if (activeExisting.length > 0) {
+        const existingTicket = activeExisting[0];
+        const existingMsgs = ensureArray<any>(existingTicket.messages);
+        const existingEvidence = ensureArray<string>(existingTicket.evidence);
+        const now = new Date();
+        const nowIso = now.toISOString();
+        const followUpMsg = {
+          id: `msg-${nanoid(6)}`,
+          complaintId: existingTicket.id,
+          senderId: customerId,
+          senderName: customerName || existingTicket.customerName || "Customer",
+          senderType: "CUSTOMER",
+          message: initialMessage || `${reason}${description && description !== reason ? `: ${description}` : ""}`,
+          timestamp: nowIso,
+          ...(Array.isArray(evidence) && evidence[0] ? { attachmentUrl: evidence[0] } : {}),
+        };
+        const mergedEvidence = Array.isArray(evidence)
+          ? Array.from(new Set([...existingEvidence, ...evidence.filter(Boolean)]))
+          : existingEvidence;
+        const escalatedPriority =
+          existingTicket.priority === "HIGH" || existingTicket.priority === "CRITICAL"
+            ? "CRITICAL"
+            : "HIGH";
+
+        const updatedFields = {
+          messages: [...existingMsgs, followUpMsg],
+          evidence: mergedEvidence,
+          priority: escalatedPriority,
+          updatedAt: now,
+        };
+        await db.update(complaints).set(updatedFields).where(eq(complaints.id, existingTicket.id));
+
+        let updatedRecord: any = { ...existingTicket, ...updatedFields };
+        try {
+          updatedRecord = await runAutonomousComplaintRules(updatedRecord);
+        } catch {}
+
+        if (outletId) {
+          try {
+            emitToRestaurant(outletId, "complaint-message", {
+              complaintId: existingTicket.id,
+              message: followUpMsg,
+              complaint: updatedRecord,
+            });
+          } catch {}
+        }
+        emitToOrder(orderId, "complaint-message", {
+          complaintId: existingTicket.id,
+          message: followUpMsg,
+          complaint: updatedRecord,
+        });
+
+        return res.status(200).json({
+          success: true,
+          deduplicated: true,
+          message: "Added update to your active conversation",
+          complaint: updatedRecord,
+        });
+      }
+    }
+
     const prefix = ticketType === "rider_issue" ? "TKT" : ticketType === "merchant_issue" ? "MRCH" : "CMP";
     const complaintId = `${prefix}-${nanoid(6).toUpperCase()}`;
     const now = new Date();
@@ -228,24 +312,32 @@ router.post("/", async (req, res) => {
 
     await db.insert(complaints).values(newRecord as any);
 
+    // Run autonomous SLA & self-healing rules immediately (e.g., auto-cancel & refund if >5m unaccepted)
+    let processedRecord: any = newRecord;
+    try {
+      processedRecord = await runAutonomousComplaintRules(newRecord);
+    } catch (autoErr) {
+      console.warn("⚠️ Autonomous complaint rule check skipped:", autoErr);
+    }
+
     // Emit live WebSocket alerts to connected Restaurant & Order rooms
     if (outletId) {
       try {
-        emitToRestaurant(outletId, "complaint-created", newRecord);
+        emitToRestaurant(outletId, "complaint-created", processedRecord);
       } catch (wsErr) {
         console.warn("⚠️ Could not emit complaint-created event:", wsErr);
       }
     }
     if (orderId) {
       try {
-        emitToOrder(orderId, "complaint-created", newRecord);
+        emitToOrder(orderId, "complaint-created", processedRecord);
       } catch {}
     }
 
     return res.status(201).json({
       success: true,
       message: "Complaint registered successfully",
-      complaint: newRecord,
+      complaint: processedRecord,
     });
   } catch (err: any) {
     console.error("❌ Error creating complaint:", err);
@@ -602,6 +694,73 @@ router.patch("/:id/status", async (req, res) => {
   }
 });
 
+// Helper to attribute financial complaint/refund fault to merchant or rider once resolution completes
+async function applyComplaintFaultPenalty(params: {
+  complaint: any;
+  refundAmount?: any;
+  faultParty?: "merchant" | "rider" | "none";
+}) {
+  const { complaint, refundAmount, faultParty } = params;
+  if (!complaint?.orderId || complaint.ticketType !== "order_complaint") return null;
+
+  const refundRupees = Number(refundAmount || 0);
+  if (refundRupees <= 0 && (!faultParty || faultParty === "none")) return null;
+  if (faultParty === "none") return null;
+
+  const refundPaise =
+    refundRupees > 0 ? Math.round(refundRupees * 100) : Math.round(Number(complaint.orderAmount || 0));
+  const penaltyPaise = computeFaultPenaltyPaise(refundPaise);
+  const categoryUpper = String(complaint.category || "").toUpperCase();
+  const textLower = `${complaint.reason || ""} ${complaint.description || ""}`.toLowerCase();
+
+  const isUndelivered = textLower.includes("not receive") || textLower.includes("did not deliver");
+  const isDeliveryIssue =
+    categoryUpper === "DELIVERY_DELAY" ||
+    isUndelivered ||
+    textLower.includes("spilled") ||
+    textLower.includes("damaged");
+
+  let targetRiderId: string | null = complaint.riderId || null;
+  if (!targetRiderId && complaint.orderId) {
+    const [del] = await db
+      .select({ riderId: orderDeliveries.riderId })
+      .from(orderDeliveries)
+      .where(eq(orderDeliveries.orderId, complaint.orderId))
+      .limit(1);
+    targetRiderId = del?.riderId || null;
+  }
+
+  const resolvedFault = faultParty || (isDeliveryIssue && targetRiderId ? "rider" : "merchant");
+
+  if (resolvedFault === "rider" && targetRiderId) {
+    return await applyRiderPenalty({
+      riderId: targetRiderId,
+      orderId: complaint.orderId,
+      complaintId: complaint.id,
+      penaltyType: isUndelivered ? "undelivered_order_complaint" : "order_damage_or_missing",
+      amountPaise: penaltyPaise,
+      cooldownMinutes: 0,
+      strikeDelta: isUndelivered ? 1 : 0,
+      forceOffline: false,
+      reason: `Customer refund attributed for ${complaint.categoryLabel || complaint.reason || "delivery issue"} (Ticket ${complaint.id}).`,
+    });
+  }
+
+  if (resolvedFault === "merchant" && complaint.outletId) {
+    return await applyMerchantPenalty({
+      restaurantId: complaint.outletId,
+      orderId: complaint.orderId,
+      penaltyType: "complaint_refund_fault",
+      amountPaise: penaltyPaise,
+      strikeDelta: 0,
+      pauseMinutes: 0,
+      reason: `Refund fault for ${complaint.categoryLabel || complaint.reason || "order issue"} (Ticket ${complaint.id}).`,
+    });
+  }
+
+  return null;
+}
+
 // 9. POST /api/complaints/:id/resolve - Propose or Direct Resolve
 router.post("/:id/resolve", async (req, res) => {
   try {
@@ -615,6 +774,7 @@ router.post("/:id/resolve", async (req, res) => {
       note = "",
       resolvedBy,
       directResolve = false,
+      faultParty,
     } = req.body;
 
     if (!resolutionType) {
@@ -636,6 +796,7 @@ router.post("/:id/resolve", async (req, res) => {
       refundAmount: refundAmount !== undefined ? Number(refundAmount) : undefined,
       replacementItem: replacementItem || undefined,
       compensationCode: compensationCode || undefined,
+      faultParty: faultParty || undefined,
       actionTaken,
       note,
       resolvedBy: actor,
@@ -673,6 +834,19 @@ router.post("/:id/resolve", async (req, res) => {
 
     await db.update(complaints).set(updatePayload).where(eq(complaints.id, id));
 
+    let penaltyApplied: any = null;
+    if (directResolve && resolutionType === "REFUND") {
+      try {
+        penaltyApplied = await applyComplaintFaultPenalty({
+          complaint: existing,
+          refundAmount,
+          faultParty,
+        });
+      } catch (penErr) {
+        console.warn("⚠️ Could not apply complaint fault penalty:", penErr);
+      }
+    }
+
     const updatedRecord = { ...existing, ...updatePayload };
 
     broadcastComplaintEvent(existing, "complaint-resolved", updatedRecord);
@@ -680,6 +854,7 @@ router.post("/:id/resolve", async (req, res) => {
     return res.json({
       success: true,
       complaint: updatedRecord,
+      penaltyApplied,
     });
   } catch (err: any) {
     console.error("❌ Error resolving complaint:", err);
@@ -735,6 +910,19 @@ router.post("/:id/accept-resolution", async (req, res) => {
 
     await db.update(complaints).set(updatePayload).where(eq(complaints.id, id));
 
+    let penaltyApplied: any = null;
+    if (currentResolution?.resolutionType === "REFUND") {
+      try {
+        penaltyApplied = await applyComplaintFaultPenalty({
+          complaint: existing,
+          refundAmount: currentResolution.refundAmount,
+          faultParty: currentResolution.faultParty,
+        });
+      } catch (penErr) {
+        console.warn("⚠️ Could not apply accepted complaint fault penalty:", penErr);
+      }
+    }
+
     const updatedRecord = { ...existing, ...updatePayload };
 
     broadcastComplaintEvent(existing, "complaint-status-updated", updatedRecord);
@@ -742,6 +930,7 @@ router.post("/:id/accept-resolution", async (req, res) => {
     return res.json({
       success: true,
       complaint: updatedRecord,
+      penaltyApplied,
     });
   } catch (err: any) {
     console.error("❌ Error accepting resolution:", err);

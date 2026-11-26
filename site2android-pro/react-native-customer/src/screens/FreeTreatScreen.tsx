@@ -36,6 +36,7 @@ import {
 } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
 import { SCREEN_WIDTH, isTablet, getSafeTopPadding } from '../utils/responsive';
+import { formatRatingCount } from '../utils/ratingFormat';
 
 // Local assets
 const freeTreatFullBannerImg = require('../assets/home/free_treat_full_banner.png');
@@ -116,7 +117,7 @@ export const FreeTreatScreen: React.FC<FreeTreatScreenProps> = ({
         name: r.name,
         image: imgUri,
         rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.3,
-        ratingCount: r.reviewCount ? `${r.reviewCount}+` : '2.1K+',
+        ratingCount: formatRatingCount(r.reviewCount, '2.1K+'),
         time: '35–45 mins',
         cuisines: r.cuisine || r.category || 'Multi-cuisine',
         location: r.address || r.city || '',
@@ -165,7 +166,7 @@ export const FreeTreatScreen: React.FC<FreeTreatScreenProps> = ({
         name: r.name,
         image: imgUri,
         rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.2,
-        ratingCount: r.reviewCount ? `${r.reviewCount}+` : '3.4K+',
+        ratingCount: formatRatingCount(r.reviewCount, '3.4K+'),
         time: '25–35 mins',
         cuisines: r.cuisine || r.category || 'Fast Food, Rolls',
         location: r.address || r.city || '',

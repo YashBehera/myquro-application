@@ -34,16 +34,6 @@ interface RefundScreenProps {
   onNavigateToOrder?: (orderId: string) => void;
 }
 
-// Simple deterministic hash for RRN generation if not present on order
-function getHashString(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString().padEnd(12, '7').slice(0, 12);
-}
-
 export const RefundScreen: React.FC<RefundScreenProps> = ({
   orders = [],
   onBack,
@@ -108,10 +98,10 @@ export const RefundScreen: React.FC<RefundScreenProps> = ({
           restaurantName: o.restaurantName || o.restaurant?.name || 'Restaurant Order',
           amount: `₹${isNaN(numAmt) ? '0' : numAmt.toFixed(1)}`,
           date: formattedDate,
-          paymentMethod: o.paymentMethod || o.paymentMode || 'UPI',
+          paymentMethod: o.paymentMethod || o.paymentMode || 'Original Payment Method',
           status: isPending ? 'Initiated' : 'Completed',
           isCompleted: !isPending,
-          rrn: o.rrn || o.refundRrn || getHashString(ordId),
+          rrn: o.rrn || o.refundRrn || o.refund?.referenceNumber || 'Pending Reference',
           rawOrder: o,
         };
       });

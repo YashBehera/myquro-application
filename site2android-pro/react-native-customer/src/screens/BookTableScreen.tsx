@@ -265,7 +265,7 @@ export const BookTableScreen: React.FC<BookTableScreenProps> = ({
       restaurantId: restaurant?.id || 'res_kruti',
       restaurantName,
       restaurantAddress,
-      restaurantPhone: restaurant?.phone || '+91 98765 43210',
+      restaurantPhone: restaurant?.phone || (restaurant as any)?.phoneNumber || '',
       restaurantImage: restaurantCover,
       guests: selectedGuests,
       date: activeDate.fullDate,

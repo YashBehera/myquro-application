@@ -60,6 +60,7 @@ import Svg, {
 } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
+import { formatRatingCount } from '../utils/ratingFormat';
 import { OlaMapView } from '../components/OlaMapView';
 import { BookTableScreen } from './BookTableScreen';
 import { PayBillScreen } from './PayBillScreen';
@@ -283,7 +284,7 @@ export const DineoutRestaurantDetailScreen: React.FC<DineoutRestaurantDetailScre
       ? restaurant.rating.toFixed(1)
       : restaurant.rating
     : '4.8';
-  const restaurantReviewCount = restaurant?.reviewsCount || (restaurant?.reviewCount ? `${restaurant.reviewCount}` : '100+');
+  const restaurantReviewCount = restaurant?.reviewsCount || formatRatingCount(restaurant?.reviewCount, '100+');
   const restaurantDistance = restaurant?.distance
     ? typeof restaurant.distance === 'number'
       ? `${restaurant.distance.toFixed(1)} km`

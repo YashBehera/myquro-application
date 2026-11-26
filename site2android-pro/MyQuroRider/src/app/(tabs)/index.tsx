@@ -176,7 +176,7 @@ function isTimeInShiftWindow(shiftTimeStr: string): boolean {
 export default function DashboardScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { triggerDemoRequest, activeTrip, isOnline, toggleOnlineStatus, todayEarnings, tripsToday } = useRider();
+  const { activeTrip, isOnline, toggleOnlineStatus, todayEarnings, tripsToday } = useRider();
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [showBookShiftModal, setShowBookShiftModal] = useState(false);
   const [showOutsideZoneModal, setShowOutsideZoneModal] = useState(false);
@@ -470,17 +470,6 @@ export default function DashboardScreen() {
           >
             <Text style={styles.sosText}>SOS</Text>
           </TouchableOpacity>
-
-          {/* TEST Pill (Visible Online for demo requests) */}
-          {isOnline && (
-            <TouchableOpacity
-              onPress={triggerDemoRequest}
-              style={styles.testPill}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.testText}>TEST</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </View>
 

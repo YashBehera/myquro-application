@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Search, Heart, ChevronRight, ArrowRight, SlidersHorizontal, ChevronDown, MoreVertical } from 'lucide-react-native';
 import { useViewModel } from '../state/MainViewModel';
 import { SCREEN_WIDTH, isTablet, isSmallDevice, getSafeTopPadding } from '../utils/responsive';
+import { formatRatingCount } from '../utils/ratingFormat';
 
 // Hero Platter Local Asset (Transparent PNG without background)
 const heroRollImg = require('../assets/home/payday_hero_rolls.png');
@@ -151,7 +152,7 @@ export const DelightfulDealsScreen: React.FC<DelightfulDealsScreenProps> = ({
         name: r.name,
         image: imgUri,
         rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.2,
-        ratingCount: r.reviewCount ? `${r.reviewCount}+` : '1.5K+',
+        ratingCount: formatRatingCount(r.reviewCount, '1.5K+'),
         time: '35-45 mins',
         cuisines: r.cuisine || r.category || 'Multi-cuisine',
         location: r.address || r.city || '',

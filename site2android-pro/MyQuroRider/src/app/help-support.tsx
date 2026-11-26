@@ -45,7 +45,6 @@ export default function HelpSupportScreen() {
         const res = await fetch(`${BACKEND_URL}/api/delivery/rider/support-tickets`, {
           headers: {
             Authorization: `Bearer ${sessionToken}`,
-            Origin: 'http://localhost:3000',
           },
         });
         if (res.ok) {

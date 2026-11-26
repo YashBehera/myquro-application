@@ -14,6 +14,7 @@ import Svg, { Path } from 'react-native-svg';
 import { ArrowLeft, Heart, Star, MapPin, MoreVertical, X, ChevronDown } from 'lucide-react-native';
 import { scale } from './profileUtils';
 import { getSafeTopPadding, getSafeBottomPadding } from '../../utils/responsive';
+import { formatRatingCount } from '../../utils/ratingFormat';
 
 interface FavouritesSubViewProps {
   isDarkMode: boolean;
@@ -381,7 +382,7 @@ export const FavouritesSubView: React.FC<FavouritesSubViewProps> = ({
                         <Star size={11} color="#f2ca50" fill="#f2ca50" style={{ marginRight: 4, marginTop: 1 }} />
                         <Text style={styles.favPremiumRatingVal}>{item.rating ? item.rating.toFixed(1) : '4.1'}</Text>
                         <Text style={styles.favPremiumRatingMeta}>
-                          ({item.reviewCount || '12K+'}) • 25-30 mins
+                          ({formatRatingCount(item.reviewCount, '12K+')}) • 25-30 mins
                         </Text>
                       </View>
 

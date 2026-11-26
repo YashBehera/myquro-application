@@ -43,6 +43,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useViewModel } from '../state/MainViewModel';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
+import { formatRatingCount } from '../utils/ratingFormat';
 import { cleanLocationLabel } from '../services/LocationService';
 import { TopSearchSheetOverlay } from '../components/TopSearchSheetOverlay';
 import { DineoutRestaurantDetailScreen } from './DineoutRestaurantDetailScreen';
@@ -267,7 +268,7 @@ export const DiningOutScreen: React.FC<DiningOutScreenProps> = ({
         image: r.image ? (typeof r.image === 'string' ? { uri: r.image } : r.image) : resDominos,
         coverUrl,
         rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : 4.5,
-        reviewsCount: r.reviewCount ? `${r.reviewCount}` : '50+',
+        reviewsCount: formatRatingCount(r.reviewCount, '50+'),
         costForTwo: r.offer ? `₹${r.offer} for two` : '₹800 for two',
         cuisine: r.cuisine || r.dishesCategory || 'Multi-cuisine',
         location: r.address || r.city || '',

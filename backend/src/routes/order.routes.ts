@@ -18,7 +18,22 @@ import { orderDeliveries } from "../db/schema/order-deliveries.js";
 import { deliveryRiders } from "../db/schema/delivery-riders.js";
 import { merchantPenalties } from "../db/schema/merchant-penalties.js";
 import { profiles } from "../db/schema/profiles.js";
+import { payments } from "../db/schema/payments.js";
+import { customerVouchers } from "../db/schema/loyalty.js";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
+import {
+  checkRestaurantServiceability,
+  parseDeliveryCoordinates,
+  isValidCoordinatePair,
+  MAX_DELIVERY_RADIUS_KM,
+} from "../lib/serviceability.js";
+import {
+  cancelOrderAutonomously,
+  evaluateOrderAutonomously,
+  ensureAutomaticOrderRefund,
+  ACCEPTANCE_TIMEOUT_MS,
+} from "../services/orderWatchdog.js";
+import { PENALTY_CONFIG } from "../services/penaltyEngine.js";
 
 import { nanoid } from "nanoid";
 import { eq, and, or, inArray, sql, desc, like } from "drizzle-orm";
@@ -201,6 +216,12 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       userId: explicitUserId,
       customerPhone,
       phone,
+      paymentMethod,
+      deliveryType,
+      deliveryTip,
+      deliveryInstructions,
+      cookingInstruction,
+      cutleryOptOut,
     } = req.body;
 
     // Declare session variables early
@@ -382,43 +403,68 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
 
     console.log("MAKE ORDER - Items with prices for calculation (including independent extras):", itemsWithPrices);
 
-    // Fetch restaurant GST percentage
-    console.log("MAKE ORDER - Fetching restaurant GST percentage for restaurant:", sessionRestaurantId);
-    const restaurantData = await db
-      .select({
-        defaultGstPercentage: restaurants.defaultGstPercentage,
-        autoAcceptOrders: restaurants.autoAcceptOrders,
-        autoPausedUntil: restaurants.autoPausedUntil,
-        isBusyMode: restaurants.isBusyMode,
-        defaultPrepTimeMinutes: restaurants.defaultPrepTimeMinutes,
-        isOpen: restaurants.isOpen,
-      })
-      .from(restaurants)
-      .where(eq(restaurants.id, sessionRestaurantId))
-      .limit(1);
+    // Fetch restaurant details + enforce Swiggy-grade serviceability & delivery radius
+    const resolvedTargetRestaurantId = sessionRestaurantId || providedRestaurantId;
+    const restaurantData = resolvedTargetRestaurantId
+      ? await db
+          .select({
+            id: restaurants.id,
+            restaurantName: restaurants.restaurantName,
+            city: restaurants.city,
+            restaurantStatus: restaurants.restaurantStatus,
+            defaultGstPercentage: restaurants.defaultGstPercentage,
+            autoAcceptOrders: restaurants.autoAcceptOrders,
+            autoPausedUntil: restaurants.autoPausedUntil,
+            snoozedUntil: restaurants.snoozedUntil,
+            snoozeReason: restaurants.snoozeReason,
+            isBusyMode: restaurants.isBusyMode,
+            defaultPrepTimeMinutes: restaurants.defaultPrepTimeMinutes,
+            isOpen: restaurants.isOpen,
+            latitude: restaurants.latitude,
+            longitude: restaurants.longitude,
+          })
+          .from(restaurants)
+          .where(eq(restaurants.id, resolvedTargetRestaurantId))
+          .limit(1)
+      : [];
 
     if (restaurantData.length === 0) {
-      console.log("MAKE ORDER - Restaurant not found:", sessionRestaurantId);
+      console.log("MAKE ORDER - Restaurant not found:", resolvedTargetRestaurantId);
       return res.status(404).json({ message: "Restaurant not found" });
     }
 
-    // Check if restaurant is temporarily auto-paused due to heavy dining rush
-    if (restaurantData[0].autoPausedUntil && new Date(restaurantData[0].autoPausedUntil) > new Date()) {
-      const remainingMins = Math.ceil((new Date(restaurantData[0].autoPausedUntil).getTime() - Date.now()) / 60000);
-      return res.status(400).json({
-        message: `Restaurant is currently paused due to heavy dining rush. Resuming in ${remainingMins} minutes.`,
-        isPaused: true,
-        remainingMinutes: remainingMins
+    const targetRestaurant = restaurantData[0];
+    const isDeliveryOrder = !tableSessionId;
+    const parsedCoords = parseDeliveryCoordinates(notes, latitude, longitude);
+
+    const serviceability = checkRestaurantServiceability(
+      targetRestaurant,
+      parsedCoords.latitude,
+      parsedCoords.longitude,
+      { isDelivery: isDeliveryOrder }
+    );
+
+    if (!serviceability.serviceable) {
+      console.warn(
+        `🚫 [MAKE ORDER] Blocked unserviceable order for restaurant ${targetRestaurant.id}:`,
+        serviceability.code,
+        serviceability.reason
+      );
+      return res.status(serviceability.code === "OUT_OF_DELIVERY_RANGE" ? 422 : 400).json({
+        message: serviceability.reason,
+        code: serviceability.code,
+        distanceKm: serviceability.distanceKm,
+        maxRadiusKm: serviceability.maxRadiusKm,
       });
     }
 
-    const isAutoAccept = Boolean(restaurantData[0].autoAcceptOrders);
-    const basePrep = restaurantData[0].defaultPrepTimeMinutes || 20;
-    const busyBuffer = restaurantData[0].isBusyMode ? 15 : 0;
+    const isAutoAccept = Boolean(targetRestaurant.autoAcceptOrders);
+    const basePrep = targetRestaurant.defaultPrepTimeMinutes || 20;
+    const busyBuffer = targetRestaurant.isBusyMode ? 15 : 0;
     const computedPrepMinutes = basePrep + busyBuffer;
     const initialStatus = isAutoAccept ? "preparing" : (status || "placed");
 
-    const rawGst = Number(restaurantData[0].defaultGstPercentage);
+    const rawGst = Number(targetRestaurant.defaultGstPercentage);
     const gstPercentage = rawGst > 0 ? rawGst : 5;
     console.log("MAKE ORDER - Using GST percentage:", gstPercentage, "| Auto-Accept:", isAutoAccept, "| Initial Status:", initialStatus);
 
@@ -453,11 +499,15 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       grandTotal
     });
 
-    // Handle table session - validate existing session or reject
+    // Determine whether this delivery checkout is prepaid online or COD
+    const normalizedMethodStr = String(paymentMethod || "").trim().toLowerCase();
+    const isCodPayment = normalizedMethodStr.includes("cod") || normalizedMethodStr === "cash" || normalizedMethodStr.includes("cash on delivery");
+    const isOnlinePaid = isDeliveryOrder && Boolean(paymentMethod) && !isCodPayment && orderGrandTotal > 0;
+
+    // Handle table session - validate existing session or create one cleanly after serviceability passes
     let finalTableSessionId = tableSessionId;
 
     if (tableSessionId) {
-      // Validate that the session exists and is active
       console.log("MAKE ORDER - Validating session:", tableSessionId);
       const existingSession = await db
         .select()
@@ -472,18 +522,14 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
 
       const session = existingSession[0];
 
-      // Check if session is still active (not billed)
       if (session.billedAt !== null) {
-        console.log("MAKE ORDER - Session already billed:", tableSessionId);
         return res.status(400).json({
           message: "Cannot place order - session has been billed. Please request payment confirmation from staff.",
           code: "SESSION_BILLED"
         });
       }
 
-      // Check if session status is active
       if (session.status !== "active") {
-        console.log("MAKE ORDER - Session not active:", tableSessionId, "Status:", session.status);
         return res.status(400).json({
           message: "Cannot place order - session is not active",
           code: "SESSION_INACTIVE"
@@ -492,35 +538,28 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
 
       sessionRestaurantId = session.restaurantId;
       sessionTableId = session.tableId;
-      console.log("MAKE ORDER - Session validated successfully");
     }
 
-    // Use provided restaurantId as fallback if session doesn't have one
     if (!sessionRestaurantId && providedRestaurantId) {
-      console.log("MAKE ORDER - Using provided restaurantId as fallback:", providedRestaurantId);
       sessionRestaurantId = providedRestaurantId;
     }
 
-    // For direct orders without session (e.g., takeout/delivery), require restaurantId
     if (!tableSessionId) {
       if (!providedRestaurantId) {
-        console.log("MAKE ORDER - No session and no restaurantId provided");
         return res.status(400).json({ message: "Restaurant ID is required for direct orders" });
       }
       sessionRestaurantId = providedRestaurantId;
 
-      // Create a session for this direct order
-      console.log("MAKE ORDER - Creating session for direct order");
       const newSessionId = nanoid();
-      const isCompleted = status === "completed";
+      const isCompleted = status === "completed" || isOnlinePaid;
       const newSession = {
         id: newSessionId,
         restaurantId: sessionRestaurantId,
         tableId: null,
         qrToken: null,
-        status: isCompleted ? ("closed" as const) : ("active" as const),
+        status: status === "completed" ? ("closed" as const) : ("active" as const),
         paymentStatus: isCompleted ? ("paid" as const) : ("unpaid" as const),
-        createdByUserId: user?.id || null,
+        createdByUserId: user?.id || explicitUserId || null,
         startedAt: new Date(),
         subtotal,
         discountAmount: discount,
@@ -541,25 +580,11 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
         })
       };
       await db.insert(tableSession).values(newSession);
-      console.log("MAKE ORDER - Created session for direct order:", newSessionId);
       finalTableSessionId = newSessionId;
     }
 
-    // Ensure we have a restaurant ID
     if (!sessionRestaurantId) {
-      console.log("MAKE ORDER - No restaurant ID available");
       return res.status(400).json({ message: "Restaurant ID is required" });
-    }
-
-    // Create order data
-    let dbNotes = notes || null;
-    if (deliveryAddress && !sessionTableId) {
-      dbNotes = JSON.stringify({
-        address: deliveryAddress,
-        latitude: latitude || 20.2505,
-        longitude: longitude || 85.7882,
-        cookingInstructions: notes || ""
-      });
     }
 
     let finalPlacedByUserId = user?.id || explicitUserId || null;
@@ -577,6 +602,72 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       }
     }
 
+    // Persist clean delivery & payment metadata in order notes without dummy coordinate fallbacks
+    let dbNotes = notes || null;
+    if (!sessionTableId && (deliveryAddress || isValidCoordinatePair(parsedCoords.latitude, parsedCoords.longitude))) {
+      const existingNoteObj =
+        typeof notes === "string" && notes.trim().startsWith("{")
+          ? (() => {
+              try {
+                return JSON.parse(notes);
+              } catch {
+                return {};
+              }
+            })()
+          : {};
+      const cookingInstr =
+        cookingInstruction ||
+        existingNoteObj.cookingInstructions ||
+        existingNoteObj.notes ||
+        (typeof notes === "string" && !notes.trim().startsWith("{") ? notes : "");
+
+      dbNotes = JSON.stringify({
+        ...existingNoteObj,
+        address: deliveryAddress || parsedCoords.address || existingNoteObj.address || "",
+        deliveryAddress: deliveryAddress || parsedCoords.address || existingNoteObj.deliveryAddress || existingNoteObj.address || "",
+        ...(isValidCoordinatePair(parsedCoords.latitude, parsedCoords.longitude)
+          ? { latitude: parsedCoords.latitude, longitude: parsedCoords.longitude }
+          : {}),
+        cookingInstructions: cookingInstr,
+        ...(paymentMethod ? { paymentMethod } : {}),
+        ...(deliveryType ? { deliveryType } : {}),
+        ...(deliveryTip ? { deliveryTip } : {}),
+        ...(Array.isArray(deliveryInstructions) && deliveryInstructions.length > 0 ? { deliveryInstructions } : {}),
+        ...(cutleryOptOut !== undefined ? { cutleryOptOut } : {}),
+        ...(serviceability.distanceKm !== undefined ? { distanceKm: serviceability.distanceKm } : {}),
+        ...(user?.name ? { customerName: user.name } : {}),
+        ...(customerPhone || phone ? { customerPhone: customerPhone || phone } : {}),
+      });
+    }
+
+    // Record online checkout payment ledger entry so cancellations/SLA timeouts issue traceable auto-refunds
+    if (isOnlinePaid && finalTableSessionId) {
+      const dbPaymentMethod: "upi" | "card" | "bank" | "gateway" = normalizedMethodStr.includes("card")
+        ? "card"
+        : normalizedMethodStr.includes("bank") || normalizedMethodStr.includes("net")
+        ? "bank"
+        : normalizedMethodStr.includes("upi")
+        ? "upi"
+        : "gateway";
+      try {
+        await db.insert(payments).values({
+          id: nanoid(),
+          tableSessionId: finalTableSessionId,
+          restaurantId: sessionRestaurantId,
+          amount: orderGrandTotal,
+          method: dbPaymentMethod,
+          status: "success",
+          referenceNumber: `PAY-${orderId.slice(-6).toUpperCase()}`,
+          paidByUserId: finalPlacedByUserId,
+          isRefund: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      } catch (payErr) {
+        console.warn("⚠️ Could not insert initial payment ledger entry:", payErr);
+      }
+    }
+
     const orderData = {
       id: orderId,
       placedByUserId: finalPlacedByUserId,
@@ -589,7 +680,8 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       gst: orderGst,
       grandTotal: orderGrandTotal,
       notes: dbNotes,
-      acknowledgedByMerchant: false,
+      acknowledgedByMerchant: isAutoAccept,
+      acknowledgedAt: isAutoAccept ? new Date() : null,
       prepTimeMinutes: computedPrepMinutes,
       extendedPrepMinutes: 0,
       handoverOtp: Math.floor(1000 + Math.random() * 9000).toString(),
@@ -1048,6 +1140,7 @@ router.patch("/:orderId/cancel", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
     const orderId = req.params.orderId;
+    const { reason } = req.body || {};
 
     const orderRow = (
       await db.select().from(orders).where(eq(orders.id, orderId)).limit(1)
@@ -1057,31 +1150,8 @@ router.patch("/:orderId/cancel", requireAuth, async (req: any, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (
-      orderRow.status === "served" ||
-      orderRow.status === "preparing" ||
-      orderRow.status === "cancelled"
-    ) {
+    if (orderRow.status === "served" || orderRow.status === "cancelled") {
       return res.status(400).json({ message: "Order cannot be cancelled" });
-    }
-
-    // Fetch session to enforce payment locks
-    const session = (
-      await db
-        .select()
-        .from(tableSession)
-        .where(eq(tableSession.id, orderRow.tableSessionId!))
-        .limit(1)
-    )[0];
-
-    if (!session) {
-      return res.status(404).json({ message: "Table session not found" });
-    }
-
-    if (session.paymentStatus === "paid") {
-      return res
-        .status(403)
-        .json({ message: "Payment already completed. Cannot cancel order." });
     }
 
     const isManager =
@@ -1106,35 +1176,68 @@ router.patch("/:orderId/cancel", requireAuth, async (req: any, res) => {
         .json({ message: "You are not authorized to cancel this order" });
     }
 
-    await db
-      .update(orders)
-      .set({ status: "cancelled" })
-      .where(eq(orders.id, orderId));
+    // Once ordered and paid, only the restaurant side can cancel or reject the order
+    if (!isManager) {
+      let isPaidOrder = false;
 
-    emitToRestaurant(orderRow.restaurantId, 'order-updated', {
-      orderId,
-      status: "cancelled",
-      restaurantId: orderRow.restaurantId,
-      tableSessionId: orderRow.tableSessionId,
-      updatedAt: new Date().toISOString()
+      if (orderRow.tableSessionId) {
+        const [sess] = await db
+          .select({ paymentStatus: tableSession.paymentStatus })
+          .from(tableSession)
+          .where(eq(tableSession.id, orderRow.tableSessionId))
+          .limit(1);
+        if (sess?.paymentStatus === "paid") {
+          isPaidOrder = true;
+        } else {
+          const paidRows = await db
+            .select({ id: payments.id })
+            .from(payments)
+            .where(
+              and(
+                eq(payments.tableSessionId, orderRow.tableSessionId),
+                eq(payments.isRefund, false)
+              )
+            )
+            .limit(1);
+          if (paidRows.length > 0) {
+            isPaidOrder = true;
+          }
+        }
+      }
+
+      if (isPaidOrder) {
+        return res.status(403).json({
+          message: "Once ordered and paid, orders cannot be cancelled. Only the restaurant can cancel this order.",
+        });
+      }
+
+      if (orderRow.status !== "placed") {
+        return res.status(400).json({
+          message: "Kitchen has already accepted this order. It cannot be cancelled now.",
+        });
+      }
+    }
+
+    const isLateAfterAccept = orderRow.status === "preparing" || orderRow.status === "ready";
+    const result = await cancelOrderAutonomously({
+      order: orderRow,
+      cancelledBy: isManager ? "merchant" : "customer",
+      reason: reason || (isManager ? "merchant_cancelled" : "customer_cancelled"),
+      applyMerchantPenalty: Boolean(isManager && isLateAfterAccept),
+      merchantPenaltyType: "late_merchant_cancellation",
+      merchantPenaltyAmountPaise: PENALTY_CONFIG.merchant.lateCancelAmountPaise,
+      merchantPauseMinutes: 0,
+      riderCompensationPaise: isManager ? PENALTY_CONFIG.merchant.riderDispatchedCompPaise : 0,
+      issueCompensationVoucher: false,
     });
 
-    emitToOrder(orderId, 'order-status', {
-      orderId,
-      status: "cancelled",
-      updatedAt: new Date().toISOString()
+    return res.status(200).json({
+      success: true,
+      message: result.refunded
+        ? `Order cancelled and refund initiated (Ref: ${result.refundReference}).`
+        : "Order cancelled successfully.",
+      ...result,
     });
-
-    await sendNotification(
-      orderRow.restaurantId,
-      `Order ${orderId} has been cancelled.`,
-      "order-update"
-    );
-
-    return res.status(200).json({ message: "Order cancelled successfully" });
-
-    // Invalidate Cache
-    orderCache.invalidate(orderRow.restaurantId);
   } catch (error) {
     console.error("Error cancelling order:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -1583,7 +1686,7 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
       allUserIds = Array.from(new Set([userId, ...matchingProfiles.map(p => p.userId), ...matchingUsers.map(u => u.id)]));
     }
 
-    const userOrders = await db
+    let userOrders = await db
       .select({
         id: orders.id,
         tableSessionId: orders.tableSessionId,
@@ -1592,6 +1695,10 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
         placedByUserId: orders.placedByUserId,
         notes: orders.notes,
         status: orders.status,
+        cancelledBy: orders.cancelledBy,
+        cancellationReason: orders.cancellationReason,
+        acknowledgedByMerchant: orders.acknowledgedByMerchant,
+        acknowledgedAt: orders.acknowledgedAt,
         handoverOtp: orders.handoverOtp,
         prepTimeMinutes: orders.prepTimeMinutes,
         extendedPrepMinutes: orders.extendedPrepMinutes,
@@ -1613,6 +1720,57 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
           : inArray(orders.placedByUserId, allUserIds)
       )
       .orderBy(desc(orders.createdAt));
+
+    // Self-heal any unaccepted delivery orders >= 5 mins old before returning
+    let autoHealedAny = false;
+    for (const o of userOrders) {
+      if (
+        o.status === "placed" &&
+        !o.tableId &&
+        !o.acknowledgedByMerchant &&
+        Date.now() - new Date(o.createdAt).getTime() >= ACCEPTANCE_TIMEOUT_MS
+      ) {
+        const resHeal = await evaluateOrderAutonomously(o.id);
+        if ((resHeal as any)?.cancelled) autoHealedAny = true;
+      }
+    }
+
+    if (autoHealedAny) {
+      userOrders = await db
+        .select({
+          id: orders.id,
+          tableSessionId: orders.tableSessionId,
+          restaurantId: orders.restaurantId,
+          tableId: orders.tableId,
+          placedByUserId: orders.placedByUserId,
+          notes: orders.notes,
+          status: orders.status,
+          cancelledBy: orders.cancelledBy,
+          cancellationReason: orders.cancellationReason,
+          acknowledgedByMerchant: orders.acknowledgedByMerchant,
+          acknowledgedAt: orders.acknowledgedAt,
+          handoverOtp: orders.handoverOtp,
+          prepTimeMinutes: orders.prepTimeMinutes,
+          extendedPrepMinutes: orders.extendedPrepMinutes,
+          subtotal: orders.subtotal,
+          discount: orders.discount,
+          gst: orders.gst,
+          grandTotal: orders.grandTotal,
+          createdAt: orders.createdAt,
+          updatedAt: orders.updatedAt,
+          restaurantName: restaurants.restaurantName,
+          restaurantBanner: restaurants.restaurantBanner,
+          city: restaurants.city,
+        })
+        .from(orders)
+        .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .where(
+          cleanPhone.length >= 7
+            ? or(inArray(orders.placedByUserId, allUserIds), like(orders.notes, `%${cleanPhone}%`))
+            : inArray(orders.placedByUserId, allUserIds)
+        )
+        .orderBy(desc(orders.createdAt));
+    }
 
     const orderIds = userOrders.map(o => o.id);
     let allOrderItems: any[] = [];
@@ -2174,7 +2332,22 @@ router.get("/:orderId/detail", optionalAuth, async (req: any, res) => {
     if (orderList.length === 0) {
       return res.status(404).json({ message: "Order not found" });
     }
-    const order = orderList[0];
+    let order = orderList[0];
+
+    // Enforce autonomous SLA checks on load (e.g. 5-min unaccepted delivery timeout -> auto-cancel + refund)
+    if (!order.tableId && order.status === "placed" && !order.acknowledgedByMerchant) {
+      try {
+        const evalResult = await evaluateOrderAutonomously(orderId);
+        if ((evalResult as any)?.cancelled) {
+          const reloaded = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+          if (reloaded.length > 0) {
+            order = reloaded[0];
+          }
+        }
+      } catch (evalErr) {
+        console.warn("Error evaluating order autonomously on detail fetch:", evalErr);
+      }
+    }
 
     // Fetch restaurant details
     let restaurantInfo: any = null;
@@ -2301,6 +2474,55 @@ router.get("/:orderId/detail", optionalAuth, async (req: any, res) => {
       console.warn("Error fetching delivery in order detail:", e);
     }
 
+    let sla: {
+      acceptanceTimeoutSeconds: number;
+      acceptanceDeadlineAt: string;
+      secondsRemaining: number;
+    } | null = null;
+    if (!order.tableId && order.status === "placed" && !order.acknowledgedByMerchant) {
+      const createdAtMs = new Date(order.createdAt).getTime();
+      const deadlineMs = createdAtMs + ACCEPTANCE_TIMEOUT_MS;
+      sla = {
+        acceptanceTimeoutSeconds: Math.max(60, Math.round(ACCEPTANCE_TIMEOUT_MS / 1000)),
+        acceptanceDeadlineAt: new Date(deadlineMs).toISOString(),
+        secondsRemaining: Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000)),
+      };
+    }
+
+    let refundInfo: {
+      status: string;
+      amountPaise: number;
+      referenceNumber?: string | null;
+      createdAt?: Date;
+    } | null = null;
+    let voucherCode: string | null = null;
+
+    if (order.status === "cancelled") {
+      if (order.tableSessionId) {
+        const [refundRow] = await db
+          .select({
+            status: payments.status,
+            amount: payments.amount,
+            referenceNumber: payments.referenceNumber,
+            createdAt: payments.createdAt,
+          })
+          .from(payments)
+          .where(and(eq(payments.tableSessionId, order.tableSessionId), eq(payments.isRefund, true)))
+          .orderBy(desc(payments.createdAt))
+          .limit(1);
+        if (refundRow) {
+          refundInfo = {
+            status: refundRow.status || "refunded",
+            amountPaise: refundRow.amount,
+            referenceNumber: refundRow.referenceNumber,
+            createdAt: refundRow.createdAt,
+          };
+        }
+      }
+
+      voucherCode = null;
+    }
+
     return res.status(200).json({
       order: {
         ...order,
@@ -2316,6 +2538,9 @@ router.get("/:orderId/detail", optionalAuth, async (req: any, res) => {
         deliveryAddress: parsedDeliveryAddress || (order as any).deliveryAddress || undefined,
         customerLatitude: parsedCustomerLat,
         customerLongitude: parsedCustomerLng,
+        sla,
+        refund: refundInfo,
+        voucherCode,
         restaurantName: restaurantInfo?.restaurantName || restaurantInfo?.name || order.restaurantId,
         restaurantAddress: restaurantInfo?.restaurantAddress || restaurantInfo?.address || restaurantInfo?.location || order.restaurantId,
         restaurantLatitude: restaurantInfo?.latitude ? Number(restaurantInfo.latitude) : undefined,
@@ -2470,7 +2695,7 @@ router.patch("/:orderId/extend-prep", async (req: any, res) => {
   }
 });
 
-// POST /orders/:orderId/merchant-cancel (Emergency cancel by restaurant + penalty handling)
+// POST /orders/:orderId/merchant-cancel (Emergency cancel by restaurant + auto-refund + penalty handling)
 router.patch("/:orderId/merchant-cancel", async (req: any, res) => {
   try {
     const { orderId } = req.params;
@@ -2482,83 +2707,86 @@ router.patch("/:orderId/merchant-cancel", async (req: any, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    const restaurantId = existing[0].restaurantId;
+    const currentOrder = existing[0];
+    const restaurantId = currentOrder.restaurantId;
 
-    // 1. Update order status
-    const updated = await db
-      .update(orders)
-      .set({
-        status: "cancelled",
-        cancelledBy: "merchant",
-        cancellationReason: cancelReason,
-        notes: details ? `${existing[0].notes || ""} | Cancel Reason: ${details}` : existing[0].notes,
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, orderId))
-      .returning();
-
-    // 2. If cancelled due to dining rush / kitchen overload, apply auto-pause & penalty
-    let isAutoPaused = false;
-    if (cancelReason === "kitchen_overloaded" || cancelReason === "dining_rush") {
-      const pauseDurationMs = 30 * 60 * 1000; // 30 minutes
-      const pauseUntil = new Date(Date.now() + pauseDurationMs);
-
-      // Increment strikes and pause restaurant
-      const [restro] = await db
-        .select({ strikeCount: restaurants.strikeCount })
-        .from(restaurants)
-        .where(eq(restaurants.id, restaurantId))
-        .limit(1);
-
-      const newStrikes = (restro?.strikeCount || 0) + 1;
-
-      await db
-        .update(restaurants)
-        .set({
-          autoPausedUntil: pauseUntil,
-          strikeCount: newStrikes,
-          updatedAt: new Date(),
-        })
-        .where(eq(restaurants.id, restaurantId));
-
-      isAutoPaused = true;
-
-      // 3. Log penalty record in ledger
-      await db.insert(merchantPenalties).values({
-        id: nanoid(),
-        restaurantId,
-        orderId,
-        penaltyType: "rush_cancellation",
-        amount: 5000, // ₹50.00 in paise
-        customerVoucherAmount: 5000,
-        riderCompensationAmount: 0,
-        status: "pending",
-        reason: `Late cancellation due to ${cancelReason}. Auto-paused for 30 minutes.`,
-        createdAt: new Date(),
+    if (currentOrder.status === "cancelled") {
+      return res.status(200).json({
+        success: true,
+        alreadyCancelled: true,
+        message: "Order was already cancelled.",
+        order: currentOrder,
       });
     }
 
-    // 4. Emit WebSocket events to Customer and Restaurant
-    const cancelPayload = {
+    if (details) {
+      await db
+        .update(orders)
+        .set({
+          notes: `${currentOrder.notes || ""} | Cancel Reason: ${details}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.id, orderId));
+    }
+
+    const isRushCancel = cancelReason === "kitchen_overloaded" || cancelReason === "dining_rush";
+    const isOutOfStock = cancelReason === "out_of_stock" || cancelReason === "item_out_of_stock";
+    const isAfterAccept = currentOrder.status === "preparing" || currentOrder.status === "ready";
+    const resolvedPenaltyType = isRushCancel
+      ? "rush_cancellation"
+      : isOutOfStock
+      ? "out_of_stock_cancellation"
+      : "late_merchant_cancellation";
+    const resolvedAmountPaise = isRushCancel
+      ? PENALTY_CONFIG.merchant.rushCancelAmountPaise
+      : isOutOfStock
+      ? PENALTY_CONFIG.merchant.outOfStockAmountPaise
+      : isAfterAccept
+      ? PENALTY_CONFIG.merchant.lateCancelAmountPaise
+      : PENALTY_CONFIG.merchant.outOfStockAmountPaise;
+
+    // 1. Cancel order atomically, apply penalty/strike/pause & rider compensation via shared engine, resolve complaints & refund
+    const cancelResult = await cancelOrderAutonomously({
+      order: currentOrder,
+      cancelledBy: "merchant",
+      reason: cancelReason,
+      details: details || `Cancelled by merchant (${cancelReason}).`,
+      applyMerchantPenalty: true,
+      merchantPenaltyType: resolvedPenaltyType,
+      merchantPenaltyAmountPaise: resolvedAmountPaise,
+      merchantPauseMinutes: isRushCancel ? PENALTY_CONFIG.merchant.baseAutoPauseMinutes : 0,
+      riderCompensationPaise: PENALTY_CONFIG.merchant.riderDispatchedCompPaise,
+      issueCompensationVoucher: false,
+    });
+
+    if (!cancelResult.cancelled) {
+      return res.status(409).json({
+        message: `Cannot cancel order in status "${currentOrder.status}".`,
+      });
+    }
+
+    const [updatedOrder] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+
+    res.status(200).json({
+      success: true,
+      message: cancelResult.refunded
+        ? `Order cancelled and 100% refund initiated (Ref: ${cancelResult.refundReference}).`
+        : "Order cancelled successfully.",
       orderId,
       status: "cancelled",
       cancelledBy: "merchant",
       reason: cancelReason,
-      isAutoPaused,
-      refundInitiated: true,
-      refundMessage: "100% refund initiated to original payment method.",
+      isAutoPaused: Boolean(cancelResult.isAutoPaused),
+      penaltyApplied: cancelResult.penaltyApplied || null,
+      riderCompensationPaise: cancelResult.riderCompensationPaise || 0,
+      refundInitiated: cancelResult.refunded,
+      refundAmountPaise: cancelResult.refundAmountPaise,
+      refundReference: cancelResult.refundReference,
+      refundMessage: cancelResult.refunded
+        ? `100% refund initiated to original payment method (Ref: ${cancelResult.refundReference}).`
+        : "Order cancelled with no captured payment charge.",
       updatedAt: new Date().toISOString(),
-    };
-
-    emitToOrder(orderId, "order-status", cancelPayload);
-    emitToOrder(orderId, "order-cancelled", cancelPayload);
-    emitToRestaurant(restaurantId, "order-cancelled", cancelPayload);
-
-    res.status(200).json({
-      success: true,
-      message: "Order cancelled successfully.",
-      ...cancelPayload,
-      order: updated[0],
+      order: updatedOrder,
     });
   } catch (error) {
     console.error("MERCHANT CANCEL ERROR:", error);
@@ -2669,33 +2897,33 @@ router.post("/:id/reject-with-items", optionalAuth, async (req: any, res) => {
         .where(inArray(menuItems.id, itemIds));
     }
 
-    // Cancel order
-    const [updated] = await db
-      .update(orders)
-      .set({
-        status: "cancelled",
-        cancellationReason: reason || "Items out of stock",
-        cancelledBy: "merchant",
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, id))
-      .returning();
+    // Cancel order via shared autonomous helper (out-of-stock penalty, rider comp if dispatched, refund & resolve tickets)
+    const cancelReason = reason || "Items out of stock";
+    const cancelResult = await cancelOrderAutonomously({
+      order,
+      cancelledBy: "merchant",
+      reason: cancelReason,
+      details: cancelReason,
+      applyMerchantPenalty: true,
+      merchantPenaltyType: "out_of_stock_cancellation",
+      merchantPenaltyAmountPaise: PENALTY_CONFIG.merchant.outOfStockAmountPaise,
+      merchantPauseMinutes: 0,
+      riderCompensationPaise: PENALTY_CONFIG.merchant.riderDispatchedCompPaise,
+      issueCompensationVoucher: false,
+    });
 
-    orderCache.invalidate(order.restaurantId);
-    emitToRestaurant(order.restaurantId, "order-cancelled", {
-      orderId: id,
-      status: "cancelled",
-      reason: reason || "Items out of stock",
-    });
-    emitToOrder(id, "order-cancelled", {
-      orderId: id,
-      status: "cancelled",
-      reason: reason || "Items out of stock",
-    });
+    const [updated] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
 
     return res.status(200).json({
       success: true,
-      message: "Order cancelled and items updated in inventory.",
+      message: cancelResult.refunded
+        ? `Order cancelled, items updated, and 100% refund initiated (Ref: ${cancelResult.refundReference}).`
+        : "Order cancelled and items updated in inventory.",
+      penaltyApplied: cancelResult.penaltyApplied || null,
+      riderCompensationPaise: cancelResult.riderCompensationPaise || 0,
+      refundInitiated: cancelResult.refunded,
+      refundAmountPaise: cancelResult.refundAmountPaise,
+      refundReference: cancelResult.refundReference,
       order: updated,
     });
   } catch (error) {

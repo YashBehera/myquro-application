@@ -15,8 +15,13 @@ import {
 } from 'react-native';
 import { useViewModel } from '../state/MainViewModel';
 import { OrderLoaderScreen } from './OrderLoaderScreen';
+import { LocationSelectorSheet } from './LocationSelectorSheet';
 import { THEME, COLORS } from '../theme/Theme';
 import { BACKEND_URL } from '../config';
+import {
+  checkCustomerServiceability,
+  MAX_DELIVERY_RADIUS_KM,
+} from '../utils/serviceability';
 import {
   ArrowLeft,
   MapPin,
@@ -29,6 +34,7 @@ import {
   Truck,
   Plus,
   Minus,
+  AlertTriangle,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -69,7 +75,9 @@ export const CartScreen: React.FC<CartScreenProps> = ({
     clearCart,
     checkoutCart,
     currentLocation,
+    setCurrentLocation,
     savedAddresses,
+    allRestaurants,
   } = useViewModel();
 
   const theme = isDarkMode ? THEME.dark : THEME.light;
@@ -80,6 +88,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
   const [appliedOffer, setAppliedOffer] = useState<any>(null);
   const [showOffersModal, setShowOffersModal] = useState(false);
   const [showDetailedBillModal, setShowDetailedBillModal] = useState(false);
+  const [showLocationSheet, setShowLocationSheet] = useState(false);
 
   // States for order loader screen
   const [showOrderLoader, setShowOrderLoader] = useState(false);
@@ -90,6 +99,21 @@ export const CartScreen: React.FC<CartScreenProps> = ({
 
   const restaurantId = cartItems.length > 0 ? cartItems[0].restaurantId : null;
   const restaurantName = cartItems.length > 0 ? cartItems[0].restaurantName : '';
+
+  const cartRestaurant = useMemo(() => {
+    if (!restaurantId) return null;
+    return (allRestaurants || []).find((r) => String(r.id) === String(restaurantId)) || null;
+  }, [allRestaurants, restaurantId]);
+
+  const serviceability = useMemo(() => {
+    if (!cartRestaurant) return null;
+    return checkCustomerServiceability(
+      cartRestaurant,
+      currentLocation?.latitude,
+      currentLocation?.longitude,
+      MAX_DELIVERY_RADIUS_KM
+    );
+  }, [cartRestaurant, currentLocation?.latitude, currentLocation?.longitude]);
 
   // Fetch active public offers for the restaurant
   useEffect(() => {
@@ -188,7 +212,20 @@ export const CartScreen: React.FC<CartScreenProps> = ({
 
   const handleCheckout = async () => {
     if (cartItems.length === 0) return;
-    
+
+    if (serviceability && !serviceability.isServiceable) {
+      Alert.alert(
+        serviceability.code === 'OUT_OF_DELIVERY_RANGE' ? 'Outside Delivery Area' : 'Delivery Unavailable',
+        serviceability.reason || `This restaurant cannot deliver to your selected address (max ${MAX_DELIVERY_RADIUS_KM} km).`,
+        [
+          { text: 'Change Address', onPress: () => setShowLocationSheet(true) },
+          { text: 'Clear Cart', style: 'destructive', onPress: () => clearCart() },
+          { text: 'OK', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
     // Capture details before they are cleared by checkoutCart
     const currentRestId = restaurantId || '';
     const currentRestName = restaurantName || 'Merchant Partner';
@@ -222,6 +259,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
       const addressId = matchedAddress.id;
       const notesPayload = JSON.stringify({
         notes: notes || "",
+        paymentMethod: 'UPI',
         addressId: addressId || "",
         address: `${matchedAddress.houseNo}, ${matchedAddress.landmark ? matchedAddress.landmark + ', ' : ''}${matchedAddress.area}, ${matchedAddress.city}`,
         mapAddress: matchedAddress.address || "",
@@ -466,6 +504,42 @@ export const CartScreen: React.FC<CartScreenProps> = ({
           </View>
         )}
 
+        {serviceability && !serviceability.isServiceable && (
+          <View style={{
+            backgroundColor: '#FEF2F2',
+            borderColor: '#FCA5A5',
+            borderWidth: 1,
+            borderRadius: 12,
+            padding: 12,
+            marginHorizontal: 16,
+            marginBottom: 12,
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+              <AlertTriangle size={16} color="#DC2626" style={{ marginRight: 6 }} />
+              <Text style={{ color: '#991B1B', fontWeight: '700', fontSize: 13 }}>
+                Delivery Unavailable for Selected Address
+              </Text>
+            </View>
+            <Text style={{ color: '#7F1D1D', fontSize: 12, marginBottom: 10 }}>
+              {serviceability.reason}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => setShowLocationSheet(true)}
+                style={{ backgroundColor: '#DC2626', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
+              >
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 12 }}>Change Address</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => clearCart()}
+                style={{ borderColor: '#DC2626', borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
+              >
+                <Text style={{ color: '#DC2626', fontWeight: '700', fontSize: 12 }}>Clear Cart</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* ─── 6. BILL DETAILS SECTION ─── */}
         <View style={[styles.card, isDarkMode && styles.cardDark, styles.billContainer]}>
           <View style={styles.billHeader}>
@@ -702,6 +776,20 @@ export const CartScreen: React.FC<CartScreenProps> = ({
         restaurantName={confirmRestaurantName}
         deliveryAddress={`${currentLocation.label} • ${currentLocation.address}`}
         paymentMethod="UPI"
+      />
+
+      <LocationSelectorSheet
+        visible={showLocationSheet}
+        onClose={() => setShowLocationSheet(false)}
+        onLocationSelected={(loc) => {
+          setCurrentLocation({
+            address: loc.address,
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            label: loc.label || 'Home',
+          });
+          setShowLocationSheet(false);
+        }}
       />
 
     </View>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,111 +9,43 @@ import {
   Alert,
   Modal,
   Share,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { apiClient } from '@/services/apiClient';
 
 type PeriodFilter = 'this_week' | 'last_week' | 'this_month' | 'last_month';
 type TabType = 'all' | 'settled' | 'processing';
 
 interface SettlementItem {
   id: string;
-  payoutId: string;
-  period: string;
+  cycleLabel: string;
   payoutDate: string;
   orderCount: number;
   grossSales: number;
   customerDeliveryFee: number;
   discountsSubsidized: number;
+  penaltiesDeducted: number;
   commissionRate: number;
   commissionAmount: number;
   gstOnCommission: number;
   tcsDeduction: number;
   netPayout: number;
   status: 'settled' | 'processing' | 'on_hold';
-  utrNumber?: string;
-  bankName: string;
-  accountLast4: string;
+  utrNumber?: string | null;
 }
 
-const MOCK_SETTLEMENTS: SettlementItem[] = [
-  {
-    id: 'set_1',
-    payoutId: 'MQ-PAY-20260817-9102',
-    period: '11 Aug 2026 – 17 Aug 2026',
-    payoutDate: '18 Aug 2026, 09:30 AM',
-    orderCount: 142,
-    grossSales: 58400,
-    customerDeliveryFee: 4260,
-    discountsSubsidized: 1800,
-    commissionRate: 15,
-    commissionAmount: 8760,
-    gstOnCommission: 1576.8,
-    tcsDeduction: 584,
-    netPayout: 49279.2,
-    status: 'settled',
-    utrNumber: 'HDFCR5202608189874102',
-    bankName: 'HDFC Bank',
-    accountLast4: '4821',
-  },
-  {
-    id: 'set_2',
-    payoutId: 'MQ-PAY-20260824-9481',
-    period: '18 Aug 2026 – 24 Aug 2026',
-    payoutDate: 'Expected 25 Aug 2026',
-    orderCount: 98,
-    grossSales: 41250,
-    customerDeliveryFee: 2940,
-    discountsSubsidized: 1200,
-    commissionRate: 15,
-    commissionAmount: 6187.5,
-    gstOnCommission: 1113.75,
-    tcsDeduction: 412.5,
-    netPayout: 34736.25,
-    status: 'processing',
-    bankName: 'HDFC Bank',
-    accountLast4: '4821',
-  },
-  {
-    id: 'set_3',
-    payoutId: 'MQ-PAY-20260810-8714',
-    period: '04 Aug 2026 – 10 Aug 2026',
-    payoutDate: '11 Aug 2026, 10:15 AM',
-    orderCount: 168,
-    grossSales: 72800,
-    customerDeliveryFee: 5040,
-    discountsSubsidized: 2400,
-    commissionRate: 15,
-    commissionAmount: 10920,
-    gstOnCommission: 1965.6,
-    tcsDeduction: 728,
-    netPayout: 61586.4,
-    status: 'settled',
-    utrNumber: 'HDFCR5202608110943811',
-    bankName: 'HDFC Bank',
-    accountLast4: '4821',
-  },
-  {
-    id: 'set_4',
-    payoutId: 'MQ-PAY-20260803-7629',
-    period: '28 Jul 2026 – 03 Aug 2026',
-    payoutDate: '04 Aug 2026, 09:45 AM',
-    orderCount: 155,
-    grossSales: 64900,
-    customerDeliveryFee: 4650,
-    discountsSubsidized: 1950,
-    commissionRate: 15,
-    commissionAmount: 9735,
-    gstOnCommission: 1752.3,
-    tcsDeduction: 649,
-    netPayout: 54713.7,
-    status: 'settled',
-    utrNumber: 'HDFCR5202608047712390',
-    bankName: 'HDFC Bank',
-    accountLast4: '4821',
-  },
-];
+interface SettlementSummary {
+  totalNetPayout: number;
+  grossSales: number;
+  commissionAmount: number;
+  totalOrders: number;
+  penaltiesDeducted: number;
+  growthPercent: number | null;
+}
 
 export default function FinanceScreen() {
   const router = useRouter();
@@ -121,31 +53,110 @@ export default function FinanceScreen() {
 
   const [period, setPeriod] = useState<PeriodFilter>('this_month');
   const [activeTab, setActiveTab] = useState<TabType>('all');
-  const [expandedId, setExpandedId] = useState<string | null>('set_2');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isStatementModalVisible, setIsStatementModalVisible] = useState(false);
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [restaurantId, setRestaurantId] = useState<string | null>(null);
+  const [restaurantName, setRestaurantName] = useState<string>('Merchant Partner');
+  const [gstNumber, setGstNumber] = useState<string | null>(null);
+  const [commissionRate, setCommissionRate] = useState<number>(15);
+  const [settlements, setSettlements] = useState<SettlementItem[]>([]);
+  const [summary, setSummary] = useState<SettlementSummary>({
+    totalNetPayout: 0,
+    grossSales: 0,
+    commissionAmount: 0,
+    totalOrders: 0,
+    penaltiesDeducted: 0,
+    growthPercent: null,
+  });
+
+  const loadSettlements = useCallback(async (selectedPeriod: PeriodFilter) => {
+    try {
+      let restId = restaurantId;
+      if (!restId) {
+        const restRes = await apiClient.get('/restaurants/my-restaurant');
+        restId = restRes.data?.restaurant?.id || restRes.data?.id || null;
+        if (restRes.data?.restaurant?.restaurantName) {
+          setRestaurantName(restRes.data.restaurant.restaurantName);
+        }
+        if (restId) setRestaurantId(restId);
+      }
+      if (!restId) {
+        setSettlements([]);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+
+      const res = await apiClient.get(`/restaurants/${restId}/settlements`, {
+        params: { period: selectedPeriod },
+      });
+      const data = res.data || {};
+      const rows: SettlementItem[] = Array.isArray(data.settlements) ? data.settlements : [];
+      setSettlements(rows);
+      if (data.restaurantName) setRestaurantName(data.restaurantName);
+      setGstNumber(data.gstNumber || null);
+      if (typeof data.commissionRate === 'number') setCommissionRate(data.commissionRate);
+      if (data.summary) {
+        setSummary({
+          totalNetPayout: Number(data.summary.totalNetPayout || 0),
+          grossSales: Number(data.summary.grossSales || 0),
+          commissionAmount: Number(data.summary.commissionAmount || 0),
+          totalOrders: Number(data.summary.totalOrders || 0),
+          penaltiesDeducted: Number(data.summary.penaltiesDeducted || 0),
+          growthPercent: data.summary.growthPercent ?? null,
+        });
+      }
+      if (rows.length > 0 && !expandedId) {
+        setExpandedId(rows[0].id);
+      }
+    } catch (err) {
+      console.error('Error loading merchant settlements:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [restaurantId]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadSettlements(period);
+  }, [period, loadSettlements]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadSettlements(period);
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedId(prev => (prev === id ? null : id));
   };
 
-  const filteredSettlements = MOCK_SETTLEMENTS.filter(item => {
+  const filteredSettlements = settlements.filter(item => {
     if (activeTab === 'settled') return item.status === 'settled';
     if (activeTab === 'processing') return item.status === 'processing';
     return true;
   });
 
-  const totalEarningsMonth = MOCK_SETTLEMENTS.reduce((acc, cur) => acc + cur.netPayout, 0);
-  const nextPayoutItem = MOCK_SETTLEMENTS.find(item => item.status === 'processing');
+  const totalEarningsMonth = summary.totalNetPayout;
+  const nextPayoutItem = settlements.find(item => item.status === 'processing');
+
+  const nowDate = new Date();
+  const currentMonthLabel = nowDate.toLocaleString('en-IN', { month: 'long' });
+  const prevMonthDate = new Date(nowDate.getFullYear(), nowDate.getMonth() - 1, 1);
+  const prevMonthLabel = prevMonthDate.toLocaleString('en-IN', { month: 'long' });
 
   const handleDownloadStatement = async (format: 'pdf' | 'csv') => {
     setIsStatementModalVisible(false);
     try {
       await Share.share({
         title: `MyQuro_Settlement_Statement_${period}.${format}`,
-        message: `MyQuro Restaurant Partner Settlement Statement for Biryani Box & Co. (ID: MQ-REST-4089)\nTotal Payout: ₹${totalEarningsMonth.toLocaleString('en-IN')}\nStatus: Verified`,
+        message: `MyQuro Restaurant Partner Settlement Statement\nOutlet: ${restaurantName}${restaurantId ? ` (ID: ${restaurantId})` : ''}\nPeriod: ${period.replace('_', ' ')}\nGross Sales: ₹${summary.grossSales.toLocaleString('en-IN')}\nTotal Net Payout: ₹${totalEarningsMonth.toLocaleString('en-IN')}\nOrders: ${summary.totalOrders}`,
       });
     } catch (_) {
-      Alert.alert('Statement Exported', `Your ${format.toUpperCase()} statement has been generated.`);
+      Alert.alert('Statement Exported', `Your ${format.toUpperCase()} summary is ready.`);
     }
   };
 
@@ -167,7 +178,7 @@ export default function FinanceScreen() {
 
           <View style={styles.headerTitleWrapper}>
             <Text style={styles.headerTitle}>Finance & Settlements</Text>
-            <Text style={styles.headerSubtitle}>Earnings, Commissions & Bank Payouts</Text>
+            <Text style={styles.headerSubtitle}>Earnings, Commissions & Weekly Payouts</Text>
           </View>
 
           <TouchableOpacity
@@ -186,6 +197,9 @@ export default function FinanceScreen() {
             styles.scrollInner,
             { paddingBottom: Math.max(insets.bottom, 20) + 40 },
           ]}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#E8C547" />
+          }
           showsVerticalScrollIndicator={false}
         >
           {/* 1. PERIOD SELECTOR CHIPS */}
@@ -197,8 +211,8 @@ export default function FinanceScreen() {
             {[
               { id: 'this_week', label: 'This Week' },
               { id: 'last_week', label: 'Last Week' },
-              { id: 'this_month', label: 'This Month (August)' },
-              { id: 'last_month', label: 'Last Month (July)' },
+              { id: 'this_month', label: `This Month (${currentMonthLabel})` },
+              { id: 'last_month', label: `Last Month (${prevMonthLabel})` },
             ].map(item => {
               const isSelected = period === item.id;
               return (
@@ -226,10 +240,19 @@ export default function FinanceScreen() {
                 </Text>
               </View>
 
-              <View style={styles.growthBadge}>
-                <Ionicons name="trending-up" size={14} color="#22C55E" style={{ marginRight: 3 }} />
-                <Text style={styles.growthText}>+18.4% vs last mo</Text>
-              </View>
+              {summary.growthPercent !== null && (
+                <View style={styles.growthBadge}>
+                  <Ionicons
+                    name={summary.growthPercent >= 0 ? 'trending-up' : 'trending-down'}
+                    size={14}
+                    color={summary.growthPercent >= 0 ? '#22C55E' : '#EF4444'}
+                    style={{ marginRight: 3 }}
+                  />
+                  <Text style={[styles.growthText, summary.growthPercent < 0 && { color: '#EF4444' }]}>
+                    {summary.growthPercent >= 0 ? `+${summary.growthPercent}%` : `${summary.growthPercent}%`} vs last mo
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* Next Payout Highlight Banner */}
@@ -240,8 +263,8 @@ export default function FinanceScreen() {
                     <Ionicons name="time" size={16} color="#E8C547" />
                   </View>
                   <View>
-                    <Text style={styles.nextPayoutTitle}>Next Scheduled Payout</Text>
-                    <Text style={styles.nextPayoutDate}>Monday, 25 Aug 2026 • In Processing</Text>
+                    <Text style={styles.nextPayoutTitle}>Current Cycle Payout</Text>
+                    <Text style={styles.nextPayoutDate}>{nextPayoutItem.payoutDate} • In Processing</Text>
                   </View>
                 </View>
                 <Text style={styles.nextPayoutAmount}>
@@ -254,22 +277,26 @@ export default function FinanceScreen() {
             <View style={styles.summaryMetricsRow}>
               <View style={styles.summaryCol}>
                 <Text style={styles.summaryColLabel}>Gross Sales</Text>
-                <Text style={styles.summaryColValue}>₹2,37,350</Text>
+                <Text style={styles.summaryColValue}>
+                  ₹{summary.grossSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryCol}>
-                <Text style={styles.summaryColLabel}>Commission (15%)</Text>
-                <Text style={[styles.summaryColValue, { color: '#EF4444' }]}>-₹35,602</Text>
+                <Text style={styles.summaryColLabel}>Commission ({commissionRate}%)</Text>
+                <Text style={[styles.summaryColValue, { color: '#EF4444' }]}>
+                  -₹{summary.commissionAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryCol}>
-                <Text style={styles.summaryColLabel}>Orders Delivered</Text>
-                <Text style={styles.summaryColValue}>563</Text>
+                <Text style={styles.summaryColLabel}>Orders Count</Text>
+                <Text style={styles.summaryColValue}>{summary.totalOrders}</Text>
               </View>
             </View>
           </View>
 
-          {/* 3. REGISTERED BANK ACCOUNT CARD */}
+          {/* 3. PARTNER TAX & PAYOUT PROFILE CARD */}
           <View style={styles.bankCard}>
             <View style={styles.bankCardHeader}>
               <View style={styles.bankIconCircle}>
@@ -277,14 +304,14 @@ export default function FinanceScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <View style={styles.bankVerifiedRow}>
-                  <Text style={styles.bankNameText}>HDFC Bank Primary Payout Account</Text>
+                  <Text style={styles.bankNameText}>{restaurantName}</Text>
                   <View style={styles.verifiedPill}>
-                    <Ionicons name="checkmark-circle" size={12} color="#22C55E" style={{ marginRight: 3 }} />
-                    <Text style={styles.verifiedPillText}>Verified</Text>
+                    <Ionicons name="shield-checkmark" size={12} color="#22C55E" style={{ marginRight: 3 }} />
+                    <Text style={styles.verifiedPillText}>Weekly Cycle</Text>
                   </View>
                 </View>
                 <Text style={styles.bankDetailsText}>
-                  A/C: •••••••••••• 4821 • IFSC: HDFC0002419 • Auto-credit: Enabled
+                  {gstNumber ? `GSTIN: ${gstNumber} • ` : ''}Weekly NEFT/IMPS settlements • Raise Support ticket to update bank mandate
                 </Text>
               </View>
             </View>
@@ -293,7 +320,7 @@ export default function FinanceScreen() {
           {/* 4. SETTLEMENT LEDGER SECTION */}
           <View style={styles.ledgerHeaderRow}>
             <Text style={styles.sectionTitle}>Settlement History</Text>
-            
+
             {/* Filter Tabs */}
             <View style={styles.tabPillsContainer}>
               {(['all', 'settled', 'processing'] as TabType[]).map(tab => (
@@ -311,8 +338,22 @@ export default function FinanceScreen() {
             </View>
           </View>
 
-          {/* SETTLEMENT CARDS LIST */}
-          {filteredSettlements.map(item => {
+          {loading ? (
+            <View style={[styles.settlementCard, { paddingVertical: 32, alignItems: 'center' }]}>
+              <ActivityIndicator size="small" color="#E8C547" />
+              <Text style={[styles.payoutSubtext, { marginTop: 10 }]}>Loading live settlement ledger...</Text>
+            </View>
+          ) : filteredSettlements.length === 0 ? (
+            <View style={[styles.settlementCard, { paddingVertical: 28, alignItems: 'center', paddingHorizontal: 18 }]}>
+              <Ionicons name="receipt-outline" size={28} color="#8E8E8E" />
+              <Text style={[styles.settlementPeriod, { marginTop: 10, textAlign: 'center' }]}>
+                No settlements for this period
+              </Text>
+              <Text style={[styles.payoutSubtext, { marginTop: 4, textAlign: 'center' }]}>
+                Completed non-cancelled orders automatically populate your weekly settlement breakdown.
+              </Text>
+            </View>
+          ) : filteredSettlements.map(item => {
             const isExpanded = expandedId === item.id;
             const isSettled = item.status === 'settled';
 
@@ -335,7 +376,7 @@ export default function FinanceScreen() {
 
                     <View>
                       <View style={styles.periodRow}>
-                        <Text style={styles.settlementPeriod}>{item.period}</Text>
+                        <Text style={styles.settlementPeriod}>{item.cycleLabel}</Text>
                         <View style={[styles.statusBadge, isSettled ? styles.badgeSettled : styles.badgeProcessing]}>
                           <Text style={[styles.statusBadgeText, isSettled ? styles.statusSettledText : styles.statusProcessingText]}>
                             {isSettled ? 'SETTLED' : 'PROCESSING'}
@@ -364,12 +405,12 @@ export default function FinanceScreen() {
                 {isExpanded && (
                   <View style={styles.breakdownContainer}>
                     <View style={styles.breakdownDivider} />
-                    
+
                     <Text style={styles.breakdownTitle}>Settlement Calculation Details</Text>
 
                     {/* Row 1: Gross Sales */}
                     <View style={styles.calcRow}>
-                      <Text style={styles.calcLabel}>Gross Food Sales ({item.orderCount} items)</Text>
+                      <Text style={styles.calcLabel}>Gross Food Sales ({item.orderCount} orders)</Text>
                       <Text style={styles.calcValue}>+₹{item.grossSales.toLocaleString('en-IN')}</Text>
                     </View>
 
@@ -410,6 +451,15 @@ export default function FinanceScreen() {
                         -₹{item.discountsSubsidized.toLocaleString('en-IN')}
                       </Text>
                     </View>
+
+                    {item.penaltiesDeducted > 0 && (
+                      <View style={styles.calcRow}>
+                        <Text style={styles.calcLabel}>SLA / Penalty Deductions</Text>
+                        <Text style={[styles.calcValue, { color: '#EF4444' }]}>
+                          -₹{item.penaltiesDeducted.toLocaleString('en-IN')}
+                        </Text>
+                      </View>
+                    )}
 
                     <View style={styles.breakdownSubtotalDivider} />
 

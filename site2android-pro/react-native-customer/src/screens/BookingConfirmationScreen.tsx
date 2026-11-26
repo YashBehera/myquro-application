@@ -134,7 +134,7 @@ export const BookingConfirmationScreen: React.FC<BookingConfirmationScreenProps>
   const restaurantName = bookingDetails?.restaurantName || 'Kruti Coffee';
   const restaurantAddress =
     bookingDetails?.restaurantAddress || '';
-  const restaurantPhone = bookingDetails?.restaurantPhone || '+91 98765 43210';
+  const restaurantPhone = bookingDetails?.restaurantPhone || '';
   const displayDate = bookingDetails?.date || '29 Aug 2026';
   const displayDayName = (bookingDetails?.dayName || 'TODAY').toUpperCase();
   const displayTime = bookingDetails?.time || '10:30 PM';

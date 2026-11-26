@@ -283,8 +283,10 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
     displayStatus = 'Order Placed';
   }
 
-  const paymentMethodRaw = order.paymentMethod || 'UPI';
-  const paymentMethodStr = paymentMethodRaw.toUpperCase().startsWith('PAID')
+  const paymentMethodRaw = order.paymentMethod || '';
+  const paymentMethodStr = !paymentMethodRaw
+    ? 'Paid Online'
+    : paymentMethodRaw.toUpperCase().startsWith('PAID')
     ? paymentMethodRaw
     : `Paid Via ${paymentMethodRaw.toUpperCase()}`;
 

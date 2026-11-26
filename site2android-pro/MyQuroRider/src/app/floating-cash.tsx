@@ -63,10 +63,11 @@ export default function FloatingCashScreen() {
   // Floating cash live state
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [currentBalance, setCurrentBalance] = useState(830);
+  const [currentBalance, setCurrentBalance] = useState(0);
   const [cashLimit, setCashLimit] = useState(2500);
-  const [availableLimit, setAvailableLimit] = useState(1670);
-  const [todaySummary, setTodaySummary] = useState({ collected: 830, changeReturned: 0, deposited: 0 });
+  const [availableLimit, setAvailableLimit] = useState(2500);
+  const [settlementUpiId, setSettlementUpiId] = useState<string | null>(null);
+  const [todaySummary, setTodaySummary] = useState({ collected: 0, changeReturned: 0, deposited: 0 });
   const [recentOrders, setRecentOrders] = useState<CodOrder[]>([]);
   const [transactions, setTransactions] = useState<FloatingTransaction[]>([]);
   const [activeHistoryTab, setActiveHistoryTab] = useState<'all' | 'change' | 'collected' | 'deposit'>('all');
@@ -114,17 +115,17 @@ export default function FloatingCashScreen() {
 
   // Return Change Form State
   const [selectedOrder, setSelectedOrder] = useState<CodOrder | null>(null);
-  const [orderAmountInput, setOrderAmountInput] = useState('380');
-  const [cashReceivedInput, setCashReceivedInput] = useState('500');
-  const [changeAmountInput, setChangeAmountInput] = useState('120');
-  const [customerNameInput, setCustomerNameInput] = useState('Pooja Verma');
-  const [customerPhoneInput, setCustomerPhoneInput] = useState('9123456789');
-  const [customerUpiInput, setCustomerUpiInput] = useState('9123456789@paytm');
+  const [orderAmountInput, setOrderAmountInput] = useState('');
+  const [cashReceivedInput, setCashReceivedInput] = useState('');
+  const [changeAmountInput, setChangeAmountInput] = useState('');
+  const [customerNameInput, setCustomerNameInput] = useState('');
+  const [customerPhoneInput, setCustomerPhoneInput] = useState('');
+  const [customerUpiInput, setCustomerUpiInput] = useState('');
   const [isProcessingChange, setIsProcessingChange] = useState(false);
   const [showQrInModal, setShowQrInModal] = useState(false);
 
   // Deposit Form State
-  const [depositAmountInput, setDepositAmountInput] = useState('830');
+  const [depositAmountInput, setDepositAmountInput] = useState('');
   const [depositMethod, setDepositMethod] = useState<'upi' | 'icici_cdm' | 'novopay' | 'airtel'>('upi');
   const [isProcessingDeposit, setIsProcessingDeposit] = useState(false);
 
@@ -138,14 +139,19 @@ export default function FloatingCashScreen() {
       const res = await fetch(`${BACKEND_URL}/api/delivery/rider/floating-cash`, {
         headers: {
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
       });
       if (res.ok) {
         const data = await res.json();
-        setCurrentBalance(data.currentBalance ?? 830);
-        setCashLimit(data.limit ?? 2500);
-        setAvailableLimit(data.availableLimit ?? 1670);
+        const bal = Number(data.currentBalance ?? 0);
+        const lim = Number(data.limit ?? 2500);
+        setCurrentBalance(bal);
+        setCashLimit(lim);
+        setAvailableLimit(Number(data.availableLimit ?? Math.max(0, lim - bal)));
+        setSettlementUpiId(data.settlementUpiId || null);
+        if (bal > 0) {
+          setDepositAmountInput((prev) => (prev ? prev : String(bal)));
+        }
         if (data.todaySummary) setTodaySummary(data.todaySummary);
         if (data.recentCodOrders) setRecentOrders(data.recentCodOrders);
         if (data.transactions) setTransactions(data.transactions);
@@ -301,15 +307,26 @@ export default function FloatingCashScreen() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const simulatedVpa = `${customerPhoneInput || '9876543210'}@okaxis`;
-        setCustomerUpiInput(simulatedVpa);
-        showAlertModal({
-          type: 'success_online',
-          title: 'QR Scanned 🎉',
-          subtitle: `Detected Customer UPI ID: ${simulatedVpa}`,
-          primaryButtonText: 'Use UPI ID',
-          onPrimaryPress: hideAlertModal,
-        });
+        const cleanDigits = customerPhoneInput.replace(/\D/g, '');
+        if (cleanDigits.length >= 10) {
+          const derivedVpa = `${cleanDigits.slice(-10)}@upi`;
+          setCustomerUpiInput(derivedVpa);
+          showAlertModal({
+            type: 'success_online',
+            title: 'QR Captured',
+            subtitle: `Auto-filled UPI ID from order contact: ${derivedVpa}. Please verify against the customer QR.`,
+            primaryButtonText: 'Use UPI ID',
+            onPrimaryPress: hideAlertModal,
+          });
+        } else {
+          showAlertModal({
+            type: 'info',
+            title: 'Enter Customer UPI ID',
+            subtitle: 'Please enter the exact UPI ID shown below the customer QR code.',
+            primaryButtonText: 'Okay',
+            onPrimaryPress: hideAlertModal,
+          });
+        }
       }
     } catch {
       showAlertModal({
@@ -343,10 +360,9 @@ export default function FloatingCashScreen() {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({
-          orderId: selectedOrder?.orderId || 'MQ-COD',
+          orderId: selectedOrder?.orderId || '',
           customerName: customerNameInput.trim() || 'Customer',
           customerPhone: customerPhoneInput.trim(),
           customerUpiId: customerUpiInput.trim() || `${customerPhoneInput.trim()}@upi`,
@@ -413,23 +429,54 @@ export default function FloatingCashScreen() {
       return;
     }
 
-    if (depositMethod === 'upi') {
-      const myquroUpi = `upi://pay?pa=myquro.settlement@icici&pn=MyQuro+Settlement&am=${amount}&cu=INR&tn=Rider+Cash+Deposit+${driverProfile?.name || 'Rider'}`;
-      try {
-        await Linking.openURL(myquroUpi);
-      } catch {
-        // Continue
-      }
-    }
-
     setIsProcessingDeposit(true);
     try {
+      if (depositMethod === 'upi') {
+        let upiLaunchUrl = settlementUpiId
+          ? `upi://pay?pa=${encodeURIComponent(settlementUpiId)}&pn=MyQuro+Settlement&am=${amount}&cu=INR&tn=${encodeURIComponent(`Rider Cash Deposit ${driverProfile?.name || 'Rider'}`)}`
+          : null;
+
+        if (!upiLaunchUrl) {
+          const gwRes = await fetch(`${BACKEND_URL}/api/delivery/rider/floating-cash/generate-gateway-order`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${sessionToken}`,
+            },
+            body: JSON.stringify({
+              amount,
+              purpose: `Rider Cash Deposit ${driverProfile?.id || ''}`,
+            }),
+          });
+          const gwData = await gwRes.json().catch(() => ({}));
+          if (!gwRes.ok) {
+            showAlertModal({
+              type: 'warning',
+              title: 'Gateway Not Configured',
+              subtitle: gwData.message || 'UPI settlement gateway is unavailable. Please deposit via retail hub.',
+              primaryButtonText: 'Okay',
+              onPrimaryPress: hideAlertModal,
+            });
+            setIsProcessingDeposit(false);
+            return;
+          }
+          upiLaunchUrl = gwData.upiIntentUrl || null;
+        }
+
+        if (upiLaunchUrl) {
+          try {
+            await Linking.openURL(upiLaunchUrl);
+          } catch {
+            // Continue so rider can confirm deposit reference
+          }
+        }
+      }
+
       const res = await fetch(`${BACKEND_URL}/api/delivery/rider/floating-cash/deposit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${sessionToken}`,
-          'Origin': 'http://localhost:3000',
         },
         body: JSON.stringify({
           amount,
@@ -944,7 +991,7 @@ export default function FloatingCashScreen() {
                     <Ionicons name="at" size={18} color="#F2CA50" style={{ marginLeft: 12 }} />
                     <TextInput
                       style={styles.upiTextInput}
-                      placeholder="Customer UPI ID (e.g. 9876543210@paytm)"
+                      placeholder="Customer UPI ID (e.g. name@upi)"
                       placeholderTextColor="#787878"
                       value={customerUpiInput}
                       onChangeText={setCustomerUpiInput}
@@ -1237,15 +1284,21 @@ export default function FloatingCashScreen() {
             <View style={styles.partnerDetailsCard}>
               <Text style={styles.partnerCardTitle}>MyQuro Virtual Account Number (VAN)</Text>
               <View style={styles.vanRow}>
-                <Text style={styles.vanNumberText}>MQRO{driverProfile?.phone?.slice(-10) || '9876543210'}</Text>
+                <Text style={styles.vanNumberText}>
+                  {driverProfile?.phone ? `MQRO${driverProfile.phone.replace(/\D/g, '').slice(-10)}` : (driverProfile?.id || 'Unassigned')}
+                </Text>
                 <TouchableOpacity
-                  onPress={() => showAlertModal({
-                    type: 'success_online',
-                    title: 'Copied to Clipboard 📋',
-                    subtitle: `Virtual Account Number MQRO${driverProfile?.phone?.slice(-10) || '9876543210'} copied successfully.`,
-                    primaryButtonText: 'Got It',
-                    onPrimaryPress: hideAlertModal,
-                  })}
+                  onPress={() => {
+                    const vanCode = driverProfile?.phone ? `MQRO${driverProfile.phone.replace(/\D/g, '').slice(-10)}` : (driverProfile?.id || '');
+                    if (!vanCode) return;
+                    showAlertModal({
+                      type: 'success_online',
+                      title: 'Copied to Clipboard 📋',
+                      subtitle: `Virtual Account Number ${vanCode} copied successfully.`,
+                      primaryButtonText: 'Got It',
+                      onPrimaryPress: hideAlertModal,
+                    });
+                  }}
                   style={styles.copyVanBtn}
                 >
                   <Ionicons name="copy-outline" size={14} color="#F2CA50" />
@@ -1300,12 +1353,12 @@ export default function FloatingCashScreen() {
             {/* Rider ID Barcode Box */}
             <View style={styles.qrDisplayBox}>
               <QRCode
-                value={`MYQURO_RIDER_${driverProfile?.id || 'RIDER101'}_${driverProfile?.phone || '9876543210'}`}
+                value={`MYQURO_RIDER_${driverProfile?.id || 'UNASSIGNED'}_${driverProfile?.phone || ''}`}
                 size={130}
                 color="#000000"
                 backgroundColor="#FFFFFF"
               />
-              <Text style={styles.riderBarcodeIdText}>Rider ID: MQ-RIDER-{driverProfile?.id?.slice(-4) || '8192'}</Text>
+              <Text style={styles.riderBarcodeIdText}>Rider ID: {driverProfile?.deId || (driverProfile?.id ? `MQ-RIDER-${driverProfile.id.slice(-6).toUpperCase()}` : 'Not Linked')}</Text>
               <Text style={styles.qrInstructionText}>Show this QR code at any Novopay / Airtel retail shop to deposit cash.</Text>
             </View>
 
