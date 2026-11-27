@@ -47,7 +47,7 @@ import {
   Banknote,
   AlertTriangle,
 } from 'lucide-react-native';
-import { checkCustomerServiceability, MAX_DELIVERY_RADIUS_KM } from '../utils/serviceability';
+import { checkCustomerServiceability, calculateOrderFees, MAX_DELIVERY_RADIUS_KM } from '../utils/serviceability';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -655,12 +655,27 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
 
   const activeCoupon = parentAppliedCoupon || internalCoupon;
   const couponDiscount = activeCoupon ? Math.min(activeCoupon.discount, itemTotal) : 0;
-  const expressFee = selectedDeliveryType === 'express' ? 19 : 0;
-  const deliveryFee = 0; // Free with MyQURO
+  const {
+    deliveryFee,
+    platformFee,
+    expressFee,
+  } = useMemo(
+    () =>
+      calculateOrderFees({
+        itemTotalRupees: itemTotal,
+        distanceKm: serviceability?.distanceKm ?? currentRestaurant?.distance ?? null,
+        deliveryType: selectedDeliveryType,
+      }),
+    [itemTotal, serviceability?.distanceKm, currentRestaurant?.distance, selectedDeliveryType]
+  );
   const taxes = Math.round(itemTotal * 0.05); // 5% GST
-  const finalTotal = Math.max(0, itemTotal - couponDiscount + deliveryFee + expressFee + selectedTip + taxes);
-  const originalTotal = itemTotal + 35 + (selectedDeliveryType === 'express' ? 29 : 0) + taxes;
-  const totalSavings = Math.max(55, originalTotal - finalTotal);
+  const finalTotal = Math.max(
+    0,
+    itemTotal - couponDiscount + deliveryFee + platformFee + expressFee + selectedTip + taxes
+  );
+  const originalTotal =
+    itemTotal + 35 + platformFee + (selectedDeliveryType === 'express' ? 29 : 0) + taxes;
+  const totalSavings = Math.max(couponDiscount + Math.max(0, 35 - deliveryFee), originalTotal - finalTotal);
 
   // Stepper handlers synchronized with ViewModel
   const handleIncreaseQty = (index: number) => {
@@ -920,7 +935,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
               activeOpacity={0.8}
               onPress={() => {
                 if (Platform.OS === 'android') {
-                  ToastAndroid.show('MyQURO: Free delivery on all orders above ₹99', ToastAndroid.SHORT);
+                  ToastAndroid.show('MyQURO: Free delivery on orders above ₹299 (< 3 km)', ToastAndroid.SHORT);
                 }
               }}
             >
@@ -1360,7 +1375,9 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
                 <Text style={styles.toPayStrikeText}>₹{originalTotal}</Text>
                 <Text style={styles.toPayFinalText}>₹{finalTotal}</Text>
               </View>
-              <Text style={styles.toPaySavingsText}>₹{totalSavings} saved on the total!</Text>
+              <Text style={styles.toPaySavingsText}>
+                {totalSavings > 0 ? `₹${totalSavings} saved on the total!` : 'Transparent pricing'}
+              </Text>
             </View>
 
             {/* Right: Down Chevron / Toggle */}
@@ -1388,12 +1405,24 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
                 </View>
               )}
               <View style={styles.billDetailRow}>
-                <Text style={styles.billDetailLabel}>Delivery Partner Fee</Text>
-                <View style={styles.freeDeliveryRow}>
-                  <Text style={styles.freeDeliveryStrike}>₹35</Text>
-                  <Text style={styles.freeDeliveryGreen}>FREE</Text>
-                </View>
+                <Text style={styles.billDetailLabel}>
+                  Delivery Partner Fee{serviceability?.distanceKm ? ` (${serviceability.distanceKm.toFixed(1)} km)` : ''}
+                </Text>
+                {deliveryFee === 0 ? (
+                  <View style={styles.freeDeliveryRow}>
+                    <Text style={styles.freeDeliveryStrike}>₹35</Text>
+                    <Text style={styles.freeDeliveryGreen}>FREE</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.billDetailValue}>₹{deliveryFee}</Text>
+                )}
               </View>
+              {platformFee > 0 && (
+                <View style={styles.billDetailRow}>
+                  <Text style={styles.billDetailLabel}>Platform Fee</Text>
+                  <Text style={styles.billDetailValue}>₹{platformFee}</Text>
+                </View>
+              )}
               {expressFee > 0 && (
                 <View style={styles.billDetailRow}>
                   <Text style={styles.billDetailLabel}>⚡ Express Delivery</Text>

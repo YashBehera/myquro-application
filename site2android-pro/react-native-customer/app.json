@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.aistudio.myquro.pkfxt",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0B0B0B"
@@ -22,6 +23,7 @@
         "ACCESS_COARSE_LOCATION",
         "CAMERA",
         "VIBRATE",
+        "POST_NOTIFICATIONS",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION"
       ]
@@ -43,7 +45,8 @@
       ],
       "expo-font",
       "expo-secure-store",
-      "expo-video"
+      "expo-video",
+      "expo-notifications"
     ],
     "extra": {
       "eas": {

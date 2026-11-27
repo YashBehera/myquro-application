@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import { User } from '../types';
 import { secureStorage } from '../utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  registerMerchantPushToken,
+  unregisterMerchantPushToken,
+} from '../services/pushNotifications';
 
 interface AuthState {
   user: User | null;
@@ -29,6 +33,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   setToken: async (token) => {
     if (token) {
       await secureStorage.setItem('auth_token', token);
+      void registerMerchantPushToken();
     } else {
       await secureStorage.removeItem('auth_token');
     }
@@ -36,6 +41,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    await unregisterMerchantPushToken();
     await secureStorage.removeItem('auth_token');
     try {
       await AsyncStorage.multiRemove([

@@ -13,6 +13,10 @@ import {
   isValidCoordinatePair,
   MAX_DELIVERY_RADIUS_KM,
 } from "../lib/serviceability.js";
+import {
+  toRupeesFromOrderPaise,
+  parseCustomerExtraFeesFromNotes,
+} from "../lib/dispatch.js";
 import { reservations } from "../db/schema/reservations.js";
 import { tables } from "../db/schema/tables.js";
 import { tableSession } from "../db/schema/table-session.js";
@@ -1113,6 +1117,7 @@ router.get("/:id/settlements", requireAuth, async (req: any, res) => {
         discount: orders.discount,
         gst: orders.gst,
         grandTotal: orders.grandTotal,
+        notes: orders.notes,
         status: orders.status,
         createdAt: orders.createdAt,
       })
@@ -1205,11 +1210,11 @@ router.get("/:id/settlements", requireAuth, async (req: any, res) => {
         });
       }
       const bucket = weekBuckets.get(key)!;
-      const grandTotalRupees = Number(o.grandTotal ?? o.subtotal ?? 0);
-      const discountRupees = Number(o.discount || 0);
-      const deliveryRupees = Math.round(deliveryFeeByOrderId.get(o.id) || 0);
-      bucket.grossSales += Math.max(0, grandTotalRupees - deliveryRupees + discountRupees);
-      bucket.customerDeliveryFee += deliveryRupees;
+      const grandTotalRupees = toRupeesFromOrderPaise(o.grandTotal ?? o.subtotal ?? 0);
+      const discountRupees = toRupeesFromOrderPaise(o.discount || 0);
+      const customerExtraFees = parseCustomerExtraFeesFromNotes(o.notes);
+      bucket.grossSales += Math.max(0, grandTotalRupees - customerExtraFees + discountRupees);
+      bucket.customerDeliveryFee += customerExtraFees;
       bucket.discountsSubsidized += discountRupees;
       bucket.orderCount += 1;
     }
@@ -1286,7 +1291,7 @@ router.get("/:id/settlements", requireAuth, async (req: any, res) => {
           const t = new Date(o.createdAt).getTime();
           return t >= start.getTime() && t < end.getTime();
         })
-        .reduce((acc, o) => acc + Number(o.grandTotal ?? o.subtotal ?? 0), 0);
+        .reduce((acc, o) => acc + toRupeesFromOrderPaise(o.grandTotal ?? o.subtotal ?? 0), 0);
 
     const thisMonthTotal = sumMonthSales(startOfThisMonth, new Date(now.getTime() + 1000));
     const lastMonthTotal = sumMonthSales(startOfLastMonth, startOfThisMonth);

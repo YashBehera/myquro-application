@@ -38,6 +38,10 @@ import { THEME, COLORS } from './src/theme/Theme';
 import { moderateScale, scale, isTablet, isSmallDevice, SCREEN_WIDTH } from './src/utils/responsive';
 import { BACKEND_URL } from './src/config';
 import { initBackendKeepAlive } from './src/utils/backendKeepAlive';
+import {
+  ensureCustomerNotificationChannels,
+  subscribeCustomerNotifications,
+} from './src/services/pushNotifications';
 
 // Screen Imports
 import { SplashScreen } from './src/screens/SplashScreen';
@@ -77,7 +81,7 @@ const navReorderImg  = require('./src/assets/home/figma/imgImage1.png');
 
 const MainAppContent: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { isDarkMode, authState, cartItems, allRestaurants, syncCartItems } = useViewModel();
+  const { isDarkMode, authState, cartItems, allRestaurants, syncCartItems, refreshUserOrders } = useViewModel();
   const theme = isDarkMode ? THEME.dark : THEME.light;
 
   const [isAppReady, setIsAppReady] = useState(false);
@@ -227,6 +231,37 @@ const MainAppContent: React.FC = () => {
       activeOrderId: orderId,
     });
   };
+
+  const pendingPushOrderIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    void ensureCustomerNotificationChannels();
+    return subscribeCustomerNotifications({
+      onForegroundUpdate: () => {
+        void refreshUserOrders();
+      },
+      onNotificationTap: (data) => {
+        if (data?.orderId) {
+          pendingPushOrderIdRef.current = String(data.orderId);
+          void refreshUserOrders();
+        }
+      },
+    });
+  }, []);
+
+  useEffect(() => {
+    if (
+      pendingPushOrderIdRef.current &&
+      isAppReady &&
+      !showSplash &&
+      hasSeenOnboarding &&
+      authState.type === 'Authenticated'
+    ) {
+      const targetOrderId = pendingPushOrderIdRef.current;
+      pendingPushOrderIdRef.current = null;
+      navigateToTracking(targetOrderId);
+    }
+  }, [isAppReady, showSplash, hasSeenOnboarding, authState.type]);
 
   const navigateToSearch = (query?: string) => {
     pushScreen('search', {

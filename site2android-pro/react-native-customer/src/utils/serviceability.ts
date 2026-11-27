@@ -1,4 +1,66 @@
-export const MAX_DELIVERY_RADIUS_KM = 15;
+export const MAX_DELIVERY_RADIUS_KM = 10;
+
+export const PLATFORM_FEE_RUPEES = 5;
+export const FREE_DELIVERY_MIN_ORDER_RUPEES = 299;
+export const FREE_DELIVERY_MAX_DISTANCE_KM = 3;
+export const BASE_DELIVERY_FEE_RUPEES = 12;
+export const MID_RANGE_BASE_FEE_RUPEES = 10;
+export const MID_RANGE_KM_FEE_RUPEES = 6;
+export const MID_RANGE_MAX_DISTANCE_KM = 6;
+export const LONG_RANGE_BASE_FEE_RUPEES = 28;
+export const LONG_RANGE_KM_FEE_RUPEES = 7;
+export const MAX_DELIVERY_FEE_RUPEES = 56;
+export const EXPRESS_DELIVERY_FEE_RUPEES = 19;
+
+export interface OrderFeeBreakdown {
+  deliveryFee: number;
+  platformFee: number;
+  expressFee: number;
+}
+
+/**
+ * Computes transparent Stage-1 customer delivery, platform, and express fees (in whole INR)
+ * aligned identically with the backend checkout calculation (FREE when food > ₹299 and distance < 3 km).
+ */
+export function calculateOrderFees(params: {
+  itemTotalRupees: number;
+  distanceKm?: number | null;
+  deliveryType?: string | null;
+}): OrderFeeBreakdown {
+  const itemTotal = Math.max(0, Number(params.itemTotalRupees) || 0);
+  const expressFee = params.deliveryType === 'express' ? EXPRESS_DELIVERY_FEE_RUPEES : 0;
+
+  if (itemTotal <= 0) {
+    return { deliveryFee: 0, platformFee: 0, expressFee: 0 };
+  }
+
+  const dist =
+    typeof params.distanceKm === 'number' && Number.isFinite(params.distanceKm) && params.distanceKm >= 0
+      ? params.distanceKm
+      : null;
+
+  let deliveryFee = 0;
+  if (dist !== null && dist >= FREE_DELIVERY_MAX_DISTANCE_KM) {
+    if (dist <= MID_RANGE_MAX_DISTANCE_KM) {
+      const midKm = Math.max(1, Math.ceil(dist - FREE_DELIVERY_MAX_DISTANCE_KM));
+      deliveryFee = MID_RANGE_BASE_FEE_RUPEES + midKm * MID_RANGE_KM_FEE_RUPEES;
+    } else {
+      const longKm = Math.ceil(dist - MID_RANGE_MAX_DISTANCE_KM);
+      deliveryFee = Math.min(
+        MAX_DELIVERY_FEE_RUPEES,
+        LONG_RANGE_BASE_FEE_RUPEES + longKm * LONG_RANGE_KM_FEE_RUPEES
+      );
+    }
+  } else if (itemTotal <= FREE_DELIVERY_MIN_ORDER_RUPEES) {
+    deliveryFee = BASE_DELIVERY_FEE_RUPEES;
+  }
+
+  return {
+    deliveryFee,
+    platformFee: PLATFORM_FEE_RUPEES,
+    expressFee,
+  };
+}
 
 export function isValidCoordPair(lat: any, lng: any): boolean {
   const nLat = Number(lat);

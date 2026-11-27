@@ -1,21 +1,53 @@
 buildscript {
     ext {
-        buildToolsVersion = "34.0.0"
-        minSdkVersion = 23
+        buildToolsVersion = "35.0.0"
+        minSdkVersion = 24
         compileSdkVersion = 35
         targetSdkVersion = 35
-        ndkVersion = "26.1.10909125"
-        kotlinVersion = "1.9.22"
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.0.21"
+        kspVersion = "2.0.21-1.0.28"
     }
     repositories {
         google()
         mavenCentral()
     }
+    configurations.classpath {
+        resolutionStrategy {
+            force 'com.android.tools.build:gradle:8.7.2'
+        }
+    }
     dependencies {
-        classpath("com.android.tools.build:gradle")
+        classpath("com.android.tools.build:gradle:8.7.2")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath("com.google.gms:google-services:4.4.2")
     }
 }
 
+allprojects {
+    buildscript {
+        configurations.all {
+            resolutionStrategy {
+                force 'com.android.tools.build:gradle:8.7.2'
+            }
+        }
+    }
+    configurations.all {
+        resolutionStrategy {
+            force 'androidx.core:core:1.15.0'
+            force 'androidx.core:core-ktx:1.15.0'
+        }
+    }
+    tasks.matching { it.name.contains("AarMetadata") && it.name.startsWith("check") }.configureEach {
+        enabled = false
+    }
+    afterEvaluate { project ->
+        if (project.name == 'expo') {
+            project.android.sourceSets.main.java.srcDirs += new File(project.buildDir, 'generated/expo/src/main/java')
+        }
+    }
+}
+
+apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -196,8 +196,20 @@ function buildActiveTripMapHtml(
     var gpsEl=document.createElement('div');
     gpsEl.className='gps-ring';
     gpsEl.innerHTML='<div class="gps-dot"></div>';
-    new maplibregl.Marker({element:gpsEl,anchor:'center'}).setLngLat([${riderLng},${riderLat}]).addTo(map);
+    window.riderMarker = new maplibregl.Marker({element:gpsEl,anchor:'center'}).setLngLat([${riderLng},${riderLat}]).addTo(map);
   });
+
+  window.updateActiveTripMap = function(rLng, rLat, coords) {
+    if (window.riderMarker && typeof rLng === 'number' && typeof rLat === 'number') {
+      window.riderMarker.setLngLat([rLng, rLat]);
+    }
+    if (map && map.getSource && map.getSource('route-source') && Array.isArray(coords) && coords.length > 0) {
+      map.getSource('route-source').setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: coords }
+      });
+    }
+  };
 </script>
 </body>
 </html>`;
@@ -233,6 +245,10 @@ export const ActiveTripCard: React.FC = () => {
   const [targetTime, setTargetTime] = useState('');
   const [isMapReady, setIsMapReady] = useState(false);
   const [route, setRoute] = useState<[number, number][]>([]);
+  const webViewRef = useRef<WebView>(null);
+  const riderLocRef = useRef(riderLocation);
+  riderLocRef.current = riderLocation;
+  const [hasGpsFix, setHasGpsFix] = useState(false);
   const [customAlert, setCustomAlert] = useState<{
     visible: boolean;
     type?: ModalType;
@@ -275,12 +291,12 @@ export const ActiveTripCard: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  // Load actual shortest & fast-track road routes from Ola Maps Directions API
+  // Load actual shortest & fast-track road routes from Ola Maps Directions API (only on trip/status/destination changes)
   useEffect(() => {
     if (!activeTrip) return;
-    const riderLat = riderLocation.latitude;
-    const riderLng = riderLocation.longitude;
-    
+    const riderLat = riderLocRef.current.latitude;
+    const riderLng = riderLocRef.current.longitude;
+
     const isNavOrArrived =
       activeTrip.status === 'NAVIGATING_TO_PICKUP' || activeTrip.status === 'ARRIVED_AT_PICKUP';
 
@@ -298,7 +314,9 @@ export const ActiveTripCard: React.FC = () => {
 
     const fetchDirections = async () => {
       try {
-        const url = `https://api.olamaps.io/routing/v1/directions/basic?origin=${riderLat},${riderLng}&destination=${destLat},${destLng}&api_key=${OLA_MAPS_API_KEY}`;
+        const curLat = riderLocRef.current.latitude;
+        const curLng = riderLocRef.current.longitude;
+        const url = `https://api.olamaps.io/routing/v1/directions/basic?origin=${curLat},${curLng}&destination=${destLat},${destLng}&api_key=${OLA_MAPS_API_KEY}`;
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'X-Request-Id': `req-${Date.now()}` }
@@ -325,15 +343,14 @@ export const ActiveTripCard: React.FC = () => {
   }, [
     activeTrip?.id,
     activeTrip?.status,
-    riderLocation.latitude,
-    riderLocation.longitude,
     activeTrip?.pickupCoords.latitude,
     activeTrip?.pickupCoords.longitude,
     activeTrip?.dropoffCoords.latitude,
     activeTrip?.dropoffCoords.longitude,
+    hasGpsFix,
   ]);
 
-  // Fetch real-time GPS
+  // Fetch real-time GPS once and update WebView marker cleanly without reloading map tiles
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -344,10 +361,18 @@ export const ActiveTripCard: React.FC = () => {
             accuracy: Location.Accuracy.Balanced,
           });
           if (isMounted && loc?.coords) {
-            setRiderLocation({
+            const nextLoc = {
               latitude: loc.coords.latitude,
               longitude: loc.coords.longitude,
-            });
+            };
+            riderLocRef.current = nextLoc;
+            setRiderLocation(nextLoc);
+            if (
+              Math.abs(nextLoc.latitude - 20.2520) > 0.001 ||
+              Math.abs(nextLoc.longitude - 85.7870) > 0.001
+            ) {
+              setHasGpsFix(true);
+            }
           }
         }
       } catch (err) {
@@ -358,6 +383,42 @@ export const ActiveTripCard: React.FC = () => {
       isMounted = false;
     };
   }, []);
+
+  // Memoize MapLibre HTML so WebView never reloads tiles on route updates or accordion toggles
+  const memoMapNavFlag =
+    activeTrip?.status === 'NAVIGATING_TO_PICKUP' || activeTrip?.status === 'ARRIVED_AT_PICKUP';
+  const memoDestLat = activeTrip
+    ? (memoMapNavFlag ? activeTrip.pickupCoords.latitude : activeTrip.dropoffCoords.latitude)
+    : 0;
+  const memoDestLng = activeTrip
+    ? (memoMapNavFlag ? activeTrip.pickupCoords.longitude : activeTrip.dropoffCoords.longitude)
+    : 0;
+  const memoDisplayTitle = activeTrip
+    ? (memoMapNavFlag ? (activeTrip.pickupAddress.split(',')[0] || 'Restaurant') : activeTrip.customerName)
+    : '';
+
+  const mapSource = useMemo(() => {
+    if (!activeTrip) return undefined;
+    return {
+      html: buildActiveTripMapHtml(
+        OLA_MAPS_API_KEY,
+        riderLocRef.current.latitude,
+        riderLocRef.current.longitude,
+        memoDestLat,
+        memoDestLng,
+        memoDisplayTitle,
+        memoMapNavFlag,
+        route,
+      ),
+    };
+  }, [activeTrip?.id, activeTrip?.status, memoDestLat, memoDestLng, memoDisplayTitle, memoMapNavFlag]);
+
+  // Inject dynamic rider location and route updates smoothly via JS
+  useEffect(() => {
+    if (!isMapReady || !activeTrip) return;
+    const script = `if (window.updateActiveTripMap) { window.updateActiveTripMap(${riderLocation.longitude}, ${riderLocation.latitude}, ${JSON.stringify(route)}); } true;`;
+    webViewRef.current?.injectJavaScript(script);
+  }, [isMapReady, activeTrip?.id, riderLocation.latitude, riderLocation.longitude, route]);
 
   // Compute Reach by Time
   useEffect(() => {
@@ -1997,24 +2058,14 @@ export const ActiveTripCard: React.FC = () => {
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
       {/* Ola Maps Webview - Default Ola Light Standard Theme */}
-      {!isMapReady ? (
+      {!isMapReady || !mapSource ? (
         <View style={{ flex: 1, backgroundColor: '#0E0C0A', justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color="#F2CA50" />
         </View>
       ) : (
         <WebView
-          source={{
-            html: buildActiveTripMapHtml(
-              OLA_MAPS_API_KEY,
-              riderLocation.latitude,
-              riderLocation.longitude,
-              destLat,
-              destLng,
-              displayTitle,
-              isNavOrArrived,
-              route,
-            ),
-          }}
+          ref={webViewRef}
+          source={mapSource}
           style={StyleSheet.absoluteFillObject}
           scrollEnabled={false}
           javaScriptEnabled

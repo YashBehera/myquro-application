@@ -624,7 +624,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
       // 2. Fetch from Backend
       try {
         const controller = new AbortController();
-        const tid = setTimeout(() => controller.abort(), 4000);
+        const tid = setTimeout(() => controller.abort(), 10000);
         const res = await fetch(`${BACKEND_URL}/api/menus/${restaurantId}/menu`, { signal: controller.signal });
         clearTimeout(tid);
 
@@ -1176,7 +1176,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
           <View style={styles.oneFreeDeliveryRow}>
             <View style={styles.oneFreeLeft}>
               <Image source={imgImage16} style={styles.scooterIcon} />
-              <Text style={styles.oneFreeText}>Free delivery on orders above ₹99</Text>
+              <Text style={styles.oneFreeText}>Free delivery on orders above ₹299 (&lt; 3 km)</Text>
             </View>
 
             <View style={styles.oneGoldBadge}>
@@ -1388,7 +1388,7 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
 
               <View style={styles.freeDeliveryPill99}>
                 <Image source={contImg20} style={styles.ticketIcon} />
-                <Text style={styles.freeDeliveryText99}>Free delivery above ₹49</Text>
+                <Text style={styles.freeDeliveryText99}>Free delivery above ₹299 (&lt; 3 km)</Text>
               </View>
 
               {is99StoreExpanded && (

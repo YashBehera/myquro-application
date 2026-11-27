@@ -168,6 +168,7 @@ export const HomeScreen = ({
     foodItems = [],
     userOrders = [],
     refreshUserOrders,
+    refreshData,
   } = useViewModel();
 
   const [showLocationSheet, setShowLocationSheet] = useState(false);
@@ -301,13 +302,17 @@ export const HomeScreen = ({
     [favouriteRestaurantsList]
   );
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (refreshUserOrders) {
-      refreshUserOrders().catch(() => { });
+    try {
+      await Promise.allSettled([
+        refreshData ? refreshData() : Promise.resolve(),
+        refreshUserOrders ? refreshUserOrders() : Promise.resolve(),
+      ]);
+    } finally {
+      setRefreshing(false);
     }
-    setTimeout(() => setRefreshing(false), 600);
-  }, [refreshUserOrders]);
+  }, [refreshData, refreshUserOrders]);
 
   const onSelectRestaurant = (id: string, targetDishName?: string) => {
     if (onNavigateToRestaurant) {

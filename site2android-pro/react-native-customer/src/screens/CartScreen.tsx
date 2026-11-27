@@ -20,6 +20,7 @@ import { THEME, COLORS } from '../theme/Theme';
 import { BACKEND_URL } from '../config';
 import {
   checkCustomerServiceability,
+  calculateOrderFees,
   MAX_DELIVERY_RADIUS_KM,
 } from '../utils/serviceability';
 import {
@@ -181,7 +182,14 @@ export const CartScreen: React.FC<CartScreenProps> = ({
   }, [cartItems]);
 
   const packagingFee = cartItems.length > 0 ? 20 : 0;
-  const deliveryFee = cartItems.length > 0 ? 40 : 0; // FREE in UI
+  const { deliveryFee, platformFee } = useMemo(
+    () =>
+      calculateOrderFees({
+        itemTotalRupees: itemTotal,
+        distanceKm: serviceability?.distanceKm ?? cartRestaurant?.distance ?? null,
+      }),
+    [itemTotal, serviceability?.distanceKm, cartRestaurant?.distance]
+  );
 
   const discountAmount = useMemo(() => {
     if (!appliedOffer || itemTotal === 0) return 0;
@@ -195,13 +203,12 @@ export const CartScreen: React.FC<CartScreenProps> = ({
 
   const toPay = useMemo(() => {
     if (cartItems.length === 0) return 0;
-    // Deliver fee is free in UI, so grand total = itemTotal + packagingFee - discountAmount
-    const total = itemTotal + packagingFee - discountAmount;
+    const total = itemTotal + packagingFee + deliveryFee + platformFee - discountAmount;
     return Math.max(total, 0);
-  }, [cartItems, itemTotal, packagingFee, discountAmount]);
+  }, [cartItems, itemTotal, packagingFee, deliveryFee, platformFee, discountAmount]);
 
   const totalSavings = useMemo(() => {
-    return discountAmount + deliveryFee; // Discount + Saved Delivery Fee
+    return discountAmount + Math.max(0, 40 - deliveryFee);
   }, [discountAmount, deliveryFee]);
 
   const amountNeededForPromo = useMemo(() => {
@@ -555,11 +562,22 @@ export const CartScreen: React.FC<CartScreenProps> = ({
           </View>
 
           <View style={styles.billRow}>
-            <Text style={styles.billLabel}>Delivery Fee</Text>
-            <View style={styles.deliveryFeeRow}>
-              <Text style={styles.deliveryFeeCrossed}>₹40</Text>
-              <Text style={styles.deliveryFeeFree}>FREE</Text>
-            </View>
+            <Text style={styles.billLabel}>
+              Delivery Fee{serviceability?.distanceKm ? ` (${serviceability.distanceKm.toFixed(1)} km)` : ''}
+            </Text>
+            {deliveryFee === 0 ? (
+              <View style={styles.deliveryFeeRow}>
+                <Text style={styles.deliveryFeeCrossed}>₹40</Text>
+                <Text style={styles.deliveryFeeFree}>FREE</Text>
+              </View>
+            ) : (
+              <Text style={[styles.billValue, isDarkMode && styles.textWhite]}>₹{deliveryFee}</Text>
+            )}
+          </View>
+
+          <View style={styles.billRow}>
+            <Text style={styles.billLabel}>Platform Fee</Text>
+            <Text style={[styles.billValue, isDarkMode && styles.textWhite]}>₹{platformFee}</Text>
           </View>
 
           <View style={styles.billRow}>
@@ -714,12 +732,20 @@ export const CartScreen: React.FC<CartScreenProps> = ({
                 <Text style={[styles.billDetailVal, isDarkMode && styles.textWhite]}>₹{itemTotal}</Text>
               </View>
               <View style={styles.billDetailRow}>
-                <Text style={styles.billDetailLabel}>Standard Delivery Fee</Text>
-                <Text style={[styles.billDetailVal, isDarkMode && styles.textWhite]}>₹40</Text>
+                <Text style={styles.billDetailLabel}>Delivery Fee</Text>
+                <Text style={deliveryFee === 0 ? styles.billDetailFree : [styles.billDetailVal, isDarkMode && styles.textWhite]}>
+                  {deliveryFee === 0 ? 'FREE' : `₹${deliveryFee}`}
+                </Text>
               </View>
+              {deliveryFee === 0 && (
+                <View style={styles.billDetailRow}>
+                  <Text style={styles.billDetailLabel}>MyQURO Delivery Savings</Text>
+                  <Text style={styles.billDetailFree}>-₹40</Text>
+                </View>
+              )}
               <View style={styles.billDetailRow}>
-                <Text style={styles.billDetailLabel}>MyQURO Delivery Savings</Text>
-                <Text style={styles.billDetailFree}>-₹40</Text>
+                <Text style={styles.billDetailLabel}>Platform Fee</Text>
+                <Text style={[styles.billDetailVal, isDarkMode && styles.textWhite]}>₹{platformFee}</Text>
               </View>
               <View style={styles.billDetailRow}>
                 <Text style={styles.billDetailLabel}>Restaurant Packaging Charges</Text>

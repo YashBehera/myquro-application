@@ -19,6 +19,7 @@ import { requireAuth } from "../auth/requireAuth.js";
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
+import { pushOrderStatusToCustomer } from "../lib/pushNotifications.js";
 import { calculateSwiggyETA, seedRidersIfEmpty, startDeliverySimulation, haversineDistance } from "../lib/delivery-simulation.js";
 import {
   isValidCoordinatePair,
@@ -26,6 +27,13 @@ import {
   MAX_DELIVERY_RADIUS_KM,
   MAX_RIDER_PICKUP_RADIUS_KM,
 } from "../lib/serviceability.js";
+import {
+  tryCreateDeliveryOffer,
+  getUnassignedDispatchCandidates,
+  invalidateDispatchCache,
+  toRupeesFromOrderPaise,
+  calculateRiderPayout,
+} from "../lib/dispatch.js";
 import { applyRiderPenalty, PENALTY_CONFIG } from "../services/penaltyEngine.js";
 
 const router = Router();
@@ -505,9 +513,9 @@ router.post("/assign", requireAuth, async (req: any, res) => {
     const etaMinutes = calculateSwiggyETA(restLat, restLng, custLat, custLng, 1);
 
     const distanceKm = Number(haversineDistance(restLat, restLng, custLat, custLng).toFixed(2));
-    if (distanceKm > MAX_DELIVERY_RADIUS_KM * 2) {
+    if (distanceKm > MAX_DELIVERY_RADIUS_KM) {
       return res.status(422).json({
-        message: `Destination is ${distanceKm.toFixed(1)} km away and exceeds dispatch range.`,
+        message: `Destination is ${distanceKm.toFixed(1)} km away and exceeds dispatch range (max ${MAX_DELIVERY_RADIUS_KM} km).`,
       });
     }
 
@@ -526,15 +534,14 @@ router.post("/assign", requireAuth, async (req: any, res) => {
     }
 
     const rider = ridersWithDist[0].rider;
-    const deliveryFee = distanceKm * 12;
+    const deliveryFee = calculateRiderPayout(distanceKm);
 
-    // 5. Create order_deliveries tracking record with status "offered"
+    // 5. Atomically create order_deliveries tracking record with status "offered"
     const deliveryId = `del_${nanoid(10)}`;
-    await db.insert(orderDeliveries).values({
+    const offerResult = await tryCreateDeliveryOffer({
       id: deliveryId,
       orderId,
       riderId: rider.id,
-      status: "offered",
       etaMinutes,
       distanceKm,
       deliveryFee,
@@ -547,6 +554,12 @@ router.post("/assign", requireAuth, async (req: any, res) => {
       restaurantLat: restLat,
       restaurantLng: restLng,
     });
+
+    if (!offerResult.created) {
+      return res.status(409).json({
+        message: "A delivery offer already exists or was claimed for this order.",
+      });
+    }
 
     // 6. Update order timestamp (preserve placed status until restaurant explicitly accepts and sets prep time)
     await db
@@ -867,28 +880,9 @@ router.get("/offers", requireAuth, async (req: any, res) => {
       }
     }
 
-    // 2. If rider is online ("available"), check for any unassigned delivery orders created in the last 2 hours
-    // ONLY assign orders that have been accepted by the restaurant (status is 'preparing' or 'ready')
+    // 2. Check cached unassigned preparing/ready delivery orders (2s TTL + batched coords, then atomic offer claim)
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    const unassignedOrders = await db
-      .select({
-        id: orders.id,
-        restaurantId: orders.restaurantId,
-        notes: orders.notes,
-        grandTotal: orders.grandTotal,
-        placedByUserId: orders.placedByUserId,
-        createdAt: orders.createdAt,
-      })
-      .from(orders)
-      .leftJoin(orderDeliveries, eq(orders.id, orderDeliveries.orderId))
-      .where(
-        and(
-          inArray(orders.status, ["preparing", "ready"]),
-          sql`${orders.tableId} IS NULL`,
-          sql`(${orderDeliveries.id} IS NULL OR (${orderDeliveries.status} = 'offered' AND ${orderDeliveries.riderId} = ${user.id}))`,
-          sql`${orders.createdAt} >= ${twoHoursAgo}`
-        )
-      );
+    const unassignedOrders = await getUnassignedDispatchCandidates(2 * 60 * 60 * 1000);
 
     if (unassignedOrders.length > 0) {
       for (const order of unassignedOrders) {
@@ -897,71 +891,60 @@ router.get("/offers", requireAuth, async (req: any, res) => {
           continue;
         }
 
-        const existingDel = await db
-          .select()
-          .from(orderDeliveries)
-          .where(eq(orderDeliveries.orderId, order.id))
-          .limit(1);
+        const parsedCoords = parseDeliveryCoordinates(order.notes);
+        if (!isValidCoordinatePair(parsedCoords.latitude, parsedCoords.longitude)) {
+          continue;
+        }
+        const latitude = Number(parsedCoords.latitude);
+        const longitude = Number(parsedCoords.longitude);
 
-        if (existingDel.length === 0) {
-          const parsedCoords = parseDeliveryCoordinates(order.notes);
-          if (!isValidCoordinatePair(parsedCoords.latitude, parsedCoords.longitude)) {
+        if (!isValidCoordinatePair(order.restaurantLat, order.restaurantLng)) {
+          continue;
+        }
+        const restLat = Number(order.restaurantLat);
+        const restLng = Number(order.restaurantLng);
+
+        // Enforce pickup proximity if rider has valid GPS
+        if (isValidCoordinatePair(rider.latitude, rider.longitude)) {
+          const pickupDist = haversineDistance(
+            Number(rider.latitude),
+            Number(rider.longitude),
+            restLat,
+            restLng
+          );
+          if (pickupDist > MAX_RIDER_PICKUP_RADIUS_KM) {
             continue;
           }
-          const latitude = Number(parsedCoords.latitude);
-          const longitude = Number(parsedCoords.longitude);
+        }
 
-          // Fetch restaurant details with strict valid coordinates
-          const restList = await db.select().from(restaurants).where(eq(restaurants.id, order.restaurantId)).limit(1);
-          const restaurant = restList[0];
-          if (!restaurant || !isValidCoordinatePair(restaurant.latitude, restaurant.longitude)) {
-            continue;
-          }
-          const restLat = Number(restaurant.latitude);
-          const restLng = Number(restaurant.longitude);
+        const distanceKm = Number(haversineDistance(restLat, restLng, latitude, longitude).toFixed(2));
+        if (distanceKm > MAX_DELIVERY_RADIUS_KM) {
+          continue;
+        }
 
-          // Enforce pickup proximity if rider has valid GPS
-          if (isValidCoordinatePair(rider.latitude, rider.longitude)) {
-            const pickupDist = haversineDistance(
-              Number(rider.latitude),
-              Number(rider.longitude),
-              restLat,
-              restLng
-            );
-            if (pickupDist > MAX_RIDER_PICKUP_RADIUS_KM) {
-              continue;
-            }
-          }
+        const deliveryFee = calculateRiderPayout(distanceKm);
+        const etaMinutes = calculateSwiggyETA(restLat, restLng, latitude, longitude, 1);
+        const deliveryId = `del_${nanoid(10)}`;
 
-          const distanceKm = Number(haversineDistance(restLat, restLng, latitude, longitude).toFixed(2));
-          if (distanceKm > MAX_DELIVERY_RADIUS_KM * 2) {
-            continue;
-          }
+        const offerResult = await tryCreateDeliveryOffer({
+          id: deliveryId,
+          orderId: order.id,
+          riderId: user.id,
+          etaMinutes,
+          distanceKm,
+          deliveryFee,
+          currentLat: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.latitude) : restLat,
+          currentLng: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.longitude) : restLng,
+          startLat: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.latitude) : restLat,
+          startLng: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.longitude) : restLng,
+          customerLat: latitude,
+          customerLng: longitude,
+          restaurantLat: restLat,
+          restaurantLng: restLng,
+        });
 
-          const deliveryFee = distanceKm * 12;
-          const etaMinutes = calculateSwiggyETA(restLat, restLng, latitude, longitude, 1);
-
-          const deliveryId = `del_${nanoid(10)}`;
-
-          console.log(`📡 [Offers Auto-Assign] Assigning Order ${order.id} to Rider ${user.id} (deliveryId: ${deliveryId})`);
-
-          await db.insert(orderDeliveries).values({
-            id: deliveryId,
-            orderId: order.id,
-            riderId: user.id,
-            status: "offered",
-            etaMinutes,
-            distanceKm,
-            deliveryFee,
-            currentLat: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.latitude) : restLat,
-            currentLng: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.longitude) : restLng,
-            startLat: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.latitude) : restLat,
-            startLng: isValidCoordinatePair(rider.latitude, rider.longitude) ? Number(rider.longitude) : restLng,
-            customerLat: latitude,
-            customerLng: longitude,
-            restaurantLat: restLat,
-            restaurantLng: restLng,
-          });
+        if (offerResult.created) {
+          console.log(`📡 [Offers Auto-Assign] Assigned Order ${order.id} to Rider ${user.id} (deliveryId: ${deliveryId})`);
           break; // Offer one order at a time
         }
       }
@@ -1067,10 +1050,28 @@ router.post("/accept", requireAuth, async (req: any, res) => {
       });
     }
 
-    const delList = await db.select().from(orderDeliveries).where(eq(orderDeliveries.orderId, orderId));
-    if (delList.length === 0) {
-      return res.status(404).json({ message: "Delivery offer expired or no longer available" });
+    // Atomically claim the offered delivery only if still 'offered' and assigned to this rider
+    const claimedRows = await db
+      .update(orderDeliveries)
+      .set({
+        status: "assigned",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(orderDeliveries.orderId, orderId),
+          eq(orderDeliveries.status, "offered"),
+          eq(orderDeliveries.riderId, user.id)
+        )
+      )
+      .returning();
+
+    if (claimedRows.length === 0) {
+      return res.status(409).json({
+        message: "Delivery offer expired, was reassigned, or already claimed.",
+      });
     }
+    invalidateDispatchCache();
 
     // Mark rider as busy and record acceptance metrics
     await db
@@ -1082,16 +1083,6 @@ router.post("/accept", requireAuth, async (req: any, res) => {
         updatedAt: new Date(),
       })
       .where(eq(deliveryRiders.id, user.id));
-
-    // Update delivery record
-    await db
-      .update(orderDeliveries)
-      .set({
-        riderId: user.id,
-        status: "assigned",
-        updatedAt: new Date(),
-      })
-      .where(eq(orderDeliveries.orderId, orderId));
 
     const activeRider = (await db.select().from(deliveryRiders).where(eq(deliveryRiders.id, user.id)))[0];
     const orderRow = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
@@ -1174,17 +1165,40 @@ router.post("/decline", requireAuth, async (req: any, res) => {
     }
     riderDeclinedOrders.get(user.id)!.set(orderId, Date.now());
 
-    // Find the current delivery record for this order
-    const delList = await db.select().from(orderDeliveries).where(eq(orderDeliveries.orderId, orderId));
-    if (delList.length === 0) {
+    // Atomically delete only this rider's pre-pickup delivery offer/assignment before applying rejection/penalty
+    const existingList = await db
+      .select()
+      .from(orderDeliveries)
+      .where(and(eq(orderDeliveries.orderId, orderId), eq(orderDeliveries.riderId, user.id)))
+      .limit(1);
+
+    if (existingList.length === 0) {
       return res.status(200).json({ success: true, message: "Declined" });
     }
-    const delivery = delList[0];
-
-    // Allow declining or canceling active trip before pickup (offered, assigned, arrived_at_store)
-    if (delivery.status !== "offered" && delivery.status !== "assigned" && delivery.status !== "arrived_at_store") {
+    if (
+      existingList[0].status !== "offered" &&
+      existingList[0].status !== "assigned" &&
+      existingList[0].status !== "arrived_at_store"
+    ) {
       return res.status(400).json({ message: "Cannot cancel delivery — order already picked up or in progress" });
     }
+
+    const deletedRows = await db
+      .delete(orderDeliveries)
+      .where(
+        and(
+          eq(orderDeliveries.id, existingList[0].id),
+          eq(orderDeliveries.riderId, user.id),
+          inArray(orderDeliveries.status, ["offered", "assigned", "arrived_at_store"])
+        )
+      )
+      .returning();
+
+    if (deletedRows.length === 0) {
+      return res.status(200).json({ success: true, message: "Declined" });
+    }
+    const delivery = deletedRows[0];
+    invalidateDispatchCache();
 
     // Always track rider rejection count
     await db
@@ -1221,9 +1235,6 @@ router.post("/decline", requireAuth, async (req: any, res) => {
         reason: "Abandoned delivery trip after arriving at restaurant pickup.",
       });
     }
-
-    // Delete the existing delivery offer/assignment for this rider
-    await db.delete(orderDeliveries).where(eq(orderDeliveries.id, delivery.id));
 
     // Find the next available nearby rider (excluding declined & cooled-down riders)
     const availableRiders = await db
@@ -1285,20 +1296,23 @@ router.post("/decline", requireAuth, async (req: any, res) => {
 
     const bestRider = eligibleRiders[0].rider;
 
-    // Create new offer with fresh timestamps
-    const now = new Date();
+    // Atomically create new offer with fresh timestamps
     const newDeliveryId = `del_${nanoid(10)}`;
-    await db.insert(orderDeliveries).values({
-      ...delivery,
+    await tryCreateDeliveryOffer({
       id: newDeliveryId,
+      orderId,
       riderId: bestRider.id,
-      status: "offered",
+      etaMinutes: delivery.etaMinutes || 20,
+      distanceKm: delivery.distanceKm || 0,
+      deliveryFee: delivery.deliveryFee || 0,
       currentLat: bestRider.latitude || restLat,
       currentLng: bestRider.longitude || restLng,
       startLat: bestRider.latitude || restLat,
       startLng: bestRider.longitude || restLng,
-      createdAt: now,
-      updatedAt: now,
+      customerLat: delivery.customerLat,
+      customerLng: delivery.customerLng,
+      restaurantLat: restLat,
+      restaurantLng: restLng,
     });
 
     return res.status(200).json({
@@ -1370,6 +1384,22 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
         deliveryStatus: 'picked_up',
         updatedAt: new Date().toISOString()
       });
+      if (orderRecord?.placedByUserId) {
+        void db
+          .select({ restaurantName: restaurants.restaurantName })
+          .from(restaurants)
+          .where(eq(restaurants.id, orderRecord.restaurantId))
+          .limit(1)
+          .then((restRows) =>
+            pushOrderStatusToCustomer({
+              userId: orderRecord.placedByUserId,
+              orderId,
+              status: "picked_up",
+              restaurantName: restRows[0]?.restaurantName ?? null,
+            })
+          )
+          .catch((err) => console.warn("⚠️ [Push] Customer picked_up push failed:", err));
+      }
     } else if (nextDeliveryStatus === "out_for_delivery") {
       // Rider has left the restaurant
       emitToOrder(orderId, 'order-status-update', {
@@ -1378,6 +1408,26 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
         deliveryStatus: 'out_for_delivery',
         updatedAt: new Date().toISOString()
       });
+      void db
+        .select({
+          placedByUserId: orders.placedByUserId,
+          restaurantName: restaurants.restaurantName,
+        })
+        .from(orders)
+        .leftJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .where(eq(orders.id, orderId))
+        .limit(1)
+        .then((rows) => {
+          if (rows[0]?.placedByUserId) {
+            return pushOrderStatusToCustomer({
+              userId: rows[0].placedByUserId,
+              orderId,
+              status: "out_for_delivery",
+              restaurantName: rows[0].restaurantName ?? null,
+            });
+          }
+        })
+        .catch((err) => console.warn("⚠️ [Push] Customer out_for_delivery push failed:", err));
     } else if (nextDeliveryStatus === "delivered") {
       const preDeliverOrder = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
       await db.update(orders).set({ status: "served", updatedAt: new Date() }).where(eq(orders.id, orderId));
@@ -1414,7 +1464,7 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
           } catch {}
         }
         if (isCodOrder && Number(orderRecord.grandTotal || 0) > 0) {
-          codCollectedAmount = Number(orderRecord.grandTotal);
+          codCollectedAmount = toRupeesFromOrderPaise(orderRecord.grandTotal);
         }
       }
 
@@ -1484,6 +1534,22 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
 
       emitToOrder(orderId, "order-status", { orderId, status: "delivered", deliveryStatus: "delivered" });
       emitToOrder(orderId, "order-status-update", { orderId, status: "delivered", deliveryStatus: "delivered" });
+      if (orderRecord?.placedByUserId) {
+        void db
+          .select({ restaurantName: restaurants.restaurantName })
+          .from(restaurants)
+          .where(eq(restaurants.id, orderRecord.restaurantId))
+          .limit(1)
+          .then((restRows) =>
+            pushOrderStatusToCustomer({
+              userId: orderRecord.placedByUserId,
+              orderId,
+              status: "delivered",
+              restaurantName: restRows[0]?.restaurantName ?? null,
+            })
+          )
+          .catch((err) => console.warn("⚠️ [Push] Customer delivered push failed:", err));
+      }
     }
 
     const riderId = user?.id || delList[0].riderId;

@@ -7,6 +7,7 @@ import { RiderProvider } from '@/context/RiderContext';
 import { IncomingRequestModal } from '@/components/IncomingRequestModal';
 import { BACKEND_URL } from '@/config';
 import { initBackendKeepAlive } from '@/utils/backendKeepAlive';
+import { ensureRiderNotificationChannels } from '@/services/pushNotifications';
 import {
   useFonts,
   Urbanist_400Regular,
@@ -18,6 +19,7 @@ import {
 export default function RootLayout() {
   useEffect(() => {
     const cleanup = initBackendKeepAlive(BACKEND_URL);
+    void ensureRiderNotificationChannels();
     return cleanup;
   }, []);
 

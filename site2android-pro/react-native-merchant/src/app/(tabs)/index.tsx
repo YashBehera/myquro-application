@@ -24,6 +24,10 @@ import { useOrderStore, Order } from '../../state/orderStore';
 import { useComplaintStore } from '../../state/complaintStore';
 import { apiClient } from '../../services/apiClient';
 import { soundService } from '../../utils/soundService';
+import {
+  registerMerchantPushToken,
+  subscribeMerchantNotifications,
+} from '../../services/pushNotifications';
 
 const { width } = Dimensions.get('window');
 
@@ -112,6 +116,9 @@ export default function RestaurantDashboard() {
         const rest = res.data?.restaurant || res.data;
         if (rest) {
           setRestaurantProfile(rest);
+          if (rest.id) {
+            void registerMerchantPushToken(rest.id);
+          }
           setAutoAcceptEnabled(rest.autoAcceptOrders ?? true);
 
           const now = Date.now();
@@ -143,6 +150,12 @@ export default function RestaurantDashboard() {
     loadOrders();
     loadComplaints();
 
+    const unsubscribePush = subscribeMerchantNotifications((data) => {
+      if (data?.type === 'NEW_ORDER' || data?.type === 'ORDER_ACCEPTANCE_WARNING') {
+        void loadOrders();
+      }
+    });
+
     const pollInterval = setInterval(() => {
       loadOrders();
       loadComplaints(undefined, true);
@@ -153,6 +166,7 @@ export default function RestaurantDashboard() {
     }, 30000);
 
     return () => {
+      unsubscribePush();
       clearInterval(pollInterval);
       clearInterval(profileSyncInterval);
     };

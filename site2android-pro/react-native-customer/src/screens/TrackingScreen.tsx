@@ -1688,19 +1688,27 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
 
   // ── Unified Ola Maps Turn-by-Turn Road Route & Directions Manager ──
   const isFetchingDirectionsRef = useRef<boolean>(false);
+  const riderPosRef = useRef<{ lat?: number; lng?: number }>({ lat: riderLat, lng: riderLng });
+  const riderStatusRef = useRef(riderStatus);
+  const isRiderAcceptedRef = useRef(isRiderAccepted);
+  riderPosRef.current = { lat: riderLat, lng: riderLng };
+  riderStatusRef.current = riderStatus;
+  isRiderAcceptedRef.current = isRiderAccepted;
 
   const fetchOlaDirections = useCallback(async (forced: boolean = false) => {
     if (!restLat || !restLng || !custLat || !custLng || !OLA_MAPS_API_KEY) return;
     if (isFetchingDirectionsRef.current && !forced) return;
 
-    const curRiderLat = isRiderAccepted ? (riderLat || trackingDataRef.current?.currentLat) : undefined;
-    const curRiderLng = isRiderAccepted ? (riderLng || trackingDataRef.current?.currentLng) : undefined;
+    const curAccepted = isRiderAcceptedRef.current;
+    const curStatus = riderStatusRef.current;
+    const curRiderLat = curAccepted ? (riderPosRef.current.lat || trackingDataRef.current?.currentLat) : undefined;
+    const curRiderLng = curAccepted ? (riderPosRef.current.lng || trackingDataRef.current?.currentLng) : undefined;
 
     let origin = `${restLat},${restLng}`;
     let destination = `${custLat},${custLng}`;
 
-    if (isRiderAccepted && curRiderLat && curRiderLng) {
-      if (riderStatus === 'assigned' || riderStatus === 'arrived_at_store') {
+    if (curAccepted && curRiderLat && curRiderLng) {
+      if (curStatus === 'assigned' || curStatus === 'arrived_at_store') {
         origin = `${curRiderLat},${curRiderLng}`;
         destination = `${restLat},${restLng}`;
       } else {
@@ -1750,16 +1758,16 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
     } finally {
       isFetchingDirectionsRef.current = false;
     }
-  }, [restLat, restLng, custLat, custLng, isRiderAccepted, riderLat, riderLng, riderStatus]);
+  }, [restLat, restLng, custLat, custLng]);
 
-  // Initial directions fetch on status change and background heartbeat (every 25 seconds)
+  // Initial directions fetch on status change and background heartbeat (every 30 seconds)
   useEffect(() => {
     fetchOlaDirections(true);
-    const interval = setInterval(() => fetchOlaDirections(false), 25000);
+    const interval = setInterval(() => fetchOlaDirections(false), 30000);
     return () => clearInterval(interval);
   }, [restLat, restLng, custLat, custLng, riderStatus, isRiderAccepted, fetchOlaDirections]);
 
-  // Dynamic off-route detour detection: recalculates street directions when rider moves onto another street
+  // Dynamic off-route detour detection: only recalculates street directions when rider leaves the route corridor
   useEffect(() => {
     if (!isRiderAccepted || !riderLat || !riderLng || !restLat || !restLng || !custLat || !custLng || !OLA_MAPS_API_KEY) return;
 
@@ -1778,20 +1786,14 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
         if (dSq < minDistSq) minDistSq = dSq;
       }
       const distToRoadMeters = Math.sqrt(minDistSq) * 111320;
-      // Rider has deviated onto another street (> 25 meters off the road corridor)
-      if (distToRoadMeters >= 25) {
+      // Rider has deviated onto another street (>= 35 meters off the drawn road corridor)
+      if (distToRoadMeters >= 35) {
         isOffRoute = true;
       }
     }
 
-    const lastPos = lastFetchedRiderPosRef.current;
-    let movedFromLastFetch = Infinity;
-    if (lastPos) {
-      movedFromLastFetch = calculateDistanceKm(lastPos.lat, lastPos.lng, riderLat, riderLng) * 1000;
-    }
-
-    // Trigger recalculation if rider is off-route or moved >= 40 meters (throttled to at least 3 seconds)
-    if ((isOffRoute || movedFromLastFetch >= 40) && now - lastFetchTimestampRef.current >= 3000) {
+    // Trigger recalculation only on genuine off-route detour, throttled to at least 10 seconds
+    if (isOffRoute && now - lastFetchTimestampRef.current >= 10000) {
       fetchOlaDirections(true);
     }
   }, [riderLat, riderLng, isRiderAccepted, riderStatus, restLat, restLng, custLat, custLng, fetchOlaDirections]);
@@ -3420,15 +3422,6 @@ export const TrackingScreen: React.FC<TrackingScreenProps> = ({ orderId, onBack 
               </View>
 
               <View style={styles.savingsBannerLeftRow}>
-                {/* Left Glowing Diamond Star in gold badge */}
-                <View style={styles.savingsStarBadge}>
-                  <Svg width={13 * SCALE} height={13 * SCALE} viewBox="0 0 24 24" fill="none">
-                    <Path
-                      d="M12 0L14.8 9.2L24 12L14.8 14.8L12 24L9.2 14.8L0 12L9.2 9.2L12 0Z"
-                      fill="#F2CA50"
-                    />
-                  </Svg>
-                </View>
 
                 {/* Banner Text with Highlighted Savings */}
                 <Text style={styles.savingsBannerText}>

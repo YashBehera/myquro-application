@@ -38,6 +38,7 @@ export * from "./schema/offers.js";
 
 // Notifications schema
 export * from "./schema/notification.js";
+export * from "./schema/device-push-tokens.js";
 
 // Reviews schema
 export * from "./schema/reviews.js";

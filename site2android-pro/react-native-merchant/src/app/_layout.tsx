@@ -7,6 +7,10 @@ import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import { BACKEND_URL } from '../config';
 import { initBackendKeepAlive } from '../utils/backendKeepAlive';
+import {
+  ensureMerchantNotificationChannels,
+  registerMerchantPushToken,
+} from '../services/pushNotifications';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -24,6 +28,7 @@ import KitchenAlarmAudio from '../components/KitchenAlarmAudio';
 export default function RootLayout() {
   useEffect(() => {
     const cleanup = initBackendKeepAlive(BACKEND_URL);
+    void ensureMerchantNotificationChannels().then(() => registerMerchantPushToken());
     return cleanup;
   }, []);
   const [fontsLoaded, fontError] = useFonts({

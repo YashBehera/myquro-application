@@ -4,6 +4,11 @@ import { Platform, Alert } from 'react-native';
 import * as Location from 'expo-location';
 import { io } from 'socket.io-client';
 import { BACKEND_URL } from '../config';
+import {
+  registerRiderPushToken,
+  subscribeRiderNotifications,
+  unregisterRiderPushToken,
+} from '../services/pushNotifications';
 
 export type TripStatus = 'NAVIGATING_TO_PICKUP' | 'ARRIVED_AT_PICKUP' | 'TRIP_IN_PROGRESS' | 'COMPLETED';
 
@@ -165,23 +170,42 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadState();
   }, []);
 
-  // Periodic polling for active task and offers when logged in
+  // Poll offers only while online and idle; reduce poll cadence when offline to avoid redundant DB compute
   useEffect(() => {
     if (!sessionToken) return;
 
-    // Initial fetch on mount / token change
     fetchActiveTask(sessionToken);
-    fetchOffers(sessionToken);
     fetchDashboardStats(sessionToken);
+    if (isOnline && !activeTrip) {
+      fetchOffers(sessionToken);
+    }
 
+    const pollMs = isOnline || activeTrip ? 5000 : 15000;
     const interval = setInterval(() => {
       fetchActiveTask(sessionToken);
-      fetchOffers(sessionToken);
+      if (isOnline && !activeTrip) {
+        fetchOffers(sessionToken);
+      }
       fetchDashboardStats(sessionToken);
-    }, 3000);
+    }, pollMs);
 
     return () => clearInterval(interval);
-  }, [sessionToken]);
+  }, [sessionToken, isOnline, activeTrip?.id]);
+
+  // Register native FCM push token and wake offer modal immediately on push receipt/tap
+  useEffect(() => {
+    if (!sessionToken) return;
+    void registerRiderPushToken(sessionToken, driverProfile?.id || undefined);
+
+    const unsubscribePush = subscribeRiderNotifications(() => {
+      fetchOffers(sessionToken);
+      fetchActiveTask(sessionToken);
+    });
+
+    return () => {
+      unsubscribePush();
+    };
+  }, [sessionToken, driverProfile?.id]);
 
   // Periodic background location streaming
   useEffect(() => {
@@ -782,6 +806,7 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const logout = async () => {
     try {
+      await unregisterRiderPushToken();
       await AsyncStorage.multiRemove(['@rider_auth', '@onboarding_step', '@rider_profile']);
       if (socketRef.current) {
         socketRef.current.disconnect();

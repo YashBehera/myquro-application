@@ -6,6 +6,7 @@ export const orderDeliveries = pgTable("order_deliveries", {
   id: text("id").notNull().primaryKey(),
   orderId: text("order_id")
     .notNull()
+    .unique()
     .references(() => orders.id, { onDelete: "cascade" }),
   riderId: text("rider_id")
     .references(() => deliveryRiders.id, { onDelete: "set null" }),

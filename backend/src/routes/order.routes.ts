@@ -25,6 +25,7 @@ import {
   checkRestaurantServiceability,
   parseDeliveryCoordinates,
   isValidCoordinatePair,
+  calculateOrderFees,
   MAX_DELIVERY_RADIUS_KM,
 } from "../lib/serviceability.js";
 import {
@@ -35,6 +36,7 @@ import {
 } from "../services/orderWatchdog.js";
 import { PENALTY_CONFIG } from "../services/penaltyEngine.js";
 
+import crypto from "node:crypto";
 import { nanoid } from "nanoid";
 import { eq, and, or, inArray, sql, desc, like } from "drizzle-orm";
 
@@ -43,6 +45,10 @@ import { fromNodeHeaders } from "better-auth/node";
 import { requireAuth } from "../auth/requireAuth.js";
 
 import { sendNotification } from "../lib/sendNotification.js";
+import {
+  pushNewOrderToMerchant,
+  pushOrderStatusToCustomer,
+} from "../lib/pushNotifications.js";
 import { verifyTableSession } from "../lib/verifyTableSession.js";
 
 import {
@@ -58,6 +64,16 @@ import {
   isRestaurantOwnerManagerOrStaff,
 } from "../lib/checkRoles.js";
 import { orderCache } from "../lib/order-cache.js";
+import { invalidateDispatchCache } from "../lib/dispatch.js";
+import {
+  sanitizeIdempotencyKey,
+  buildIdempotencyScopeKey,
+  findExistingIdempotentOrder,
+  getInFlightIdempotentOrder,
+  registerInFlightIdempotentOrder,
+  clearInFlightIdempotentOrder,
+  cacheCompletedIdempotentOrder,
+} from "../lib/idempotency.js";
 
 const router = Router();
 
@@ -112,16 +128,16 @@ router.get("/kitchen/active/:restaurantId", requireAuth, async (req: any, res) =
     const { restaurantId } = req.params;
     const user = req.user;
 
+    // Authorization MUST run before checking cache so unauthorized callers cannot read cached orders
+    const isAllowed = await isRestaurantOwnerManagerOrStaff(user.id, restaurantId);
+    if (!isAllowed) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
     // Check Cache
     const cached = orderCache.get(restaurantId);
     if (cached.hit) {
       return res.status(200).json(cached.data);
-    }
-
-    // Authorization
-    const isAllowed = await isRestaurantOwnerManagerOrStaff(user.id, restaurantId);
-    if (!isAllowed) {
-      return res.status(403).json({ message: "Unauthorized" });
     }
 
     // Fetch active orders (placed, preparing, ready)
@@ -196,6 +212,27 @@ router.get("/kitchen/active/:restaurantId", requireAuth, async (req: any, res) =
 });
 
 router.post("/make-order", optionalAuth, async (req: any, res) => {
+  let idempotencyScopeKey: string | null = null;
+  let resolveIdempotencyPromise: ((val: { order: any; items: any[] } | null) => void) | null = null;
+  let idempotencySettled = false;
+
+  const finalizeIdempotency = (result: { order: any; items: any[] } | null) => {
+    if (idempotencySettled) return;
+    idempotencySettled = true;
+    if (idempotencyScopeKey) {
+      if (result) {
+        cacheCompletedIdempotentOrder(idempotencyScopeKey, result);
+      }
+      clearInFlightIdempotentOrder(idempotencyScopeKey);
+    }
+    if (resolveIdempotencyPromise) {
+      resolveIdempotencyPromise(result);
+    }
+  };
+
+  res.once("finish", () => finalizeIdempotency(null));
+  res.once("close", () => finalizeIdempotency(null));
+
   try {
     console.log("MAKE ORDER REQUEST - Body:", JSON.stringify(req.body, null, 2));
     console.log("MAKE ORDER REQUEST - User:", req.user?.id || "No user");
@@ -222,7 +259,72 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       deliveryInstructions,
       cookingInstruction,
       cutleryOptOut,
+      idempotencyKey: rawIdempotencyKey,
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
     } = req.body;
+
+    // Optional Razorpay cryptographic verification when gateway proof is provided
+    let verifiedGatewayPaymentId: string | null = null;
+    if (razorpay_order_id && razorpay_payment_id && razorpay_signature && process.env.RAZORPAY_KEY_SECRET) {
+      const expectedSig = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest("hex");
+      if (expectedSig !== String(razorpay_signature)) {
+        return res.status(400).json({ message: "Payment signature verification failed." });
+      }
+      verifiedGatewayPaymentId = String(razorpay_payment_id);
+    }
+
+    // Validate request body
+    if (!Array.isArray(items) || items.length === 0) {
+      console.log("MAKE ORDER - Validation failed: Invalid items array");
+      return res.status(400).json({ message: "Invalid order payload" });
+    }
+
+    // Validate that either tableSessionId or restaurantId is provided
+    if (!tableSessionId && !providedRestaurantId) {
+      console.log("MAKE ORDER - Validation failed: No tableSessionId or restaurantId");
+      return res.status(400).json({ message: "Either tableSessionId or restaurantId is required" });
+    }
+
+    const cleanIdempotencyKey = sanitizeIdempotencyKey(rawIdempotencyKey);
+    if (cleanIdempotencyKey) {
+      const scopeEntity = providedRestaurantId || tableSessionId;
+      idempotencyScopeKey = buildIdempotencyScopeKey(scopeEntity, cleanIdempotencyKey);
+
+      const inFlight = getInFlightIdempotentOrder(idempotencyScopeKey);
+      if (inFlight) {
+        const existing = await inFlight;
+        if (existing) {
+          return res.status(200).json({
+            order: existing.order,
+            items: existing.items,
+            deduplicated: true,
+            message: "Order retrieved (concurrent retry deduplicated)",
+          });
+        }
+      }
+
+      if (providedRestaurantId) {
+        const persisted = await findExistingIdempotentOrder(providedRestaurantId, cleanIdempotencyKey);
+        if (persisted) {
+          return res.status(200).json({
+            order: persisted.order,
+            items: persisted.items,
+            deduplicated: true,
+            message: "Order already created",
+          });
+        }
+      }
+
+      const inFlightPromise = new Promise<{ order: any; items: any[] } | null>((resolve) => {
+        resolveIdempotencyPromise = resolve;
+      });
+      registerInFlightIdempotentOrder(idempotencyScopeKey, inFlightPromise);
+    }
 
     // Declare session variables early
     let sessionRestaurantId = providedRestaurantId; // May be undefined initially
@@ -236,12 +338,6 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       itemsCount: items?.length || 0
     });
 
-    // Validate request body
-    if (!Array.isArray(items) || items.length === 0) {
-      console.log("MAKE ORDER - Validation failed: Invalid items array");
-      return res.status(400).json({ message: "Invalid order payload" });
-    }
-
     // Separate regular items from independent extras
     const regularItems = items.filter(item => item.variantId || item.menuItemVariantId);
     const independentExtras = items.filter(item => !item.variantId && !item.menuItemVariantId && item.extras && item.extras.length > 0);
@@ -249,13 +345,8 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
     // Validate that we have at least one valid item
     if (regularItems.length === 0 && independentExtras.length === 0) {
       console.log("MAKE ORDER - Validation failed: No valid items or extras");
+      finalizeIdempotency(null);
       return res.status(400).json({ message: "Invalid order payload - no valid items or extras" });
-    }
-
-    // Validate that either tableSessionId or restaurantId is provided
-    if (!tableSessionId && !providedRestaurantId) {
-      console.log("MAKE ORDER - Validation failed: No tableSessionId or restaurantId");
-      return res.status(400).json({ message: "Either tableSessionId or restaurantId is required" });
     }
 
     console.log("MAKE ORDER - Items validation passed");
@@ -483,13 +574,23 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       discount = 0;
     }
 
+    const feeBreakdown = isDeliveryOrder
+      ? calculateOrderFees({
+          itemTotalRupees: subtotal / 100,
+          distanceKm: serviceability.distanceKm ?? null,
+          deliveryType,
+        })
+      : { deliveryFee: 0, platformFee: 0, expressFee: 0 };
+    const extraFeesPaise =
+      (feeBreakdown.deliveryFee + feeBreakdown.platformFee + feeBreakdown.expressFee) * 100;
+
     const taxableBase = calculateTaxableBase(subtotal);
-    const grandTotal = calculateGrandTotal(subtotal, gst, discount);
+    const grandTotal = calculateGrandTotal(subtotal, gst, discount) + extraFeesPaise;
 
     // For individual KOT/orders, we don't apply the session discount to the ticket total
     const orderDiscount = 0;
     const orderGst = calculateGST(subtotal, gstRate);
-    const orderGrandTotal = calculateGrandTotal(subtotal, orderGst, 0);
+    const orderGrandTotal = calculateGrandTotal(subtotal, orderGst, 0) + extraFeesPaise;
 
     console.log("MAKE ORDER - Calculated totals:", {
       subtotal,
@@ -602,9 +703,9 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       }
     }
 
-    // Persist clean delivery & payment metadata in order notes without dummy coordinate fallbacks
+    // Persist clean delivery, idempotency & payment metadata in order notes without dummy coordinate fallbacks
     let dbNotes = notes || null;
-    if (!sessionTableId && (deliveryAddress || isValidCoordinatePair(parsedCoords.latitude, parsedCoords.longitude))) {
+    if (!sessionTableId && (deliveryAddress || isValidCoordinatePair(parsedCoords.latitude, parsedCoords.longitude) || cleanIdempotencyKey)) {
       const existingNoteObj =
         typeof notes === "string" && notes.trim().startsWith("{")
           ? (() => {
@@ -629,12 +730,16 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
           ? { latitude: parsedCoords.latitude, longitude: parsedCoords.longitude }
           : {}),
         cookingInstructions: cookingInstr,
+        ...(cleanIdempotencyKey ? { idempotencyKey: cleanIdempotencyKey } : {}),
         ...(paymentMethod ? { paymentMethod } : {}),
         ...(deliveryType ? { deliveryType } : {}),
         ...(deliveryTip ? { deliveryTip } : {}),
         ...(Array.isArray(deliveryInstructions) && deliveryInstructions.length > 0 ? { deliveryInstructions } : {}),
         ...(cutleryOptOut !== undefined ? { cutleryOptOut } : {}),
         ...(serviceability.distanceKm !== undefined ? { distanceKm: serviceability.distanceKm } : {}),
+        platformFee: feeBreakdown.platformFee,
+        customerDeliveryFee: feeBreakdown.deliveryFee,
+        expressFee: feeBreakdown.expressFee,
         ...(user?.name ? { customerName: user.name } : {}),
         ...(customerPhone || phone ? { customerPhone: customerPhone || phone } : {}),
       });
@@ -657,7 +762,7 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
           amount: orderGrandTotal,
           method: dbPaymentMethod,
           status: "success",
-          referenceNumber: `PAY-${orderId.slice(-6).toUpperCase()}`,
+          referenceNumber: verifiedGatewayPaymentId || `PAY-${orderId.slice(-6).toUpperCase()}`,
           paidByUserId: finalPlacedByUserId,
           isRefund: false,
           createdAt: new Date(),
@@ -967,6 +1072,16 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       createdAt: new Date().toISOString()
     });
 
+    // High-priority FCM push notification to wake locked/killed Merchant devices immediately
+    void pushNewOrderToMerchant({
+      restaurantId: sessionRestaurantId,
+      orderId,
+      itemCount: items.length,
+      totalPaiseOrRupees: grandTotal,
+      isDelivery: isDeliveryOrder,
+      isAutoAccepted: isAutoAccept,
+    }).catch((err) => console.warn("⚠️ [Push] Merchant new-order push failed:", err));
+
     // Also emit to order room for customer live tracker
     emitToOrder(orderId, 'order-status', {
       orderId,
@@ -992,6 +1107,17 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       updatedAt: new Date().toISOString()
     });
 
+    // Cache completed idempotent result and release in-flight lock before responding
+    finalizeIdempotency({ order: newOrder[0], items: orderItemsData });
+
+    // Invalidate Kitchen & Dispatch caches so merchants and nearby riders see new auto-accepted orders immediately
+    if (sessionRestaurantId) {
+      orderCache.invalidate(sessionRestaurantId);
+    }
+    if (isDeliveryOrder && (initialStatus === "preparing" || initialStatus === "ready")) {
+      invalidateDispatchCache();
+    }
+
     // Return success response
     console.log("MAKE ORDER - Returning success response");
     res.status(201).json({
@@ -1000,12 +1126,8 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       message: "Order created successfully"
     });
 
-    // Invalidate Kitchen Cache
-    if (sessionRestaurantId) {
-      orderCache.invalidate(sessionRestaurantId);
-    }
-
   } catch (error) {
+    finalizeIdempotency(null);
     console.error("MAKE ORDER ERROR:", error);
     if (error instanceof Error) {
       console.error("MAKE ORDER ERROR - Stack:", error.stack);
@@ -1511,8 +1633,11 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
     const orderStatus = await db.update(orders).set(updateData).where(eq(orders.id, orderId));
     const effectivePrepMinutes = updateData.prepTimeMinutes || orderRow.prepTimeMinutes || 20;
 
-    // Invalidate Cache immediately so subsequent reads have fresh status and prep time
+    // Invalidate Kitchen & Dispatch caches immediately so subsequent reads/riders see fresh status and prep time
     orderCache.invalidate(orderRow.restaurantId);
+    if (!orderRow.tableId) {
+      invalidateDispatchCache();
+    }
 
     const nowIso = now.toISOString();
 
@@ -1567,6 +1692,27 @@ router.patch("/:orderId/status", requireAuth, async (req: any, res) => {
       },
       updatedAt: nowIso
     });
+
+    if (
+      orderRow.placedByUserId &&
+      (status === "preparing" || status === "ready" || status === "cancelled")
+    ) {
+      void db
+        .select({ restaurantName: restaurants.restaurantName })
+        .from(restaurants)
+        .where(eq(restaurants.id, orderRow.restaurantId))
+        .limit(1)
+        .then((restRows) =>
+          pushOrderStatusToCustomer({
+            userId: orderRow.placedByUserId,
+            orderId,
+            status,
+            restaurantName: restRows[0]?.restaurantName ?? null,
+            prepTimeMinutes: effectivePrepMinutes,
+          })
+        )
+        .catch((err) => console.warn("⚠️ [Push] Customer order status push failed:", err));
+    }
 
     // If the status is changed to "served", calculate billing details
     if (status === "served") {
@@ -2856,6 +3002,22 @@ router.post("/:id/verify-handover", optionalAuth, async (req: any, res) => {
     } else {
       // For delivery orders, notify customer room of pickup, NOT served/delivered!
       emitToOrder(id, "order-status-update", { orderId: id, status: "picked_up", deliveryStatus: "picked_up", updatedAt: new Date().toISOString() });
+      if (order.placedByUserId) {
+        void db
+          .select({ restaurantName: restaurants.restaurantName })
+          .from(restaurants)
+          .where(eq(restaurants.id, order.restaurantId))
+          .limit(1)
+          .then((restRows) =>
+            pushOrderStatusToCustomer({
+              userId: order.placedByUserId,
+              orderId: id,
+              status: "picked_up",
+              restaurantName: restRows[0]?.restaurantName ?? null,
+            })
+          )
+          .catch((err) => console.warn("⚠️ [Push] Customer handover push failed:", err));
+      }
     }
 
     return res.status(200).json({

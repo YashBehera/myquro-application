@@ -67,3 +67,9 @@ yarn-error.log*
 .expo/
 **/.expo/
 *.bak
+
+# Firebase credentials & Google Services configs
+*firebase-adminsdk*.json
+firebase-service-account.json
+google-services*.json
+

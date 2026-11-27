@@ -13,9 +13,14 @@ import {
 import { eq, and, or, ne, inArray, isNull, lte, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { emitToOrder, emitToRestaurant } from "../lib/socket.js";
+import {
+  pushMerchantAcceptanceWarning,
+  pushOrderStatusToCustomer,
+} from "../lib/pushNotifications.js";
 import { orderCache } from "../lib/order-cache.js";
 import { haversineDistance } from "../lib/delivery-simulation.js";
 import { parseDeliveryCoordinates } from "../lib/serviceability.js";
+import { invalidateDispatchCache } from "../lib/dispatch.js";
 import {
   applyMerchantPenalty,
   applyRiderPenalty,
@@ -491,6 +496,24 @@ export async function cancelOrderAutonomously(params: {
     emitToRestaurant(order.restaurantId, "order-auto-cancelled", payload);
   }
 
+  if (order.placedByUserId) {
+    void db
+      .select({ restaurantName: restaurants.restaurantName })
+      .from(restaurants)
+      .where(eq(restaurants.id, order.restaurantId))
+      .limit(1)
+      .then((restRows) =>
+        pushOrderStatusToCustomer({
+          userId: order.placedByUserId,
+          orderId: order.id,
+          status: "cancelled",
+          restaurantName: restRows[0]?.restaurantName ?? null,
+          reason: refundText || customerFacingMessage,
+        })
+      )
+      .catch((err) => console.warn("⚠️ [Push] Customer cancellation push failed:", err));
+  }
+
   return {
     cancelled: true,
     refunded: refundResult.refunded,
@@ -606,6 +629,11 @@ export async function runWatchdogTick() {
           secondsRemaining: remainingSecs,
           message: `Urgent: Customer has been waiting ${Math.floor(ageMs / 60000)}m+. Accept within ${remainingSecs}s to avoid auto-cancellation and penalty.`,
         });
+        void pushMerchantAcceptanceWarning({
+          restaurantId: ord.restaurantId,
+          orderId: ord.id,
+          secondsRemaining: remainingSecs,
+        }).catch((err) => console.warn("⚠️ [Push] Merchant warning push failed:", err));
         emitToOrder(ord.id, "order-sla-update", {
           orderId: ord.id,
           phase: "AWAITING_ACCEPTANCE",
@@ -640,6 +668,7 @@ export async function runWatchdogTick() {
 
     for (const stale of staleOffers) {
       await db.delete(orderDeliveries).where(eq(orderDeliveries.id, stale.deliveryId));
+      invalidateDispatchCache();
       console.log(`🔄 [Watchdog] Cleared stale rider offer ${stale.deliveryId} for Order ${stale.orderId}`);
 
       // Track ignored offers only when rider stayed online ('available') and timed out past 90s
@@ -836,6 +865,11 @@ export async function runAutonomousComplaintRules(complaintRecord: any): Promise
       secondsRemaining: remainingSecs,
       message: `Customer contacted support while waiting! Accept within ${remainingSecs}s or order auto-cancels with penalty.`,
     });
+    void pushMerchantAcceptanceWarning({
+      restaurantId: order.restaurantId,
+      orderId: order.id,
+      secondsRemaining: remainingSecs,
+    }).catch((err) => console.warn("⚠️ [Push] Merchant urgent warning push failed:", err));
     autoReplyText = `We have alerted ${restaurantName} urgently to confirm your order. If the kitchen cannot respond within ${remainingSecs} seconds, the order will automatically close with a full refund—no manual follow-up needed.`;
   } else if (order.status === "cancelled") {
     const refund = await ensureAutomaticOrderRefund(order);

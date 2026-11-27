@@ -26,8 +26,11 @@
         "ACCESS_BACKGROUND_LOCATION",
         "CAMERA",
         "FOREGROUND_SERVICE",
-        "VIBRATE"
+        "VIBRATE",
+        "POST_NOTIFICATIONS",
+        "WAKE_LOCK"
       ],
+      "googleServicesFile": "./google-services.json",
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -53,7 +56,15 @@
       "expo-font",
       "expo-web-browser",
       "expo-image",
-      "expo-status-bar"
+      "expo-status-bar",
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/order_alert.wav"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

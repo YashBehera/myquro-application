@@ -15,6 +15,10 @@ import { BACKEND_URL } from '../config';
 import { SecureStorage } from '../utils/secureStorage';
 import { cleanLocationLabel } from '../services/LocationService';
 import {
+  registerCustomerPushToken,
+  unregisterCustomerPushToken,
+} from '../services/pushNotifications';
+import {
   MAX_DELIVERY_RADIUS_KM,
   isValidCoordPair,
   computeHaversineKm,
@@ -98,6 +102,7 @@ interface ViewModelContextType {
   }) => void;
   userOrders: any[];
   refreshUserOrders: () => Promise<void>;
+  refreshData: () => Promise<void>;
 }
 
 const ViewModelContext = createContext<ViewModelContextType | undefined>(undefined);
@@ -725,6 +730,21 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
     loadStoredAuthAndData();
   }, []);
 
+  // Register native FCM push token whenever Customer becomes authenticated
+  useEffect(() => {
+    if (authState.type !== 'Authenticated') return;
+    let cancelled = false;
+    (async () => {
+      const token = await getActiveToken();
+      if (!cancelled && token) {
+        await registerCustomerPushToken(token);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authState]);
+
   // Automatically clean up cart items for deleted/inactive restaurants
   useEffect(() => {
     if (isLoading) return;
@@ -982,6 +1002,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
   };
 
   const logout = async () => {
+    void unregisterCustomerPushToken();
     setAuthState({ type: 'Unauthenticated' });
     setSavedAddresses([]);
     try {
@@ -1362,6 +1383,7 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         setCurrentLocation: updateCurrentLocation,
         userOrders,
         refreshUserOrders,
+        refreshData: loadData,
       }}
     >
       {children}
