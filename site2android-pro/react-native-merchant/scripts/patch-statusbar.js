@@ -52,3 +52,16 @@ if (fs.existsSync(rnGradlePluginToml)) {
     console.log('✅ Patched @react-native/gradle-plugin AGP version to 8.7.2');
   }
 }
+
+const webviewGradle = path.join(__dirname, '../node_modules/react-native-webview/android/build.gradle');
+if (fs.existsSync(webviewGradle)) {
+  let content = fs.readFileSync(webviewGradle, 'utf8');
+  if (content.includes("if (isNewArchitectureEnabled()) {\n    apply plugin: 'com.facebook.react'\n} else {\n    apply plugin: 'kotlin-android'\n}")) {
+    content = content.replace(
+      "if (isNewArchitectureEnabled()) {\n    apply plugin: 'com.facebook.react'\n} else {\n    apply plugin: 'kotlin-android'\n}",
+      "if (isNewArchitectureEnabled()) {\n    apply plugin: 'com.facebook.react'\n}\napply plugin: 'kotlin-android'"
+    );
+    fs.writeFileSync(webviewGradle, content, 'utf8');
+    console.log('✅ Patched react-native-webview to always apply kotlin-android under New Architecture');
+  }
+}
