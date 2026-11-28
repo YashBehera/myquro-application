@@ -61,7 +61,7 @@ export default function FinanceScreen() {
   const [restaurantId, setRestaurantId] = useState<string | null>(null);
   const [restaurantName, setRestaurantName] = useState<string>('Merchant Partner');
   const [gstNumber, setGstNumber] = useState<string | null>(null);
-  const [commissionRate, setCommissionRate] = useState<number>(15);
+  const [commissionRate, setCommissionRate] = useState<number>(12);
   const [settlements, setSettlements] = useState<SettlementItem[]>([]);
   const [summary, setSummary] = useState<SettlementSummary>({
     totalNetPayout: 0,

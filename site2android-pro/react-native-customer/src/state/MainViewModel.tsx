@@ -1289,6 +1289,10 @@ export const ViewModelProvider: React.FC<{ children: ReactNode }> = ({ children 
         longitude: Number(deliveryLng),
         deliveryAddress,
         paymentMethod: resolvedPaymentMethod,
+        ...(parsedNotes.couponCode ? { couponCode: parsedNotes.couponCode } : {}),
+        ...(parsedNotes.razorpay_order_id ? { razorpay_order_id: parsedNotes.razorpay_order_id } : {}),
+        ...(parsedNotes.razorpay_payment_id ? { razorpay_payment_id: parsedNotes.razorpay_payment_id } : {}),
+        ...(parsedNotes.razorpay_signature ? { razorpay_signature: parsedNotes.razorpay_signature } : {}),
         notes: notes || "",
         items: itemsToUse.map(item => ({
           menuItemId: item.id,

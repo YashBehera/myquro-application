@@ -20,6 +20,7 @@ import { merchantPenalties } from "../db/schema/merchant-penalties.js";
 import { profiles } from "../db/schema/profiles.js";
 import { payments } from "../db/schema/payments.js";
 import { customerVouchers } from "../db/schema/loyalty.js";
+import { offers } from "../db/schema/offers.js";
 import { emitToRestaurant, emitToOrder } from "../lib/socket.js";
 import {
   checkRestaurantServiceability,
@@ -58,6 +59,7 @@ import {
   calculateGST,
   calculateGrandTotal,
 } from "../lib/billing.js";
+import { isRazorpayConfigured, verifyRazorpaySignature } from "../lib/razorpay.js";
 
 import {
   isRestaurantOwnerOrManager,
@@ -247,6 +249,7 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       discount: frontendDiscount,
       discountType,
       discountValue,
+      couponCode,
       deliveryAddress,
       latitude,
       longitude,
@@ -265,14 +268,20 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
       razorpay_signature,
     } = req.body;
 
-    // Optional Razorpay cryptographic verification when gateway proof is provided
+    // Verify Razorpay cryptographic signature whenever gateway payment proof is provided
     let verifiedGatewayPaymentId: string | null = null;
-    if (razorpay_order_id && razorpay_payment_id && razorpay_signature && process.env.RAZORPAY_KEY_SECRET) {
-      const expectedSig = crypto
-        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest("hex");
-      if (expectedSig !== String(razorpay_signature)) {
+    if (razorpay_order_id || razorpay_payment_id || razorpay_signature) {
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return res.status(400).json({ message: "Incomplete Razorpay payment verification payload." });
+      }
+      if (
+        isRazorpayConfigured() &&
+        !verifyRazorpaySignature({
+          orderId: String(razorpay_order_id),
+          paymentId: String(razorpay_payment_id),
+          signature: String(razorpay_signature),
+        })
+      ) {
         return res.status(400).json({ message: "Payment signature verification failed." });
       }
       verifiedGatewayPaymentId = String(razorpay_payment_id);
@@ -562,35 +571,93 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
     // Calculate totals - NEW LOGIC: (Subtotal + GST) - Discount
     const subtotal = calculateSubtotal(itemsWithPrices);
     const gstRate = gstPercentage;
-    const gst = calculateGST(subtotal, gstRate); // GST on full subtotal
-    const grandTotalBeforeDiscount = subtotal + gst;
+    const subtotalRupees = subtotal / 100;
 
     let discount = 0;
-    if (discountType === 'percentage' && discountValue > 0) {
-      discount = Math.floor((grandTotalBeforeDiscount * discountValue) / 100);
-    } else if (frontendDiscount !== undefined) {
-      discount = Number(frontendDiscount);
-    } else {
-      discount = 0;
+    let verifiedCouponCode: string | null = null;
+    const cleanCouponCode = typeof couponCode === "string" ? couponCode.trim().toUpperCase() : "";
+
+    if (isDeliveryOrder && cleanCouponCode && resolvedTargetRestaurantId) {
+      const candidateOffers = await db
+        .select()
+        .from(offers)
+        .where(
+          and(
+            sql`UPPER(${offers.code}) = ${cleanCouponCode}`,
+            or(
+              eq(offers.restaurantId, resolvedTargetRestaurantId),
+              eq(offers.scope, "company")
+            )
+          )
+        );
+      const now = new Date();
+      const matchedOffer = candidateOffers.find((o) => {
+        const withinDates = now >= new Date(o.startDate) && now <= new Date(o.endDate);
+        if (!withinDates) return false;
+        if (o.scope === "company") {
+          if (o.targetType === "specific") {
+            return Array.isArray(o.targetRestaurantIds) && o.targetRestaurantIds.includes(resolvedTargetRestaurantId);
+          }
+          return true;
+        }
+        return o.restaurantId === resolvedTargetRestaurantId;
+      });
+
+      if (matchedOffer) {
+        const minOrderRupees = Number(matchedOffer.minOrderValue || 0);
+        if (subtotalRupees >= minOrderRupees) {
+          const val = Number(matchedOffer.discountValue || 0);
+          let discountRupees = 0;
+          if (matchedOffer.offerType === "percentage") {
+            discountRupees = Math.round((subtotalRupees * val) / 100);
+            const maxCap = Number(matchedOffer.maxDiscountAmount || 0);
+            if (maxCap > 0) discountRupees = Math.min(discountRupees, maxCap);
+          } else {
+            discountRupees = val;
+          }
+          discount = Math.min(subtotal, Math.max(0, Math.round(discountRupees * 100)));
+          if (discount > 0) {
+            verifiedCouponCode = matchedOffer.code;
+          }
+        }
+      }
+    } else if (!isDeliveryOrder) {
+      const preDiscount = subtotal + calculateGST(subtotal, gstRate);
+      if (discountType === "percentage" && discountValue > 0) {
+        discount = Math.floor((preDiscount * discountValue) / 100);
+      } else if (frontendDiscount !== undefined) {
+        discount = Number(frontendDiscount);
+      }
     }
+
+    const orderDiscount = isDeliveryOrder ? discount : 0;
+    const gstBase = isDeliveryOrder ? Math.max(0, subtotal - orderDiscount) : subtotal;
+    const gst = calculateGST(gstBase, gstRate);
 
     const feeBreakdown = isDeliveryOrder
       ? calculateOrderFees({
-          itemTotalRupees: subtotal / 100,
+          itemTotalRupees: subtotalRupees,
           distanceKm: serviceability.distanceKm ?? null,
           deliveryType,
         })
-      : { deliveryFee: 0, platformFee: 0, expressFee: 0 };
+      : { deliveryFee: 0, platformFee: 0, smallOrderFee: 0, expressFee: 0 };
+    const deliveryTipPaise = isDeliveryOrder
+      ? Math.max(0, Math.round((Number(deliveryTip) || 0) * 100))
+      : 0;
     const extraFeesPaise =
-      (feeBreakdown.deliveryFee + feeBreakdown.platformFee + feeBreakdown.expressFee) * 100;
+      (feeBreakdown.deliveryFee +
+        feeBreakdown.platformFee +
+        feeBreakdown.smallOrderFee +
+        feeBreakdown.expressFee) *
+        100 +
+      deliveryTipPaise;
 
-    const taxableBase = calculateTaxableBase(subtotal);
+    const taxableBase = calculateTaxableBase(gstBase);
     const grandTotal = calculateGrandTotal(subtotal, gst, discount) + extraFeesPaise;
 
-    // For individual KOT/orders, we don't apply the session discount to the ticket total
-    const orderDiscount = 0;
-    const orderGst = calculateGST(subtotal, gstRate);
-    const orderGrandTotal = calculateGrandTotal(subtotal, orderGst, 0) + extraFeesPaise;
+    // For individual KOT/orders, delivery checkout records the verified coupon discount; dine-in keeps session discount separate
+    const orderGst = calculateGST(gstBase, gstRate);
+    const orderGrandTotal = calculateGrandTotal(subtotal, orderGst, orderDiscount) + extraFeesPaise;
 
     console.log("MAKE ORDER - Calculated totals:", {
       subtotal,
@@ -604,6 +671,13 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
     const normalizedMethodStr = String(paymentMethod || "").trim().toLowerCase();
     const isCodPayment = normalizedMethodStr.includes("cod") || normalizedMethodStr === "cash" || normalizedMethodStr.includes("cash on delivery");
     const isOnlinePaid = isDeliveryOrder && Boolean(paymentMethod) && !isCodPayment && orderGrandTotal > 0;
+    if (isOnlinePaid && isRazorpayConfigured() && !verifiedGatewayPaymentId) {
+      finalizeIdempotency(null);
+      return res.status(402).json({
+        code: "RAZORPAY_PAYMENT_REQUIRED",
+        message: "Please complete online payment via Razorpay before placing this order.",
+      });
+    }
 
     // Handle table session - validate existing session or create one cleanly after serviceability passes
     let finalTableSessionId = tableSessionId;
@@ -739,7 +813,9 @@ router.post("/make-order", optionalAuth, async (req: any, res) => {
         ...(serviceability.distanceKm !== undefined ? { distanceKm: serviceability.distanceKm } : {}),
         platformFee: feeBreakdown.platformFee,
         customerDeliveryFee: feeBreakdown.deliveryFee,
+        smallOrderFee: feeBreakdown.smallOrderFee,
         expressFee: feeBreakdown.expressFee,
+        ...(verifiedCouponCode ? { couponCode: verifiedCouponCode } : {}),
         ...(user?.name ? { customerName: user.name } : {}),
         ...(customerPhone || phone ? { customerPhone: customerPhone || phone } : {}),
       });
@@ -1968,6 +2044,12 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
       let parsedDeliveryAddress = undefined;
       let parsedCustomerLat = undefined;
       let parsedCustomerLng = undefined;
+      let parsedPlatformFee: number | undefined = undefined;
+      let parsedDeliveryFee: number | undefined = undefined;
+      let parsedSmallOrderFee: number | undefined = undefined;
+      let parsedExpressFee: number | undefined = undefined;
+      let parsedPaymentMethod: string | undefined = undefined;
+      let parsedCouponCode: string | undefined = undefined;
       if (order.notes && typeof order.notes === 'string') {
         try {
           if (order.notes.startsWith('{') && order.notes.endsWith('}')) {
@@ -1975,6 +2057,12 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
             if (parsed.address) parsedDeliveryAddress = parsed.address;
             if (parsed.latitude) parsedCustomerLat = Number(parsed.latitude);
             if (parsed.longitude) parsedCustomerLng = Number(parsed.longitude);
+            if (parsed.platformFee !== undefined) parsedPlatformFee = Number(parsed.platformFee);
+            if (parsed.customerDeliveryFee !== undefined) parsedDeliveryFee = Number(parsed.customerDeliveryFee);
+            if (parsed.smallOrderFee !== undefined) parsedSmallOrderFee = Number(parsed.smallOrderFee);
+            if (parsed.expressFee !== undefined) parsedExpressFee = Number(parsed.expressFee);
+            if (parsed.paymentMethod) parsedPaymentMethod = String(parsed.paymentMethod);
+            if (parsed.couponCode) parsedCouponCode = String(parsed.couponCode);
           }
         } catch (e) {}
       }
@@ -1983,6 +2071,12 @@ router.get("/:userId/user-orders", requireAuth, async (req: any, res) => {
 
       return {
         ...order,
+        platformFee: parsedPlatformFee,
+        customerDeliveryFee: parsedDeliveryFee,
+        smallOrderFee: parsedSmallOrderFee,
+        expressFee: parsedExpressFee,
+        paymentMethod: parsedPaymentMethod || (order as any).paymentMethod,
+        couponCode: parsedCouponCode || (order as any).couponCode,
         deliveryStatus: activeDelivery?.status || null,
         riderName: activeDelivery?.riderName || null,
         riderPhone: activeDelivery?.riderPhone || null,

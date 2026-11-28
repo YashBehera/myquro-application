@@ -44,7 +44,11 @@ allprojects {
     }
     afterEvaluate { project ->
         if (project.name == 'expo') {
-            project.android.sourceSets.main.java.srcDirs += new File(project.buildDir, 'generated/expo/src/main/java')
+            project.android.sourceSets.main.java.srcDirs += [
+                new File(project.buildDir, 'generated/expo/src/main/java'),
+                new File(project.buildDir, 'generated/kotlin/generatePackagesList'),
+                new File(project.buildDir, 'generated/kotlin/generateInlineModules')
+            ]
         }
     }
 }

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../auth/requireAuth.js";
+import { requireAuth, optionalAuth } from "../auth/requireAuth.js";
 import { db } from "../db/db.js";
 import { nanoid } from "nanoid";
 
@@ -10,8 +10,133 @@ import { customerVouchers, sessionDiscounts } from "../db/schema/loyalty.js";
 import { and, eq, desc } from "drizzle-orm";
 import { emitToRestaurant } from "../lib/socket.js";
 import { restaurants } from "../db/schema/restaurants.js";
+import {
+  createRazorpayOrder,
+  isRazorpayConfigured,
+  verifyRazorpaySignature,
+} from "../lib/razorpay.js";
 
 const router = Router();
+
+// GET /api/payments/razorpay/config
+router.get("/razorpay/config", (_req, res) => {
+  const keyId = process.env.RAZORPAY_KEY_ID?.trim() || "";
+  return res.status(200).json({
+    success: true,
+    configured: isRazorpayConfigured(),
+    mode: keyId.startsWith("rzp_live_") ? "live" : "test",
+  });
+});
+
+// POST /api/payments/razorpay/create-order
+router.post("/razorpay/create-order", optionalAuth, async (req: any, res) => {
+  try {
+    if (!isRazorpayConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: "RAZORPAY_NOT_CONFIGURED",
+        message: "Razorpay test/live keys are not configured on the backend server yet.",
+      });
+    }
+
+    const {
+      amountPaise,
+      amountRupees,
+      purpose,
+      restaurantId,
+      couponCode,
+      paymentMethod,
+      receipt,
+      notes,
+    } = req.body || {};
+    const resolvedPaise =
+      Number(amountPaise) > 0
+        ? Math.round(Number(amountPaise))
+        : Math.round(Number(amountRupees || 0) * 100);
+
+    if (!Number.isFinite(resolvedPaise) || resolvedPaise < 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment amount must be at least ₹1.",
+      });
+    }
+
+    const userId = String(req.user?.id || "guest").slice(-8);
+    const customNotes: Record<string, string> = {};
+    if (notes && typeof notes === "object") {
+      for (const [k, v] of Object.entries(notes)) {
+        if (v !== undefined && v !== null && String(v).trim() !== "") {
+          customNotes[String(k)] = String(v).slice(0, 200);
+        }
+      }
+    }
+
+    const rzpOrder = await createRazorpayOrder({
+      amountPaise: resolvedPaise,
+      receipt: String(receipt || `mq_${userId}_${Date.now()}`),
+      notes: {
+        purpose: String(purpose || "MyQuro Order Payment").slice(0, 100),
+        ...(paymentMethod ? { paymentMethod: String(paymentMethod).slice(0, 50) } : {}),
+        ...(restaurantId ? { restaurantId: String(restaurantId) } : {}),
+        ...(couponCode ? { couponCode: String(couponCode) } : {}),
+        ...(req.user?.id ? { userId: String(req.user.id) } : {}),
+        ...customNotes,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      keyId: rzpOrder.keyId,
+      orderId: rzpOrder.orderId,
+      amount: rzpOrder.amountPaise,
+      currency: rzpOrder.currency,
+    });
+  } catch (error: any) {
+    console.error("❌ Razorpay create-order error:", error);
+    return res.status(502).json({
+      success: false,
+      message: error?.message || "Failed to initialize Razorpay payment order.",
+    });
+  }
+});
+
+// POST /api/payments/razorpay/verify
+router.post("/razorpay/verify", optionalAuth, async (req: any, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Missing razorpay_order_id, razorpay_payment_id, or razorpay_signature.",
+      });
+    }
+
+    const isValid = verifyRazorpaySignature({
+      orderId: String(razorpay_order_id),
+      paymentId: String(razorpay_payment_id),
+      signature: String(razorpay_signature),
+    });
+
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        message: "Razorpay payment signature verification failed.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      orderId: String(razorpay_order_id),
+      paymentId: String(razorpay_payment_id),
+    });
+  } catch (error) {
+    console.error("❌ Razorpay verify error:", error);
+    return res.status(500).json({ success: false, verified: false, message: "Verification failed." });
+  }
+});
 
 router.post("/:tableSessionId/pay", requireAuth, async (req: any, res) => {
   try {

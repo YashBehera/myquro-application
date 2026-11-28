@@ -76,6 +76,12 @@ interface OrderPaymentLoaderScreenProps {
   deliveryInstructions?: string[];
   cookingInstruction?: string;
   cutleryOptOut?: boolean;
+  couponCode?: string | null;
+  razorpayProof?: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  } | null;
   cartItems?: SimCartItem[];
   userName?: string;
   estimatedDeliveryTime?: string;
@@ -96,6 +102,8 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
   deliveryInstructions = [],
   cookingInstruction = '',
   cutleryOptOut = false,
+  couponCode = null,
+  razorpayProof = null,
   cartItems = [],
   userName,
   estimatedDeliveryTime,
@@ -247,6 +255,14 @@ export const OrderPaymentLoaderScreen: React.FC<OrderPaymentLoaderScreenProps> =
         deliveryInstructions: deliveryInstructions || [],
         cookingInstruction: cookingInstruction || '',
         cutleryOptOut: cutleryOptOut || false,
+        couponCode: couponCode || undefined,
+        ...(razorpayProof
+          ? {
+              razorpay_order_id: razorpayProof.razorpay_order_id,
+              razorpay_payment_id: razorpayProof.razorpay_payment_id,
+              razorpay_signature: razorpayProof.razorpay_signature,
+            }
+          : {}),
         deliveryAddress: resolvedAddress,
         latitude: currentLocation?.latitude || null,
         longitude: currentLocation?.longitude || null,

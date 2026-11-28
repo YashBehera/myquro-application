@@ -44,6 +44,7 @@ import chatRoutes from "./routes/chat.routes.js";
 import complaintsRoutes from "./routes/complaints.routes.js";
 import riderOnboardingRoutes from "./routes/rider-onboarding.routes.js";
 import customerAuthRoutes from "./routes/customerAuth.routes.js";
+import publicWebRoutes, { homeHtml } from "./routes/publicWeb.routes.js";
 
 
 export const app = express();
@@ -69,9 +70,15 @@ app.use(requestLogger);
 
 /* -------------------- Health & Root -------------------- */
 
-app.get("/", (_req, res) => {
-  res.json({ message: "MyQuro Backend API", status: "running" });
+app.get("/", (req, res) => {
+  const acceptsHtml = String(req.headers.accept || "").includes("text/html");
+  if (acceptsHtml && req.query.format !== "json") {
+    return res.status(200).type("html").send(homeHtml);
+  }
+  return res.json({ message: "MyQuro Backend API", status: "running" });
 });
+
+app.use("/", publicWebRoutes);
 
 import { emitToRestaurant } from "./lib/socket.js";
 

@@ -74,10 +74,28 @@ export function parseCustomerExtraFeesFromNotes(notes: unknown): number {
     return (
       (Number(parsed.customerDeliveryFee) || 0) +
       (Number(parsed.platformFee) || 0) +
-      (Number(parsed.expressFee) || 0)
+      (Number(parsed.smallOrderFee) || 0) +
+      (Number(parsed.expressFee) || 0) +
+      (Number(parsed.deliveryTip) || 0)
     );
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Extracts any positive delivery tip from order notes JSON (in INR rupees)
+ * and adds it to the Tier-2 distance-based rider payout.
+ */
+export function calculateRiderPayoutForOrder(distanceKm: number, notes?: unknown): number {
+  const basePayout = calculateRiderPayout(distanceKm);
+  if (typeof notes !== "string" || !notes.trim().startsWith("{")) return basePayout;
+  try {
+    const parsed = JSON.parse(notes);
+    const tip = Math.max(0, Number(parsed.deliveryTip) || 0);
+    return Number((basePayout + tip).toFixed(2));
+  } catch {
+    return basePayout;
   }
 }
 

@@ -292,7 +292,10 @@ export const IncomingRequestModal: React.FC = () => {
   const pickupName = incomingRequest.pickupAddress.split(',')[0] || 'Sindhi Sweets';
   const estimatedMin = incomingRequest.estimatedMinutes || 19;
   const distance = incomingRequest.distanceKm || 5.09;
-  const fare = Math.round(incomingRequest.fareAmount) || 50;
+  const fareVal = Number(incomingRequest.riderEarning || 0) > 0
+    ? Number(incomingRequest.riderEarning)
+    : Number((25 + Math.max(0, (incomingRequest.distanceKm || 0) - 2) * 7).toFixed(2));
+  const fare = Number.isInteger(fareVal) ? String(fareVal) : fareVal.toFixed(2);
   const surgeText = incomingRequest.surgeMultiplier || '₹25 Surge';
   const timerPct = (timeLeft / TIMER_TOTAL) * 100;
 

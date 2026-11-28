@@ -1078,7 +1078,7 @@ router.get("/:id/settlements", requireAuth, async (req: any, res) => {
       return res.status(404).json({ message: "Restaurant not found" });
     }
 
-    const commissionRate = Number(process.env.PLATFORM_COMMISSION_PERCENT) || 15;
+    const commissionRate = Number(process.env.PLATFORM_COMMISSION_PERCENT) || 12;
     const now = new Date();
     const startOfCurrentWeek = new Date(now);
     const day = startOfCurrentWeek.getDay();
@@ -1211,9 +1211,14 @@ router.get("/:id/settlements", requireAuth, async (req: any, res) => {
       }
       const bucket = weekBuckets.get(key)!;
       const grandTotalRupees = toRupeesFromOrderPaise(o.grandTotal ?? o.subtotal ?? 0);
+      const gstRupees = toRupeesFromOrderPaise(o.gst || 0);
       const discountRupees = toRupeesFromOrderPaise(o.discount || 0);
       const customerExtraFees = parseCustomerExtraFeesFromNotes(o.notes);
-      bucket.grossSales += Math.max(0, grandTotalRupees - customerExtraFees + discountRupees);
+      const foodSalesRupees =
+        Number(o.subtotal || 0) > 0
+          ? toRupeesFromOrderPaise(o.subtotal)
+          : Math.max(0, grandTotalRupees - gstRupees - customerExtraFees + discountRupees);
+      bucket.grossSales += foodSalesRupees;
       bucket.customerDeliveryFee += customerExtraFees;
       bucket.discountsSubsidized += discountRupees;
       bucket.orderCount += 1;
@@ -1246,17 +1251,17 @@ router.get("/:id/settlements", requireAuth, async (req: any, res) => {
         const payoutMonday = new Date(b.weekStart);
         payoutMonday.setDate(payoutMonday.getDate() + 7);
 
-        const commissionAmount = Number(((b.grossSales * commissionRate) / 100).toFixed(2));
+        const netFoodSales = Number(Math.max(0, b.grossSales - b.discountsSubsidized).toFixed(2));
+        const commissionAmount = Number(((netFoodSales * commissionRate) / 100).toFixed(2));
         const gstOnCommission = Number((commissionAmount * 0.18).toFixed(2));
-        const tcsDeduction = Number((b.grossSales * 0.01).toFixed(2));
+        const tcsDeduction = Number((netFoodSales * 0.01).toFixed(2));
         const netPayout = Number(
           Math.max(
             0,
-            b.grossSales -
+            netFoodSales -
               commissionAmount -
               gstOnCommission -
               tcsDeduction -
-              b.discountsSubsidized -
               b.penaltiesDeducted
           ).toFixed(2)
         );
@@ -1284,14 +1289,23 @@ router.get("/:id/settlements", requireAuth, async (req: any, res) => {
         };
       });
 
-    // Compute month-over-month growth % cleanly from real orders
+    // Compute month-over-month growth % cleanly from real food sales
     const sumMonthSales = (start: Date, end: Date) =>
       allOrders
         .filter((o) => {
           const t = new Date(o.createdAt).getTime();
           return t >= start.getTime() && t < end.getTime();
         })
-        .reduce((acc, o) => acc + toRupeesFromOrderPaise(o.grandTotal ?? o.subtotal ?? 0), 0);
+        .reduce((acc, o) => {
+          if (Number(o.subtotal || 0) > 0) {
+            return acc + toRupeesFromOrderPaise(o.subtotal);
+          }
+          const gross = toRupeesFromOrderPaise(o.grandTotal ?? 0);
+          const gstAmt = toRupeesFromOrderPaise(o.gst || 0);
+          const extra = parseCustomerExtraFeesFromNotes(o.notes);
+          const disc = toRupeesFromOrderPaise(o.discount || 0);
+          return acc + Math.max(0, gross - gstAmt - extra + disc);
+        }, 0);
 
     const thisMonthTotal = sumMonthSales(startOfThisMonth, new Date(now.getTime() + 1000));
     const lastMonthTotal = sumMonthSales(startOfLastMonth, startOfThisMonth);

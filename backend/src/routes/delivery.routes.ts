@@ -33,8 +33,14 @@ import {
   invalidateDispatchCache,
   toRupeesFromOrderPaise,
   calculateRiderPayout,
+  calculateRiderPayoutForOrder,
 } from "../lib/dispatch.js";
 import { applyRiderPenalty, PENALTY_CONFIG } from "../services/penaltyEngine.js";
+import {
+  createRazorpayOrder,
+  isRazorpayConfigured,
+  verifyRazorpaySignature,
+} from "../lib/razorpay.js";
 
 const router = Router();
 
@@ -534,7 +540,7 @@ router.post("/assign", requireAuth, async (req: any, res) => {
     }
 
     const rider = ridersWithDist[0].rider;
-    const deliveryFee = calculateRiderPayout(distanceKm);
+    const deliveryFee = calculateRiderPayoutForOrder(distanceKm, order.notes);
 
     // 5. Atomically create order_deliveries tracking record with status "offered"
     const deliveryId = `del_${nanoid(10)}`;
@@ -922,7 +928,7 @@ router.get("/offers", requireAuth, async (req: any, res) => {
           continue;
         }
 
-        const deliveryFee = calculateRiderPayout(distanceKm);
+        const deliveryFee = calculateRiderPayoutForOrder(distanceKm, order.notes);
         const etaMinutes = calculateSwiggyETA(restLat, restLng, latitude, longitude, 1);
         const deliveryId = `del_${nanoid(10)}`;
 
@@ -1352,6 +1358,7 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
       return res.status(404).json({ message: "Delivery not found" });
     }
 
+    const wasAlreadyDelivered = delList[0]?.status === "delivered";
     const nextDeliveryStatus = status;
 
     await db
@@ -1500,17 +1507,19 @@ router.post("/status/update", requireAuth, async (req: any, res) => {
           }
         }
 
-        await db.update(deliveryRiders)
-          .set({
-            status: "available",
-            walletBalance: sql`COALESCE(${deliveryRiders.walletBalance}, 0) + ${fee}`,
-            totalEarnings: sql`COALESCE(${deliveryRiders.totalEarnings}, 0) + ${fee}`,
-            totalDeliveries: sql`COALESCE(${deliveryRiders.totalDeliveries}, 0) + 1`,
-            ...(codCollectedAmount > 0
-              ? { pendingSettlement: sql`COALESCE(${deliveryRiders.pendingSettlement}, 0) + ${codCollectedAmount}` }
-              : {}),
-          })
-          .where(eq(deliveryRiders.id, riderId));
+        if (!wasAlreadyDelivered) {
+          await db.update(deliveryRiders)
+            .set({
+              status: "available",
+              walletBalance: sql`COALESCE(${deliveryRiders.walletBalance}, 0) + ${fee}`,
+              totalEarnings: sql`COALESCE(${deliveryRiders.totalEarnings}, 0) + ${fee}`,
+              totalDeliveries: sql`COALESCE(${deliveryRiders.totalDeliveries}, 0) + 1`,
+              ...(codCollectedAmount > 0
+                ? { pendingSettlement: sql`COALESCE(${deliveryRiders.pendingSettlement}, 0) + ${codCollectedAmount}` }
+                : {}),
+            })
+            .where(eq(deliveryRiders.id, riderId));
+        }
 
         // Apply post-pickup extreme delay penalty when transit duration breaches threshold
         if (orderRecord?.updatedAt) {
@@ -1771,11 +1780,12 @@ router.get("/rider/dashboard", requireAuth, async (req: any, res) => {
     }
     const rider = riderList[0];
 
-    // Compute today's and this week's earnings
+    // Compute today's and this week's earnings (Monday-start calendar week)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
+    const diffToMon = (today.getDay() + 6) % 7;
+    startOfWeek.setDate(today.getDate() - diffToMon);
 
     const deliveries = await db.select({
       fee: orderDeliveries.deliveryFee,
@@ -2641,11 +2651,34 @@ router.post("/rider/floating-cash/return-change", requireAuth, async (req: any, 
 router.post("/rider/floating-cash/deposit", requireAuth, async (req: any, res) => {
   try {
     const user = req.user;
-    const { amount, method, referenceNumber } = req.body;
+    const {
+      amount,
+      method,
+      referenceNumber,
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    } = req.body;
 
     const depositAmount = Number(amount);
     if (!depositAmount || depositAmount <= 0) {
       return res.status(400).json({ message: "Valid deposit amount is required" });
+    }
+
+    if (razorpay_order_id || razorpay_payment_id || razorpay_signature) {
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return res.status(400).json({ message: "Incomplete Razorpay verification details." });
+      }
+      if (
+        isRazorpayConfigured() &&
+        !verifyRazorpaySignature({
+          orderId: String(razorpay_order_id),
+          paymentId: String(razorpay_payment_id),
+          signature: String(razorpay_signature),
+        })
+      ) {
+        return res.status(400).json({ message: "Razorpay deposit signature verification failed." });
+      }
     }
 
     const [rider] = await db
@@ -2662,7 +2695,10 @@ router.post("/rider/floating-cash/deposit", requireAuth, async (req: any, res) =
     const nextBalance = Math.max(0, Number((currentBal - depositAmount).toFixed(2)));
     const txnId = `DEP-${nanoid(8).toUpperCase()}`;
     const validMethod = String(method || "upi").toLowerCase();
-    const refNo = referenceNumber || `DEP-${Date.now().toString().slice(-6)}`;
+    const refNo =
+      (razorpay_payment_id ? String(razorpay_payment_id) : null) ||
+      referenceNumber ||
+      `DEP-${Date.now().toString().slice(-6)}`;
 
     const [inserted] = await db
       .insert(riderFloatingCashTxns)
@@ -2715,11 +2751,9 @@ router.post("/rider/floating-cash/generate-gateway-order", requireAuth, async (r
       return res.status(400).json({ success: false, message: "Valid deposit amount is required" });
     }
 
-    const rzpKey = process.env.RAZORPAY_KEY_ID;
-    const rzpSecret = process.env.RAZORPAY_KEY_SECRET;
     const targetUpi = String(customerUpi || process.env.COMPANY_SETTLEMENT_UPI_ID || "").trim();
 
-    if (!(rzpKey && rzpSecret) && !targetUpi) {
+    if (!isRazorpayConfigured() && !targetUpi) {
       return res.status(503).json({
         success: false,
         message: "Online settlement gateway is not configured on the server yet. Deposit cash via hub partner or configure RAZORPAY_KEY_ID / COMPANY_SETTLEMENT_UPI_ID.",
@@ -2727,29 +2761,28 @@ router.post("/rider/floating-cash/generate-gateway-order", requireAuth, async (r
     }
 
     let gatewayOrderId = `intent_${nanoid(12)}`;
-    if (rzpKey && rzpSecret) {
-      const authHeader = Buffer.from(`${rzpKey}:${rzpSecret}`).toString("base64");
-      const rzpResp = await fetch("https://api.razorpay.com/v1/orders", {
-        method: "POST",
-        headers: {
-          "Authorization": `Basic ${authHeader}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          amount: Math.round(numericAmount * 100),
-          currency: "INR",
+    let keyId: string | null = null;
+    let amountPaise = Math.round(numericAmount * 100);
+
+    if (isRazorpayConfigured()) {
+      try {
+        const rzpOrder = await createRazorpayOrder({
+          amountPaise,
           receipt: `fc_${String(user.id).slice(-8)}_${Date.now()}`,
-          notes: { riderId: user.id, purpose: purpose || "MyQuro Floating Cash Settlement" },
-        }),
-      });
-      const rzpData: any = await rzpResp.json().catch(() => ({}));
-      if (!rzpResp.ok || !rzpData?.id) {
+          notes: {
+            riderId: String(user.id),
+            purpose: String(purpose || "MyQuro Floating Cash Settlement"),
+          },
+        });
+        gatewayOrderId = rzpOrder.orderId;
+        keyId = rzpOrder.keyId;
+        amountPaise = rzpOrder.amountPaise;
+      } catch (gwErr: any) {
         return res.status(502).json({
           success: false,
-          message: rzpData?.error?.description || "Failed to initialize Razorpay settlement order",
+          message: gwErr?.message || "Failed to initialize Razorpay settlement order",
         });
       }
-      gatewayOrderId = rzpData.id;
     }
 
     const upiIntentUrl = targetUpi
@@ -2760,8 +2793,9 @@ router.post("/rider/floating-cash/generate-gateway-order", requireAuth, async (r
       success: true,
       gatewayOrderId,
       amount: numericAmount,
+      amountPaise,
       currency: "INR",
-      keyId: rzpKey || null,
+      keyId,
       upiIntentUrl,
     });
   } catch (err) {

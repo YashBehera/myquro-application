@@ -68,7 +68,7 @@ router.get("/scan/:qrToken", async (req, res) => {
       });
 
       // Send a redirect response and return immediately
-      const redirectUrl = `${process.env.CLIENT_URL || 'https://myquro.com'}/dashboard`;
+      const redirectUrl = `${process.env.CLIENT_URL || 'https://myquro-backend.onrender.com'}/dashboard`;
       return res.redirect(redirectUrl);
     }
 

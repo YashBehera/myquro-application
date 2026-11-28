@@ -27,6 +27,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRider } from '@/context/RiderContext';
 import { BACKEND_URL } from '@/config';
 import { CustomAlertModal, ModalType } from '../components/CustomAlertModal';
+import { RazorpayCheckoutModal, type RazorpaySuccessPayload } from '../components/RazorpayCheckoutModal';
 
 interface CodOrder {
   orderId: string;
@@ -79,6 +80,12 @@ export default function FloatingCashScreen() {
   const [novopayModalVisible, setNovopayModalVisible] = useState(false);
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
+  const [rzpDepositOrder, setRzpDepositOrder] = useState<{
+    keyId: string;
+    orderId: string;
+    amountPaise: number;
+    amountInr: number;
+  } | null>(null);
   const [customAlert, setCustomAlert] = useState<{
     visible: boolean;
     type?: ModalType;
@@ -404,6 +411,48 @@ export default function FloatingCashScreen() {
     }
   };
 
+  const completeRiderDeposit = async (
+    depositAmt: number,
+    method: string,
+    proof?: RazorpaySuccessPayload
+  ) => {
+    const res = await fetch(`${BACKEND_URL}/api/delivery/rider/floating-cash/deposit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sessionToken}`,
+      },
+      body: JSON.stringify({
+        amount: depositAmt,
+        method,
+        referenceNumber: proof?.razorpay_payment_id || `DEP-UTR-${Date.now().toString().slice(-6)}`,
+        ...(proof ? {
+          razorpay_order_id: proof.razorpay_order_id,
+          razorpay_payment_id: proof.razorpay_payment_id,
+          razorpay_signature: proof.razorpay_signature,
+        } : {}),
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setCurrentBalance(data.currentBalance);
+      setDepositModalVisible(false);
+      setSelectedReceipt(data.receipt);
+      setReceiptModalVisible(true);
+      fetchFloatingCashData();
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      showAlertModal({
+        type: 'error',
+        title: 'Deposit Failed',
+        subtitle: errData.message || 'Deposit failed',
+        primaryButtonText: 'Okay',
+        onPrimaryPress: hideAlertModal,
+      });
+    }
+  };
+
   // Process Cash Deposit to MyQuro
   const handleDepositToMyQuro = async () => {
     const amount = parseFloat(depositAmountInput);
@@ -432,24 +481,23 @@ export default function FloatingCashScreen() {
     setIsProcessingDeposit(true);
     try {
       if (depositMethod === 'upi') {
-        let upiLaunchUrl = settlementUpiId
-          ? `upi://pay?pa=${encodeURIComponent(settlementUpiId)}&pn=MyQuro+Settlement&am=${amount}&cu=INR&tn=${encodeURIComponent(`Rider Cash Deposit ${driverProfile?.name || 'Rider'}`)}`
-          : null;
-
-        if (!upiLaunchUrl) {
-          const gwRes = await fetch(`${BACKEND_URL}/api/delivery/rider/floating-cash/generate-gateway-order`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${sessionToken}`,
-            },
-            body: JSON.stringify({
-              amount,
-              purpose: `Rider Cash Deposit ${driverProfile?.id || ''}`,
-            }),
-          });
-          const gwData = await gwRes.json().catch(() => ({}));
-          if (!gwRes.ok) {
+        const gwRes = await fetch(`${BACKEND_URL}/api/delivery/rider/floating-cash/generate-gateway-order`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`,
+          },
+          body: JSON.stringify({
+            amount,
+            purpose: `Rider Cash Deposit ${driverProfile?.id || ''}`,
+          }),
+        });
+        const gwData = await gwRes.json().catch(() => ({}));
+        if (!gwRes.ok) {
+          if (settlementUpiId) {
+            const fallbackUrl = `upi://pay?pa=${encodeURIComponent(settlementUpiId)}&pn=MyQuro+Settlement&am=${amount}&cu=INR&tn=${encodeURIComponent(`Rider Cash Deposit ${driverProfile?.name || 'Rider'}`)}`;
+            try { await Linking.openURL(fallbackUrl); } catch {}
+          } else {
             showAlertModal({
               type: 'warning',
               title: 'Gateway Not Configured',
@@ -460,48 +508,25 @@ export default function FloatingCashScreen() {
             setIsProcessingDeposit(false);
             return;
           }
-          upiLaunchUrl = gwData.upiIntentUrl || null;
-        }
-
-        if (upiLaunchUrl) {
+        } else if (gwData?.keyId && typeof gwData?.gatewayOrderId === 'string' && gwData.gatewayOrderId.startsWith('order_')) {
+          setIsProcessingDeposit(false);
+          setRzpDepositOrder({
+            keyId: String(gwData.keyId),
+            orderId: String(gwData.gatewayOrderId),
+            amountPaise: Number(gwData.amountPaise || Math.round(amount * 100)),
+            amountInr: amount,
+          });
+          return;
+        } else if (gwData?.upiIntentUrl) {
           try {
-            await Linking.openURL(upiLaunchUrl);
+            await Linking.openURL(gwData.upiIntentUrl);
           } catch {
             // Continue so rider can confirm deposit reference
           }
         }
       }
 
-      const res = await fetch(`${BACKEND_URL}/api/delivery/rider/floating-cash/deposit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionToken}`,
-        },
-        body: JSON.stringify({
-          amount,
-          method: depositMethod,
-          referenceNumber: `DEP-UTR-${Date.now().toString().slice(-6)}`,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setCurrentBalance(data.currentBalance);
-        setDepositModalVisible(false);
-        setSelectedReceipt(data.receipt);
-        setReceiptModalVisible(true);
-        fetchFloatingCashData();
-      } else {
-        const errData = await res.json();
-        showAlertModal({
-          type: 'error',
-          title: 'Deposit Failed',
-          subtitle: errData.message || 'Deposit failed',
-          primaryButtonText: 'Okay',
-          onPrimaryPress: hideAlertModal,
-        });
-      }
+      await completeRiderDeposit(amount, depositMethod);
     } catch (err) {
       console.error('Deposit error:', err);
       showAlertModal({
@@ -1486,6 +1511,49 @@ export default function FloatingCashScreen() {
         secondaryButtonText={customAlert.secondaryButtonText}
         onSecondaryPress={customAlert.onSecondaryPress || hideAlertModal}
         onClose={hideAlertModal}
+      />
+
+      <RazorpayCheckoutModal
+        visible={!!rzpDepositOrder}
+        keyId={rzpDepositOrder?.keyId || ''}
+        orderId={rzpDepositOrder?.orderId || ''}
+        amountPaise={rzpDepositOrder?.amountPaise || 0}
+        description={`Floating Cash Settlement (₹${rzpDepositOrder?.amountInr || 0})`}
+        prefill={{
+          name: driverProfile?.name || undefined,
+          contact: driverProfile?.phone || undefined,
+          method: 'upi',
+        }}
+        onSuccess={async (payload) => {
+          const pendingAmount = rzpDepositOrder?.amountInr || 0;
+          setRzpDepositOrder(null);
+          if (!pendingAmount) return;
+          setIsProcessingDeposit(true);
+          try {
+            await completeRiderDeposit(pendingAmount, 'razorpay_upi', payload);
+          } catch (err: any) {
+            showAlertModal({
+              type: 'error',
+              title: 'Network Error',
+              subtitle: err?.message || 'Unable to reach settlement server.',
+              primaryButtonText: 'Okay',
+              onPrimaryPress: hideAlertModal,
+            });
+          } finally {
+            setIsProcessingDeposit(false);
+          }
+        }}
+        onCancel={() => setRzpDepositOrder(null)}
+        onFailure={(msg) => {
+          setRzpDepositOrder(null);
+          showAlertModal({
+            type: 'error',
+            title: 'Payment Failed',
+            subtitle: msg || 'Razorpay checkout failed. Please try again.',
+            primaryButtonText: 'Okay',
+            onPrimaryPress: hideAlertModal,
+          });
+        }}
       />
     </View>
   );

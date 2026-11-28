@@ -240,15 +240,40 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
   const rawGrandTotal = getNumericAmount(order.grandTotal || order.totalAmount || order.billTotal);
   const discountAmount = getNumericAmount(order.discount || order.discountAmount);
   const couponCode = order.couponCode || order.coupon || order.promoCode || 'OFFER';
-  const packagingFee = order.packagingFee !== undefined ? getNumericAmount(order.packagingFee) : (rawSubtotal > 0 ? 30 : 0);
-  const platformFee = order.platformFee !== undefined ? getNumericAmount(order.platformFee) : (rawSubtotal > 0 ? 17.58 : 0);
+  const parsedOrderNotes = (() => {
+    if (typeof order.notes === 'string' && order.notes.trim().startsWith('{')) {
+      try {
+        return JSON.parse(order.notes);
+      } catch {}
+    }
+    return {};
+  })();
+  const packagingFee = order.packagingFee !== undefined ? getNumericAmount(order.packagingFee) : 0;
+  const platformFee =
+    order.platformFee !== undefined
+      ? getNumericAmount(order.platformFee)
+      : parsedOrderNotes.platformFee !== undefined
+      ? Number(parsedOrderNotes.platformFee) || 0
+      : 0;
+  const smallOrderFee =
+    order.smallOrderFee !== undefined
+      ? getNumericAmount(order.smallOrderFee)
+      : parsedOrderNotes.smallOrderFee !== undefined
+      ? Number(parsedOrderNotes.smallOrderFee) || 0
+      : 0;
+  const deliveryFee =
+    order.customerDeliveryFee !== undefined
+      ? getNumericAmount(order.customerDeliveryFee)
+      : parsedOrderNotes.customerDeliveryFee !== undefined
+      ? Number(parsedOrderNotes.customerDeliveryFee) || 0
+      : 0;
   const taxesFee = order.gst !== undefined ? getNumericAmount(order.gst) : (order.taxes !== undefined ? getNumericAmount(order.taxes) : Math.round(rawSubtotal * 0.05));
-  const isExpress = order.deliveryType === 'express' || order.isExpress === true;
-  const expressFee = isExpress ? (getNumericAmount(order.expressFee) || 19) : 0;
-  const deliveryDistance = order.distance || order.deliveryDistance || null;
+  const isExpress = order.deliveryType === 'express' || order.isExpress === true || parsedOrderNotes.deliveryType === 'express';
+  const expressFee = isExpress ? (getNumericAmount(order.expressFee) || Number(parsedOrderNotes.expressFee) || 19) : 0;
+  const deliveryDistance = order.distance || order.deliveryDistance || parsedOrderNotes.distanceKm || null;
 
   const totalBillFormatted = formatAmount(
-    rawGrandTotal || (rawSubtotal + packagingFee + platformFee + taxesFee + expressFee - discountAmount)
+    rawGrandTotal || (rawSubtotal + packagingFee + deliveryFee + platformFee + smallOrderFee + taxesFee + expressFee - discountAmount)
   );
 
   // Status mapping
@@ -479,8 +504,16 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
             {/* Platform Fee */}
             {platformFee > 0 && (
               <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Platform fee with GST</Text>
+                <Text style={styles.breakdownLabel}>Platform Fee</Text>
                 <Text style={styles.breakdownValue}>₹{platformFee}</Text>
+              </View>
+            )}
+
+            {/* Small Order Fee */}
+            {smallOrderFee > 0 && (
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Small Order Fee (Below ₹200)</Text>
+                <Text style={styles.breakdownValue}>₹{smallOrderFee}</Text>
               </View>
             )}
 
@@ -497,12 +530,16 @@ export const OrderDetailsSubView: React.FC<OrderDetailsSubViewProps> = ({
             {/* Delivery Fee */}
             <View style={styles.breakdownRow}>
               <Text style={styles.breakdownLabel} numberOfLines={1}>
-                Delivery Fee (FREE with MyQURO){deliveryDistance ? ` | ${deliveryDistance} kms` : ''}
+                Delivery Fee{deliveryDistance ? ` | ${deliveryDistance} kms` : ''}
               </Text>
-              <View style={styles.deliveryFeeCol}>
-                <Text style={styles.strikethroughFee}>56.0</Text>
-                <Text style={styles.freeGreenText}>FREE</Text>
-              </View>
+              {deliveryFee === 0 ? (
+                <View style={styles.deliveryFeeCol}>
+                  <Text style={styles.strikethroughFee}>35.0</Text>
+                  <Text style={styles.freeGreenText}>FREE</Text>
+                </View>
+              ) : (
+                <Text style={styles.breakdownValue}>₹{deliveryFee}</Text>
+              )}
             </View>
 
             {/* Express Fee (only if express order) */}

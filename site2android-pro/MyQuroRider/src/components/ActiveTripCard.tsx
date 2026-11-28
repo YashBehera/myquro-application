@@ -765,7 +765,10 @@ export const ActiveTripCard: React.FC = () => {
     );
   };
 
-  const earningsAmount = Math.round(activeTrip.fareAmount * 0.3) || 22;
+  const rawEarning = Number(activeTrip.riderEarning || 0) > 0
+    ? Number(activeTrip.riderEarning)
+    : Number((25 + Math.max(0, (activeTrip.distanceKm || 0) - 2) * 7).toFixed(2));
+  const earningsAmount = Number.isInteger(rawEarning) ? rawEarning : rawEarning.toFixed(2);
 
   if (showEarningsScreen || activeTrip.status === 'COMPLETED') {
     return (

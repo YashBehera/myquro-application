@@ -72,7 +72,8 @@ router.get("/public/:restaurantId", async (req: any, res) => {
       code: offer.code,
       endDate: offer.endDate,
       scope: offer.scope,
-      minOrderValue: offer.minOrderValue
+      minOrderValue: offer.minOrderValue,
+      maxDiscountAmount: offer.maxDiscountAmount,
     }));
 
     const responseData = { success: true, offers: activeOffers };

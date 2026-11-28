@@ -18,7 +18,7 @@ console.log('  NODE_ENV:', process.env.NODE_ENV);
 console.log('  CLIENT_URL:', process.env.CLIENT_URL);
 console.log('  BACKEND_URL:', process.env.BACKEND_URL);
 
-const baseURL = process.env.BETTER_AUTH_URL || "https://api.myquro.com";
+const baseURL = process.env.BETTER_AUTH_URL || "https://myquro-backend.onrender.com";
 const isDevOriginAllowed = process.env.NODE_ENV !== "production";
 const configuredOrigins = [
   process.env.BACKEND_URL,

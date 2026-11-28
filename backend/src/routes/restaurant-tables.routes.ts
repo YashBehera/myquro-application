@@ -353,7 +353,7 @@ router.post("/tables/:tableId/qrcode", requireAuth, async (req: any, res) => {
     });
 
     // Step 3: Generate the QR code image with FRONTEND URL
-    const frontendUrl = process.env.CLIENT_URL || 'https://myquro.com';
+    const frontendUrl = process.env.CLIENT_URL || 'https://myquro-backend.onrender.com';
     const scanUrl = `${frontendUrl}/qr/${qrToken}`;
     const qrImageBase64 = await QRCode.toDataURL(scanUrl, {
       width: 400,

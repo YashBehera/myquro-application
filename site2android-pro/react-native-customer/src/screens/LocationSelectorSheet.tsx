@@ -30,6 +30,7 @@ import {
 } from 'lucide-react-native';
 import { OlaMapView, OlaMapViewRef } from '../components/OlaMapView';
 import { useViewModel, SavedAddress } from '../state/MainViewModel';
+import { BACKEND_URL } from '../config';
 import {
   fetchPlaceSuggestions,
   getCoordsFromPlaceId,
@@ -553,7 +554,7 @@ export const LocationSelectorSheet: React.FC<LocationSelectorSheetProps> = ({
   const handleShareAddressRequest = async () => {
     try {
       await Share.share({
-        message: 'Hey! Please share your delivery address with me on MyQuro: https://myquro.com/address-request',
+        message: `Hey! Please share your delivery address with me on MyQuro: ${BACKEND_URL}/address-request`,
         title: 'Request Delivery Address',
       });
     } catch (error: any) {

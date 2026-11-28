@@ -425,45 +425,54 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
   const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
   const [modalQuantity, setModalQuantity] = useState<number>(1);
 
-  // Auto-rotating & Touch-Responsive Offer Banner Carousel State
+  // Real database offers only (zero hardcoded promo fallbacks)
   const [currentOfferIndex, setCurrentOfferIndex] = useState(0);
+  const [restaurantOffers, setRestaurantOffers] = useState<
+    Array<{ title: string; code: string; badge: string; couponCode: string }>
+  >([]);
   const offerFadeAnim = useRef(new Animated.Value(1)).current;
 
-  const restaurantOffers = useMemo(() => [
-    {
-      title: restaurant.discount || '70% OFF UPTO ₹140',
-      code: 'USE QURO70 | ABOVE ₹199',
-      badge: '%',
-      couponCode: 'QURO70',
-    },
-    {
-      title: 'FLAT ₹125 OFF INSTANTLY',
-      code: 'USE FLAVORFUL | ABOVE ₹399',
-      badge: '₹',
-      couponCode: 'FLAVORFUL',
-    },
-    {
-      title: '50% OFF UPTO ₹100',
-      code: 'USE WELCOME50 | ABOVE ₹149',
-      badge: '%',
-      couponCode: 'WELCOME50',
-    },
-    {
-      title: 'FLAT ₹200 OFF GOURMET DEALS',
-      code: 'USE GOURMET200 | ABOVE ₹599',
-      badge: '₹',
-      couponCode: 'GOURMET200',
-    },
-    {
-      title: 'FREE DELIVERY + EXTRA 20% OFF',
-      code: 'USE ONEPASS | ABOVE ₹99',
-      badge: '★',
-      couponCode: 'ONEPASS',
-    },
-  ], [restaurant.discount]);
+  useEffect(() => {
+    let active = true;
+    const targetRestId = restaurant?.id;
+    if (!targetRestId) {
+      setRestaurantOffers([]);
+      return;
+    }
+    fetch(`${BACKEND_URL}/api/offers/public/${targetRestId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active) return;
+        const list = Array.isArray(data?.offers) ? data.offers : [];
+        const mapped = list.map((o: any) => {
+          const isPct = o.offerType === 'percentage';
+          const val = Number(o.discountValue || 0);
+          const minVal = Number(o.minOrderValue || 0);
+          const title = isPct
+            ? `${val}% OFF${o.maxDiscountAmount ? ` UPTO ₹${o.maxDiscountAmount}` : ''}`
+            : `FLAT ₹${val} OFF`;
+          const code = minVal > 0 ? `USE ${o.code} | ABOVE ₹${minVal}` : `USE ${o.code}`;
+          return {
+            title,
+            code,
+            badge: isPct ? '%' : '₹',
+            couponCode: String(o.code || ''),
+          };
+        });
+        setRestaurantOffers(mapped);
+        setCurrentOfferIndex(0);
+      })
+      .catch(() => {
+        if (active) setRestaurantOffers([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [restaurant?.id]);
 
   // Touch handler to cycle to next offer with smooth animation
   const handleNextOffer = useCallback(() => {
+    if (restaurantOffers.length === 0) return;
     Animated.sequence([
       Animated.timing(offerFadeAnim, {
         toValue: 0.3,
@@ -478,13 +487,14 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
     ]).start();
     setCurrentOfferIndex(prev => (prev + 1) % restaurantOffers.length);
     const offer = restaurantOffers[(currentOfferIndex + 1) % restaurantOffers.length];
-    if (Platform.OS === 'android') {
+    if (Platform.OS === 'android' && offer) {
       ToastAndroid.show(`Coupon: ${offer.couponCode} (${offer.title})`, ToastAndroid.SHORT);
     }
   }, [offerFadeAnim, restaurantOffers, currentOfferIndex]);
 
-  // Continuously rotate offers every 3.2 seconds
+  // Continuously rotate offers every 3.2 seconds when multiple exist
   useEffect(() => {
+    if (restaurantOffers.length <= 1) return;
     const timer = setInterval(() => {
       Animated.sequence([
         Animated.timing(offerFadeAnim, {
@@ -1126,48 +1136,51 @@ export const RestaurantDetailScreen: React.FC<RestaurantDetailScreenProps> = ({
             <Image source={imgImage17} style={styles.downChevronImg} />
           </TouchableOpacity>
 
-          {/* Card Divider Line 1 */}
-          <Image source={imgBackground9} style={styles.cardDividerImg} />
+          {/* Offer Banner Carousel Row (shown only when restaurant has active DB offers) */}
+          {restaurantOffers.length > 0 && (
+            <>
+              <Image source={imgBackground9} style={styles.cardDividerImg} />
 
-          {/* Offer Banner Carousel Row (Touch Responsive & Auto-Rotating) */}
-          <TouchableOpacity
-            style={styles.offerBannerRow}
-            activeOpacity={0.8}
-            onPress={handleNextOffer}
-          >
-            <View style={styles.offerBadgeBox}>
-              <Image source={imgBackground8} style={styles.offerBadgeStarburst} />
-              <Text style={styles.offerBadgePercentText}>
-                {restaurantOffers[currentOfferIndex]?.badge || '%'}
-              </Text>
-            </View>
+              <TouchableOpacity
+                style={styles.offerBannerRow}
+                activeOpacity={0.8}
+                onPress={handleNextOffer}
+              >
+                <View style={styles.offerBadgeBox}>
+                  <Image source={imgBackground8} style={styles.offerBadgeStarburst} />
+                  <Text style={styles.offerBadgePercentText}>
+                    {restaurantOffers[currentOfferIndex]?.badge || '%'}
+                  </Text>
+                </View>
 
-            <Animated.View style={[styles.offerInfoCol, { opacity: offerFadeAnim }]}>
-              <Text style={styles.offerTitleText} numberOfLines={1}>
-                {restaurantOffers[currentOfferIndex]?.title}
-              </Text>
-              <Text style={styles.offerCouponCodeText} numberOfLines={1}>
-                {restaurantOffers[currentOfferIndex]?.code}
-              </Text>
-            </Animated.View>
+                <Animated.View style={[styles.offerInfoCol, { opacity: offerFadeAnim }]}>
+                  <Text style={styles.offerTitleText} numberOfLines={1}>
+                    {restaurantOffers[currentOfferIndex]?.title}
+                  </Text>
+                  <Text style={styles.offerCouponCodeText} numberOfLines={1}>
+                    {restaurantOffers[currentOfferIndex]?.code}
+                  </Text>
+                </Animated.View>
 
-            <View style={styles.offerPaginationCol}>
-              <Text style={styles.offerPageCountText}>
-                {currentOfferIndex + 1}/{restaurantOffers.length}
-              </Text>
-              <View style={styles.offerDotsRow}>
-                {restaurantOffers.map((_, dotIdx) => (
-                  <View
-                    key={`offer-dot-${dotIdx}`}
-                    style={[
-                      styles.offerDotCustom,
-                      dotIdx === currentOfferIndex && styles.offerDotCustomActive,
-                    ]}
-                  />
-                ))}
-              </View>
-            </View>
-          </TouchableOpacity>
+                <View style={styles.offerPaginationCol}>
+                  <Text style={styles.offerPageCountText}>
+                    {currentOfferIndex + 1}/{restaurantOffers.length}
+                  </Text>
+                  <View style={styles.offerDotsRow}>
+                    {restaurantOffers.map((_, dotIdx) => (
+                      <View
+                        key={`offer-dot-${dotIdx}`}
+                        style={[
+                          styles.offerDotCustom,
+                          dotIdx === currentOfferIndex && styles.offerDotCustomActive,
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </>
+          )}
 
           {/* Card Divider Line 2 */}
           <Image source={imgBackground3} style={styles.cardDividerImg} />

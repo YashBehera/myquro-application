@@ -69,87 +69,7 @@ export interface SimCoupon {
   terms?: string[];
 }
 
-export const ALL_COUPONS: SimCoupon[] = [
-  {
-    code: 'FLAVORFUL',
-    badge: '₹125 OFF',
-    discount: 125,
-    minOrder: 399,
-    discountType: 'flat',
-    discountValue: 125,
-    maxDiscount: 125,
-    benefitHighlight: 'Get Flat Rs.125 off',
-    description: 'Use code FLAVORFUL & get FLAT ₹125 Off on orders above ₹399',
-    terms: [
-      'Applicable on orders with food total ₹399 and above',
-      'Flat instant discount of ₹125 applied to total bill',
-      'Valid once per customer per day',
-    ],
-  },
-  {
-    code: 'DEALZONE',
-    badge: '3% OFF',
-    discount: 30,
-    minOrder: 499,
-    discountType: 'percentage',
-    discountValue: 3,
-    maxDiscount: 50,
-    benefitHighlight: 'Get 3% off on all items',
-    description: 'Use code DEALZONE & get 3% instant off + unlocked payment offers on orders above ₹499.',
-    hasPaymentAddons: true,
-    terms: [
-      'Valid on orders above ₹499',
-      '3% instant savings on order total',
-      'Unlocks special bank & wallet cashback deals upon checkout',
-    ],
-  },
-  {
-    code: 'DELULU4FOOD',
-    badge: '70% OFF',
-    discount: 140,
-    minOrder: 199,
-    discountType: 'percentage',
-    discountValue: 70,
-    maxDiscount: 140,
-    benefitHighlight: 'Get 70% off up to ₹140',
-    description: 'Use code DELULU4FOOD & get 70% OFF up to ₹140 on orders above ₹199.',
-    terms: [
-      'Special introductory foodie offer',
-      'Maximum discount is capped at ₹140',
-      'Applicable on orders of ₹199 and above',
-    ],
-  },
-  {
-    code: 'MYQURO',
-    badge: '₹50 OFF',
-    discount: 50,
-    minOrder: 249,
-    discountType: 'flat',
-    discountValue: 50,
-    maxDiscount: 50,
-    benefitHighlight: 'Get Flat ₹50 off',
-    description: 'Exclusive benefit for MyQURO Gold Members on orders above ₹249.',
-    terms: [
-      'Active MyQURO membership required',
-      'Flat ₹50 savings on food total above ₹249',
-    ],
-  },
-  {
-    code: 'FLAT300',
-    badge: '₹300 OFF',
-    discount: 300,
-    minOrder: 500,
-    discountType: 'flat',
-    discountValue: 300,
-    maxDiscount: 300,
-    benefitHighlight: 'Get Flat ₹300 off',
-    description: 'Use code FLAT300 & get FLAT ₹300 Off on bulk orders above ₹500.',
-    terms: [
-      'Applicable on party & bulk orders above ₹500',
-      'Flat ₹300 instant reduction on bill value',
-    ],
-  },
-];
+export const ALL_COUPONS: SimCoupon[] = [];
 
 export interface ApplyCouponModalProps {
   visible: boolean;
@@ -340,16 +260,28 @@ export const ApplyCouponModal: React.FC<ApplyCouponModalProps> = ({
             <Text style={styles.eligibilityText}>
               {appliedCoupon
                 ? `Coupon '${appliedCoupon.code}' applied! You are saving ₹${appliedCoupon.discount} on this order.`
-                : cartTotal < 199
-                ? 'Items added to your cart are not eligible for any coupons (Min. cart ₹199)'
-                : 'Great! You have unlocked special coupon discounts for your cart.'}
+                : coupons.length === 0
+                ? 'No restaurant coupons active right now — enjoying direct menu prices!'
+                : coupons.some((c) => cartTotal >= c.minOrder)
+                ? 'Great! Select an eligible coupon below for instant savings.'
+                : 'Add more items to unlock available outlet offers below.'}
             </Text>
           </View>
 
           {/* ════════════════════════════════════════════════════════════════════════
               [4] "MORE OFFERS" SECTION
               ════════════════════════════════════════════════════════════════════════ */}
-          <Text style={styles.sectionTitle}>MORE OFFERS</Text>
+          <Text style={styles.sectionTitle}>
+            {coupons.length > 0 ? 'AVAILABLE OFFERS' : 'OUTLET OFFERS'}
+          </Text>
+
+          {coupons.length === 0 && (
+            <View style={{ paddingVertical: 28, alignItems: 'center', paddingHorizontal: 16 }}>
+              <Text style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
+                This restaurant has no active discount coupons at the moment. Prices already reflect direct dine-in menu rates.
+              </Text>
+            </View>
+          )}
 
           {/* ════════════════════════════════════════════════════════════════════════
               [5] COUPON TICKET CARDS LIST (FIGMA NODE 3029:1641)

@@ -43,7 +43,7 @@ export default function PartnerContractScreen() {
   const showCommissionInfo = () => {
     Alert.alert(
       'Commission Structure',
-      'The 15% platform commission covers delivery logistics, live order tracking, customer support, and merchant app services.'
+      'The 12% platform commission covers delivery logistics, live order tracking, customer support, and merchant app services.'
     );
   };
 
@@ -156,7 +156,7 @@ export default function PartnerContractScreen() {
                   />
                 </TouchableOpacity>
               </View>
-              <Text style={styles.overviewValue}>15%</Text>
+              <Text style={styles.overviewValue}>12%</Text>
             </View>
 
             <View style={styles.overviewDivider} />
@@ -405,7 +405,7 @@ export default function PartnerContractScreen() {
                   Post first 30 days or first 100 completed orders or ₹10,000
                   worth of commission rebate (whichever occurs earlier), the partner
                   will automatically be charged{' '}
-                  <Text style={styles.boldWhite}>% 15 commission</Text>
+                  <Text style={styles.boldWhite}>% 12 commission</Text>
                 </Text>
               </View>
 
@@ -435,7 +435,7 @@ export default function PartnerContractScreen() {
               <View style={styles.termsBulletItem}>
                 <Text style={styles.bulletDotGold}>•</Text>
                 <Text style={styles.termsBulletText}>
-                  After the restaurant is live, commissions will be deducted @ % 15
+                  After the restaurant is live, commissions will be deducted @ % 12
                   on all orders, excluding taxes and delivery fees (if applicable).
                 </Text>
               </View>

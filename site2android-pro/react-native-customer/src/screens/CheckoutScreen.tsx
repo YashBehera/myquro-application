@@ -53,7 +53,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useViewModel } from '../state/MainViewModel';
 import { BACKEND_URL } from '../config';
-import { ApplyCouponModal } from '../components/ApplyCouponModal';
+import { ApplyCouponModal, type SimCoupon } from '../components/ApplyCouponModal';
+export type { SimCoupon };
+import {
+  RazorpayCheckoutModal,
+  createRazorpayOrderOnBackend,
+  type RazorpaySuccessPayload,
+} from '../components/RazorpayCheckoutModal';
 import { OrderPaymentLoaderScreen } from './OrderPaymentLoaderScreen';
 import { CelebrationPoppers } from '../components/CelebrationPoppers';
 import { PaymentOptionsSheet } from './PaymentOptionsSheet';
@@ -132,13 +138,6 @@ export interface SimCartItem {
   };
 }
 
-export interface SimCoupon {
-  code: string;
-  description: string;
-  discount: number;
-  minOrder: number;
-}
-
 export interface CheckoutScreenProps {
   cart?: SimCartItem[];
   setCart?: React.Dispatch<React.SetStateAction<SimCartItem[]>>;
@@ -169,12 +168,6 @@ export interface CheckoutScreenProps {
   restaurantName?: string;
   restaurantDistance?: string;
 }
-
-const AVAILABLE_COUPONS: SimCoupon[] = [
-  { code: 'DELULU4FOOD', description: '70% OFF up to ₹140 on orders above ₹199', discount: 140, minOrder: 199 },
-  { code: 'MYQUROONE', description: 'Flat ₹50 OFF for Gold Members', discount: 50, minOrder: 249 },
-  { code: 'FLAT300', description: 'Flat ₹300 OFF on orders above ₹500', discount: 300, minOrder: 500 },
-];
 
 export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   cart = [],
@@ -234,6 +227,12 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   const [showLocationSelectorSheet, setShowLocationSelectorSheet] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [appliedCelebrationCoupon, setAppliedCelebrationCoupon] = useState<SimCoupon | null>(null);
+  const [razorpayOrder, setRazorpayOrder] = useState<{
+    keyId: string;
+    orderId: string;
+    amountPaise: number;
+  } | null>(null);
+  const [razorpayProof, setRazorpayProof] = useState<RazorpaySuccessPayload | null>(null);
 
   const activeRestaurantId = useMemo(() => {
     return currentRestaurant?.id || restaurantId || (cartItems && cartItems.length > 0 ? cartItems[0].restaurantId : null);
@@ -654,10 +653,20 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
   }, [safeCart]);
 
   const activeCoupon = parentAppliedCoupon || internalCoupon;
-  const couponDiscount = activeCoupon ? Math.min(activeCoupon.discount, itemTotal) : 0;
+  const couponDiscount = useMemo(() => {
+    if (!activeCoupon || itemTotal <= 0) return 0;
+    if (activeCoupon.minOrder && itemTotal < activeCoupon.minOrder) return 0;
+    if (activeCoupon.discountType === 'percentage' && activeCoupon.discountValue) {
+      const calc = Math.round((itemTotal * activeCoupon.discountValue) / 100);
+      const capped = activeCoupon.maxDiscount ? Math.min(calc, activeCoupon.maxDiscount) : calc;
+      return Math.min(capped, itemTotal);
+    }
+    return Math.min(activeCoupon.discount || 0, itemTotal);
+  }, [activeCoupon, itemTotal]);
   const {
     deliveryFee,
     platformFee,
+    smallOrderFee,
     expressFee,
   } = useMemo(
     () =>
@@ -668,14 +677,17 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       }),
     [itemTotal, serviceability?.distanceKm, currentRestaurant?.distance, selectedDeliveryType]
   );
-  const taxes = Math.round(itemTotal * 0.05); // 5% GST
-  const finalTotal = Math.max(
-    0,
-    itemTotal - couponDiscount + deliveryFee + platformFee + expressFee + selectedTip + taxes
+  const taxes = Number((Math.max(0, itemTotal - couponDiscount) * 0.05).toFixed(2)); // 5% GST on net taxable food value
+  const finalTotal = Number(
+    Math.max(
+      0,
+      itemTotal - couponDiscount + deliveryFee + platformFee + smallOrderFee + expressFee + selectedTip + taxes
+    ).toFixed(2)
   );
-  const originalTotal =
-    itemTotal + 35 + platformFee + (selectedDeliveryType === 'express' ? 29 : 0) + taxes;
-  const totalSavings = Math.max(couponDiscount + Math.max(0, 35 - deliveryFee), originalTotal - finalTotal);
+  const originalTotal = Number(
+    (itemTotal + 35 + platformFee + smallOrderFee + (selectedDeliveryType === 'express' ? 29 : 0) + taxes).toFixed(2)
+  );
+  const totalSavings = Math.max(couponDiscount + Math.max(0, 35 - deliveryFee), Number((originalTotal - finalTotal).toFixed(2)));
 
   // Stepper handlers synchronized with ViewModel
   const handleIncreaseQty = (index: number) => {
@@ -795,11 +807,11 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
     );
   };
 
-  // Pay & Place Order -> Opens Figma 3046:48 Hold On Payment Verification screen with double-tap protection
+  // Pay & Place Order -> For online payments opens Razorpay Checkout first, then OrderPaymentLoaderScreen
   const lastTapRef = useRef<number>(0);
-  const handleProceedToPay = () => {
+  const handleProceedToPay = async () => {
     const now = Date.now();
-    if (now - lastTapRef.current < 1200 || showPaymentLoader) {
+    if (now - lastTapRef.current < 1200 || showPaymentLoader || isProcessingPayment || razorpayOrder) {
       return;
     }
     lastTapRef.current = now;
@@ -821,7 +833,33 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
       return;
     }
 
-    setShowPaymentLoader(true);
+    const normalizedMethod = String(selectedPayment || '').trim().toLowerCase();
+    const isCod = normalizedMethod === 'cash' || normalizedMethod === 'cod' || normalizedMethod.includes('cash');
+    if (isCod) {
+      setRazorpayProof(null);
+      setShowPaymentLoader(true);
+      return;
+    }
+
+    setIsProcessingPayment(true);
+    try {
+      const token = authState?.type === 'Authenticated' ? authState.sessionToken : undefined;
+      const order = await createRazorpayOrderOnBackend({
+        amountPaise: Math.round(finalTotal * 100),
+        paymentMethod: selectedPayment,
+        receipt: `cust_${Date.now()}`,
+        sessionToken: token,
+        notes: {
+          restaurantId: String(activeRestaurantId || ''),
+          restaurantName: String(displayRestaurantName || ''),
+        },
+      });
+      setRazorpayOrder(order);
+    } catch (err: any) {
+      Alert.alert('Payment Setup Failed', err?.message || 'Unable to reach payment gateway.');
+    } finally {
+      setIsProcessingPayment(false);
+    }
   };
 
   return (
@@ -1423,6 +1461,12 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
                   <Text style={styles.billDetailValue}>₹{platformFee}</Text>
                 </View>
               )}
+              {smallOrderFee > 0 && (
+                <View style={styles.billDetailRow}>
+                  <Text style={styles.billDetailLabel}>Small Order Fee (Below ₹200)</Text>
+                  <Text style={styles.billDetailValue}>₹{smallOrderFee}</Text>
+                </View>
+              )}
               {expressFee > 0 && (
                 <View style={styles.billDetailRow}>
                   <Text style={styles.billDetailLabel}>⚡ Express Delivery</Text>
@@ -1675,10 +1719,13 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
         deliveryInstructions={selectedInstructions}
         cookingInstruction={cookingInstruction}
         cutleryOptOut={parentCutleryOptOut || internalCutlery}
+        couponCode={activeCoupon?.code || null}
         cartItems={safeCart}
         estimatedDeliveryTime={selectedDeliveryType === 'express' ? expressEta : (selectedDeliveryType === 'eco' ? ecoEta : standardEta)}
+        razorpayProof={razorpayProof}
         onComplete={async (orderId) => {
           setShowPaymentLoader(false);
+          setRazorpayProof(null);
           setCart([]);
           if (syncCartItems) {
             syncCartItems([]);
@@ -1695,6 +1742,7 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
         }}
         onCancel={() => {
           setShowPaymentLoader(false);
+          setRazorpayProof(null);
         }}
       />
 
@@ -1964,6 +2012,38 @@ export const CheckoutScreen: React.FC<CheckoutScreenProps> = ({
           </View>
         </View>
       </Modal>
+
+      <RazorpayCheckoutModal
+        visible={!!razorpayOrder}
+        keyId={razorpayOrder?.keyId || ''}
+        orderId={razorpayOrder?.orderId || ''}
+        amountPaise={razorpayOrder?.amountPaise || 0}
+        description={`Order from ${displayRestaurantName}`}
+        prefill={{
+          name: (authState as any)?.username || (authState as any)?.user?.name || undefined,
+          contact: (authState as any)?.email?.includes('@myquro.customer')
+            ? (authState as any)?.email?.replace('@myquro.customer', '')
+            : undefined,
+          method: (() => {
+            const m = String(selectedPayment || '').toLowerCase();
+            if (m.includes('upi') || m.includes('gpay') || m.includes('google') || m.includes('phonepe') || m.includes('paytm')) return 'upi';
+            if (m.includes('card')) return 'card';
+            return undefined;
+          })(),
+        }}
+        onSuccess={(payload) => {
+          setRazorpayOrder(null);
+          setRazorpayProof(payload);
+          setShowPaymentLoader(true);
+        }}
+        onCancel={() => {
+          setRazorpayOrder(null);
+        }}
+        onFailure={(msg) => {
+          setRazorpayOrder(null);
+          Alert.alert('Payment Failed', msg || 'Payment could not be completed. Please try again.');
+        }}
+      />
     </View>
   );
 };

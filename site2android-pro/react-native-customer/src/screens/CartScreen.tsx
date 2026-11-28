@@ -16,6 +16,11 @@ import {
 import { useViewModel } from '../state/MainViewModel';
 import { OrderLoaderScreen } from './OrderLoaderScreen';
 import { LocationSelectorSheet } from './LocationSelectorSheet';
+import {
+  RazorpayCheckoutModal,
+  createRazorpayOrderOnBackend,
+  type RazorpaySuccessPayload,
+} from '../components/RazorpayCheckoutModal';
 import { THEME, COLORS } from '../theme/Theme';
 import { BACKEND_URL } from '../config';
 import {
@@ -70,6 +75,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
   const insets = useSafeAreaInsets();
   const {
     isDarkMode,
+    authState,
     cartItems,
     updateCartQuantity,
     removeFromCart,
@@ -97,6 +103,11 @@ export const CartScreen: React.FC<CartScreenProps> = ({
   const [confirmRestaurantName, setConfirmRestaurantName] = useState('');
   const [confirmRestaurantId, setConfirmRestaurantId] = useState('');
   const [confirmAmount, setConfirmAmount] = useState(0);
+  const [razorpayOrder, setRazorpayOrder] = useState<{
+    keyId: string;
+    orderId: string;
+    amountPaise: number;
+  } | null>(null);
 
   const restaurantId = cartItems.length > 0 ? cartItems[0].restaurantId : null;
   const restaurantName = cartItems.length > 0 ? cartItems[0].restaurantName : '';
@@ -146,35 +157,18 @@ export const CartScreen: React.FC<CartScreenProps> = ({
     fetchOffers();
   }, [restaurantId]);
 
-  // If offersList is empty, define fallback active promo to match mockup
-  const activeOffers = useMemo(() => {
-    if (offersList.length > 0) return offersList;
-    return [
-      {
-        id: 'fallback_myquro50',
-        name: 'MYQURO50 Savings',
-        description: 'Get Flat ₹50 off on your order above ₹200',
-        code: 'MYQURO50',
-        offerType: 'fixed',
-        discountValue: 50,
-      },
-      {
-        id: 'fallback_quro30',
-        name: 'QURO30 Discount',
-        description: 'Get 30% off on your total order',
-        code: 'QURO30',
-        offerType: 'percentage',
-        discountValue: 30,
-      }
-    ];
-  }, [offersList]);
+  const activeOffers = useMemo(() => offersList, [offersList]);
 
-  // Set default applied offer if nothing was auto-applied
+  // Keep appliedOffer strictly limited to verified offers returned for this restaurant
   useEffect(() => {
+    if (offersList.length === 0) {
+      if (appliedOffer) setAppliedOffer(null);
+      return;
+    }
     if (!appliedOffer && activeOffers.length > 0) {
       setAppliedOffer(activeOffers[0]);
     }
-  }, [activeOffers, appliedOffer]);
+  }, [offersList, activeOffers, appliedOffer]);
 
   // Calculations
   const itemTotal = useMemo(() => {
@@ -182,7 +176,7 @@ export const CartScreen: React.FC<CartScreenProps> = ({
   }, [cartItems]);
 
   const packagingFee = cartItems.length > 0 ? 20 : 0;
-  const { deliveryFee, platformFee } = useMemo(
+  const { deliveryFee, platformFee, smallOrderFee } = useMemo(
     () =>
       calculateOrderFees({
         itemTotalRupees: itemTotal,
@@ -193,19 +187,21 @@ export const CartScreen: React.FC<CartScreenProps> = ({
 
   const discountAmount = useMemo(() => {
     if (!appliedOffer || itemTotal === 0) return 0;
+    const minOrder = Number(appliedOffer.minOrderValue || 0);
+    if (minOrder > 0 && itemTotal < minOrder) return 0;
     if (appliedOffer.offerType === 'percentage') {
-      return Math.min(Math.round((itemTotal * appliedOffer.discountValue) / 100), 150);
-    } else {
-      // fixed discount
-      return Math.min(appliedOffer.discountValue, itemTotal);
+      const pct = Math.round((itemTotal * Number(appliedOffer.discountValue || 0)) / 100);
+      const maxCap = Number(appliedOffer.maxDiscountAmount || 0);
+      return maxCap > 0 ? Math.min(pct, maxCap, itemTotal) : Math.min(pct, itemTotal);
     }
+    return Math.min(Number(appliedOffer.discountValue || 0), itemTotal);
   }, [appliedOffer, itemTotal]);
 
   const toPay = useMemo(() => {
     if (cartItems.length === 0) return 0;
-    const total = itemTotal + packagingFee + deliveryFee + platformFee - discountAmount;
+    const total = itemTotal + packagingFee + deliveryFee + platformFee + smallOrderFee - discountAmount;
     return Math.max(total, 0);
-  }, [cartItems, itemTotal, packagingFee, deliveryFee, platformFee, discountAmount]);
+  }, [cartItems, itemTotal, packagingFee, deliveryFee, platformFee, smallOrderFee, discountAmount]);
 
   const totalSavings = useMemo(() => {
     return discountAmount + Math.max(0, 40 - deliveryFee);
@@ -243,8 +239,31 @@ export const CartScreen: React.FC<CartScreenProps> = ({
     setConfirmAmount(currentAmount);
     
     setLoading(true);
+    try {
+      const token = authState?.type === 'Authenticated' ? authState.sessionToken : undefined;
+      const order = await createRazorpayOrderOnBackend({
+        amountPaise: Math.round(toPay * 100),
+        paymentMethod: 'UPI',
+        receipt: `cart_${Date.now()}`,
+        sessionToken: token,
+        notes: {
+          restaurantId: currentRestId,
+          restaurantName: currentRestName,
+        },
+      });
+      setRazorpayOrder(order);
+    } catch (err: any) {
+      Alert.alert('Payment Setup Failed', err?.message || 'Unable to reach payment gateway.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const finalizeCartCheckout = async (proof: RazorpaySuccessPayload) => {
+    setRazorpayOrder(null);
+    setLoading(true);
     setShowOrderLoader(true);
-    
+
     try {
       // Find matching saved address based on currentLocation, otherwise build a dynamic custom one
       const matchedAddress = savedAddresses.find((a: any) => 
@@ -273,6 +292,10 @@ export const CartScreen: React.FC<CartScreenProps> = ({
         latitude: matchedAddress.latitude,
         longitude: matchedAddress.longitude,
         city: matchedAddress.city,
+        razorpay_order_id: proof.razorpay_order_id,
+        razorpay_payment_id: proof.razorpay_payment_id,
+        razorpay_signature: proof.razorpay_signature,
+        ...(appliedOffer?.code ? { couponCode: appliedOffer.code } : {}),
       });
 
       const orderRes = await checkoutCart(notesPayload);
@@ -486,29 +509,31 @@ export const CartScreen: React.FC<CartScreenProps> = ({
           ))}
         </View>
 
-        {/* ─── 5. PROMO LOCK DASHED BANNER ─── */}
-        {amountNeededForPromo > 0 ? (
-          <TouchableOpacity
-            style={styles.promoLockBanner}
-            onPress={() => onNavigateToRestaurant(restaurantId || '')}
-          >
-            <View style={styles.promoLockLeft}>
-              <View style={styles.promoLockIconCircle}>
-                <Gift size={16} color="#C2410C" />
+        {/* ─── 5. PROMO LOCK DASHED BANNER (only when outlet has real active offers) ─── */}
+        {activeOffers.length > 0 && (
+          amountNeededForPromo > 0 ? (
+            <TouchableOpacity
+              style={styles.promoLockBanner}
+              onPress={() => onNavigateToRestaurant(restaurantId || '')}
+            >
+              <View style={styles.promoLockLeft}>
+                <View style={styles.promoLockIconCircle}>
+                  <Gift size={16} color="#C2410C" />
+                </View>
+                <Text style={styles.promoLockText}>
+                  Add items worth <Text style={{ fontWeight: '800' }}>₹{amountNeededForPromo}</Text> more to unlock outlet promo offers
+                </Text>
               </View>
-              <Text style={styles.promoLockText}>
-                Add items worth <Text style={{ fontWeight: '800' }}>₹{amountNeededForPromo}</Text> more to get extra 10% OFF
-              </Text>
+              <View style={styles.promoLockBtn}>
+                <Text style={styles.promoLockBtnText}>Explore Menu</Text>
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.promoUnlockedBanner}>
+              <Gift size={16} color="#16A34A" />
+              <Text style={styles.promoUnlockedText}>YAY! Outlet promo offer unlocked on this checkout!</Text>
             </View>
-            <View style={styles.promoLockBtn}>
-              <Text style={styles.promoLockBtnText}>Explore Menu</Text>
-            </View>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.promoUnlockedBanner}>
-            <Gift size={16} color="#16A34A" />
-            <Text style={styles.promoUnlockedText}>YAY! Extra 10% discount unlocked on this checkout!</Text>
-          </View>
+          )
         )}
 
         {serviceability && !serviceability.isServiceable && (
@@ -579,6 +604,13 @@ export const CartScreen: React.FC<CartScreenProps> = ({
             <Text style={styles.billLabel}>Platform Fee</Text>
             <Text style={[styles.billValue, isDarkMode && styles.textWhite]}>₹{platformFee}</Text>
           </View>
+
+          {smallOrderFee > 0 && (
+            <View style={styles.billRow}>
+              <Text style={styles.billLabel}>Small Order Fee (Below ₹200)</Text>
+              <Text style={[styles.billValue, isDarkMode && styles.textWhite]}>₹{smallOrderFee}</Text>
+            </View>
+          )}
 
           <View style={styles.billRow}>
             <Text style={styles.billLabel}>Packaging Fee</Text>
@@ -747,6 +779,12 @@ export const CartScreen: React.FC<CartScreenProps> = ({
                 <Text style={styles.billDetailLabel}>Platform Fee</Text>
                 <Text style={[styles.billDetailVal, isDarkMode && styles.textWhite]}>₹{platformFee}</Text>
               </View>
+              {smallOrderFee > 0 && (
+                <View style={styles.billDetailRow}>
+                  <Text style={styles.billDetailLabel}>Small Order Fee (Below ₹200)</Text>
+                  <Text style={[styles.billDetailVal, isDarkMode && styles.textWhite]}>₹{smallOrderFee}</Text>
+                </View>
+              )}
               <View style={styles.billDetailRow}>
                 <Text style={styles.billDetailLabel}>Restaurant Packaging Charges</Text>
                 <Text style={[styles.billDetailVal, isDarkMode && styles.textWhite]}>₹{packagingFee}</Text>
@@ -815,6 +853,27 @@ export const CartScreen: React.FC<CartScreenProps> = ({
             label: loc.label || 'Home',
           });
           setShowLocationSheet(false);
+        }}
+      />
+
+      <RazorpayCheckoutModal
+        visible={!!razorpayOrder}
+        keyId={razorpayOrder?.keyId || ''}
+        orderId={razorpayOrder?.orderId || ''}
+        amountPaise={razorpayOrder?.amountPaise || 0}
+        description={`Order from ${confirmRestaurantName || restaurantName || 'MyQuro Partner'}`}
+        prefill={{
+          name: authState?.type === 'Authenticated' ? (authState as any).username : undefined,
+          contact: authState?.type === 'Authenticated' && (authState as any)?.email?.includes('@myquro.customer')
+            ? (authState as any)?.email?.replace('@myquro.customer', '')
+            : undefined,
+          method: 'upi',
+        }}
+        onSuccess={finalizeCartCheckout}
+        onCancel={() => setRazorpayOrder(null)}
+        onFailure={(msg) => {
+          setRazorpayOrder(null);
+          Alert.alert('Payment Failed', msg || 'Payment could not be completed.');
         }}
       />
 

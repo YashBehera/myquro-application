@@ -15,6 +15,7 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   Switch,
+  Alert,
 } from 'react-native';
 import {
   ArrowLeft,
@@ -46,6 +47,12 @@ import Svg, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useViewModel } from '../state/MainViewModel';
+import { BACKEND_URL } from '../config';
+import {
+  RazorpayCheckoutModal,
+  createRazorpayOrderOnBackend,
+  type RazorpaySuccessPayload,
+} from '../components/RazorpayCheckoutModal';
 import {
   SCALE,
   SCREEN_WIDTH,
@@ -264,6 +271,11 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
   const [infoModalVisible, setInfoModalVisible] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [successReceiptModal, setSuccessReceiptModal] = useState<any | null>(null);
+  const [razorpayOrder, setRazorpayOrder] = useState<{
+    keyId: string;
+    orderId: string;
+    amountPaise: number;
+  } | null>(null);
 
   // Computed Values
   const numericAmount = parseFloat(billAmount) > 0 ? parseFloat(billAmount) : 50;
@@ -286,12 +298,51 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
     setPayStep('checkout_details');
   };
 
-  const handleFinalPay = () => {
+  const handleFinalPay = async () => {
+    if (isProcessing || razorpayOrder) return;
     setIsProcessing(true);
-    setTimeout(() => {
+    try {
+      const token = authState?.type === 'Authenticated' ? authState.sessionToken : undefined;
+      const order = await createRazorpayOrderOnBackend({
+        amountPaise: Math.max(100, Math.round(totalToPayRounded * 100)),
+        paymentMethod: 'UPI',
+        receipt: `dine_${Date.now()}`,
+        sessionToken: token,
+        notes: {
+          restaurantId: String(restaurant?.id || ''),
+          restaurantName: String(restaurantName || ''),
+          type: 'dineout',
+        },
+      });
+      setRazorpayOrder(order);
+    } catch (err: any) {
+      Alert.alert('Payment Setup Failed', err?.message || 'Unable to reach payment gateway.');
+    } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleRazorpaySuccess = async (payload: RazorpaySuccessPayload) => {
+    setRazorpayOrder(null);
+    setIsProcessing(true);
+    try {
+      const token = authState?.type === 'Authenticated' ? authState.sessionToken : undefined;
+      const verifyResp = await fetch(`${BACKEND_URL}/api/payments/razorpay/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      const verifyData = await verifyResp.json().catch(() => ({}));
+      if (!verifyResp.ok || !verifyData?.verified) {
+        Alert.alert('Verification Failed', verifyData?.message || 'Could not verify payment signature.');
+        return;
+      }
       const receiptData = {
-        txnId: `TXN_DINE_${Date.now()}`,
+        txnId: payload.razorpay_payment_id,
+        razorpayOrderId: payload.razorpay_order_id,
         restaurantName,
         restaurantAddress,
         billAmount: numericAmount,
@@ -305,9 +356,12 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
         paidAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       };
-
       setSuccessReceiptModal(receiptData);
-    }, 1200);
+    } catch (err: any) {
+      Alert.alert('Verification Error', err?.message || 'Unable to confirm bill payment.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleFinishPayment = () => {
@@ -682,6 +736,26 @@ export const PayBillScreen: React.FC<PayBillScreenProps> = ({
             </View>
           </View>
         </Modal>
+
+        <RazorpayCheckoutModal
+          visible={!!razorpayOrder}
+          keyId={razorpayOrder?.keyId || ''}
+          orderId={razorpayOrder?.orderId || ''}
+          amountPaise={razorpayOrder?.amountPaise || 0}
+          description={`Dineout Bill at ${restaurantName || 'Restaurant'}`}
+          prefill={{
+            name: authState?.type === 'Authenticated' ? (authState as any).username : undefined,
+            contact: authState?.type === 'Authenticated' && (authState as any)?.email?.includes('@myquro.customer')
+              ? (authState as any)?.email?.replace('@myquro.customer', '')
+              : undefined,
+          }}
+          onSuccess={handleRazorpaySuccess}
+          onCancel={() => setRazorpayOrder(null)}
+          onFailure={(msg) => {
+            setRazorpayOrder(null);
+            Alert.alert('Payment Failed', msg || 'Payment could not be completed.');
+          }}
+        />
       </View>
     );
   }

@@ -25,6 +25,7 @@ export interface TripOrder {
   distanceKm: number;
   estimatedMinutes: number;
   fareAmount: number;
+  riderEarning: number;
   surgeMultiplier?: string;
   packageType: string;
   status: TripStatus;
@@ -359,9 +360,18 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const resolveRiderEarning = (rawDeliveryFee: unknown, distanceKm: number): number => {
+    const raw = Number(rawDeliveryFee || 0);
+    return raw > 0
+      ? Number(raw.toFixed(2))
+      : Number((25 + Math.max(0, distanceKm - 2) * 7).toFixed(2));
+  };
+
   const mapBackendTaskToTripOrder = (task: any): TripOrder => {
     const rawAmount = Number(task.orderAmount || 60);
     const fare = rawAmount > 1000 ? Math.round(rawAmount / 100) : (rawAmount > 0 ? rawAmount : 60);
+    const dist = task.distanceKm ? Number(task.distanceKm) : 2;
+    const riderEarning = resolveRiderEarning(task.deliveryFee, dist);
     return {
       id: task.orderId,
       customerName: task.customerName || '',
@@ -372,9 +382,10 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       dropoffAddress: task.customerAddress || '',
       pickupCoords: { latitude: Number(task.restaurantLat) || 0, longitude: Number(task.restaurantLng) || 0 },
       dropoffCoords: { latitude: Number(task.customerLat) || 0, longitude: Number(task.customerLng) || 0 },
-      distanceKm: task.distanceKm ? Number(task.distanceKm) : 4.8,
+      distanceKm: dist,
       estimatedMinutes: task.etaMinutes || 15,
       fareAmount: fare,
+      riderEarning,
       surgeMultiplier: task.surgeMultiplier || '1.0x Surge',
       packageType: task.orderNotes || 'Standard Delivery',
       status: mapBackendStatusToTripStatus(task.status),
@@ -446,6 +457,8 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const mapped = validOffers.map((offer: any) => {
               const rawOfferAmount = Number(offer.orderAmount || 50);
               const offerFare = rawOfferAmount > 1000 ? Math.round(rawOfferAmount / 100) : (rawOfferAmount > 0 ? rawOfferAmount : 50);
+              const dist = offer.distanceKm ? Number(offer.distanceKm) : 2;
+              const riderEarning = resolveRiderEarning(offer.deliveryFee, dist);
               return {
                 id: offer.orderId,
                 customerName: offer.customerName || '',
@@ -456,9 +469,10 @@ export const RiderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 dropoffAddress: offer.customerAddress || '',
                 pickupCoords: { latitude: Number(offer.restaurantLat) || 0, longitude: Number(offer.restaurantLng) || 0 },
                 dropoffCoords: { latitude: Number(offer.customerLat) || 0, longitude: Number(offer.customerLng) || 0 },
-                distanceKm: offer.distanceKm ? Number(offer.distanceKm) : 3.4,
+                distanceKm: dist,
                 estimatedMinutes: offer.etaMinutes || 12,
                 fareAmount: offerFare,
+                riderEarning,
                 surgeMultiplier: offer.surgeMultiplier || '1.0x Surge',
                 packageType: offer.orderNotes || 'Standard Delivery',
                 status: 'NAVIGATING_TO_PICKUP' as TripStatus,

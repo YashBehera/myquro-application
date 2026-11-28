@@ -4,6 +4,8 @@ export const MAX_DELIVERY_RADIUS_KM = Number(process.env.MAX_DELIVERY_RADIUS_KM 
 export const MAX_RIDER_PICKUP_RADIUS_KM = Number(process.env.MAX_RIDER_PICKUP_RADIUS_KM || 25);
 
 export const PLATFORM_FEE_RUPEES = 5;
+export const SMALL_ORDER_FEE_RUPEES = 10;
+export const SMALL_ORDER_THRESHOLD_RUPEES = 200;
 export const FREE_DELIVERY_MIN_ORDER_RUPEES = 299;
 export const FREE_DELIVERY_MAX_DISTANCE_KM = 3;
 export const BASE_DELIVERY_FEE_RUPEES = 12;
@@ -18,12 +20,14 @@ export const EXPRESS_DELIVERY_FEE_RUPEES = 19;
 export interface OrderFeeBreakdown {
   deliveryFee: number;
   platformFee: number;
+  smallOrderFee: number;
   expressFee: number;
 }
 
 /**
- * Computes Stage-1 customer delivery, platform, and express fees (in whole INR)
- * across 0-10 km trips: FREE only when food > ₹299 and distance < 3 km.
+ * Computes Stage-1 customer delivery, platform, small-order, and express fees (in whole INR)
+ * across 0-10 km trips: FREE delivery only when food > ₹299 and distance < 3 km;
+ * ₹10 small-order fee applies when food < ₹200.
  */
 export function calculateOrderFees(params: {
   itemTotalRupees: number;
@@ -34,8 +38,10 @@ export function calculateOrderFees(params: {
   const expressFee = params.deliveryType === "express" ? EXPRESS_DELIVERY_FEE_RUPEES : 0;
 
   if (itemTotal <= 0) {
-    return { deliveryFee: 0, platformFee: 0, expressFee: 0 };
+    return { deliveryFee: 0, platformFee: 0, smallOrderFee: 0, expressFee: 0 };
   }
+
+  const smallOrderFee = itemTotal < SMALL_ORDER_THRESHOLD_RUPEES ? SMALL_ORDER_FEE_RUPEES : 0;
 
   const dist =
     typeof params.distanceKm === "number" && Number.isFinite(params.distanceKm) && params.distanceKm >= 0
@@ -61,6 +67,7 @@ export function calculateOrderFees(params: {
   return {
     deliveryFee,
     platformFee: PLATFORM_FEE_RUPEES,
+    smallOrderFee,
     expressFee,
   };
 }
